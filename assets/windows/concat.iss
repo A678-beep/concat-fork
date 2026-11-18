@@ -1,4 +1,4 @@
-﻿; 星籁剪辑 (XingLai Cut) 的 Windows 安装包。
+; 星籁剪辑 (XingLai Cut) 的 Windows 安装包。
 ; 基于 Concat（AGPL-3.0-or-later）构建；源码见
 ; https://github.com/A678-beep/concat-fork 。
 ;
@@ -108,6 +108,10 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "{#Stage}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\icons\concat.ico"; DestDir: "{app}"; Flags: ignoreversion
+; 自动字幕的中文语音模型：一键安装脚本 + 使用说明。488 MB 的 ggml-small.bin
+; 不随安装包分发；脚本优先复制 {app}\模型\ggml-small.bin（离线），
+; 否则按系统代理 → HuggingFace → hf-mirror → GitHub 镜像下载，校验 SHA-256 后安装。
+Source: "..\..\assets\windows\字幕模型\*"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\星籁剪辑"; Filename: "{app}\concat.exe"; IconFilename: "{app}\concat.ico"
@@ -115,6 +119,8 @@ Name: "{autoprograms}\星籁剪辑"; Filename: "{app}\concat.exe"; IconFilename:
 ; it turns off Settings > General > Draw on the GPU, which that window hides.
 Name: "{autoprograms}\星籁剪辑（安全图形）"; Filename: "{app}\concat.exe"; Parameters: "--software"; IconFilename: "{app}\concat.ico"
 Name: "{autodesktop}\星籁剪辑"; Filename: "{app}\concat.exe"; IconFilename: "{app}\concat.ico"; Tasks: desktopicon
+; 中文自动字幕：给第一次用的商家一个能看懂、能直接双击的入口（模型需单独装一次）。
+Name: "{autoprograms}\星籁剪辑 · 安装中文语音模型（自动字幕）"; Filename: "{app}\安装中文语音模型.cmd"; IconFilename: "{app}\concat.ico"; WorkingDir: "{app}"
 
 [Run]
 Filename: "{app}\concat.exe"; Description: "{cm:LaunchProgram,星籁剪辑}"; Flags: nowait postinstall skipifsilent
