@@ -2575,6 +2575,28 @@ impl Studio {
                     &keymap::label(&self.prefs, "save"),
                     true,
                 ),
+                // 工程云同步：保存、取回，以及把导出的成片传回工作台。
+                row(
+                    "cloud-save",
+                    "☁ 保存到云端".to_owned(),
+                    Glyph::Export,
+                    "",
+                    true,
+                ),
+                row(
+                    "cloud-open",
+                    "☁ 从云端打开".to_owned(),
+                    Glyph::Import,
+                    "",
+                    true,
+                ),
+                row(
+                    "cloud-upload",
+                    "⬆ 上传当前成片".to_owned(),
+                    Glyph::Export,
+                    "",
+                    !self.timeline().clips.is_empty(),
+                ),
                 row(
                     "export",
                     t("studio.export"),

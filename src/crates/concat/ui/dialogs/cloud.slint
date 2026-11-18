@@ -1,0 +1,183 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 XingLai contributors
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph } from "../icons.slint";
+import { Button, Modal } from "../primitives/modal.slint";
+
+/// 云端工程列表的一行。
+export struct CloudItem {
+    pid: string,
+    name: string,
+    size: string,
+    version: int,
+    updated: string,
+}
+
+/// 工程云同步面板的状态。打开、忙碌与一句人话（成功、失败或进度），
+/// 成片传完后还带上公网地址。
+export struct CloudData {
+    open: bool,
+    busy: bool,
+    status: string,
+    url: string,
+}
+
+// 工程云同步：文件菜单里的「保存到云端」「从云端打开」「上传当前成片」
+// 都落在这一张表上。列表由 Rust 从平台取回；打开一行是把工程 JSON 复原
+// 成本机工程文件夹再打开，媒体路径仍是本机的（见文档的限制说明）。
+export component CloudDialog inherits Modal {
+    in property <CloudData> data;
+    in property <[CloudItem]> items;
+
+    callback refresh();
+    callback save();
+    callback open-pid(pid: string, name: string);
+    callback open-url();
+    callback dismiss();
+
+    open: root.data.open;
+    title: "工程云同步";
+    glyph: Glyph.none;
+    surface-width: 640px;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        Text {
+            text: root.data.status;
+            color: Theme.fg;
+            font-size: Theme.fs;
+            wrap: word-wrap;
+        }
+
+        if root.data.url != "" : Rectangle {
+            height: 40px;
+            background: Theme.field;
+            border-radius: Theme.r-sm;
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 6px;
+                spacing: 8px;
+
+                Text {
+                    text: "成片地址";
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: root.data.url;
+                    color: Theme.accent;
+                    font-size: Theme.fs-sm;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+
+                Button {
+                    label: "在浏览器打开";
+                    clicked => { root.open-url(); }
+                }
+            }
+        }
+
+        VerticalLayout {
+            spacing: 4px;
+
+            for item in root.items : Rectangle {
+                height: 50px;
+                background: Theme.field;
+                border-radius: Theme.r-sm;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 6px;
+                    spacing: 6px;
+
+                    Text {
+                        width: 190px;
+                        text: item.name;
+                        color: Theme.fg;
+                        font-size: Theme.fs;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        width: 100px;
+                        text: item.pid;
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-sm;
+                        font-family: Theme.font-technical;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        width: 64px;
+                        text: item.size;
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        width: 34px;
+                        text: "v" + item.version;
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        width: 120px;
+                        text: item.updated;
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-sm;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+
+                    Button {
+                        label: "打开";
+                        enabled: !root.data.busy;
+                        clicked => { root.open-pid(item.pid, item.name); }
+                    }
+                }
+            }
+
+            if root.items.length == 0 : Text {
+                text: root.data.busy ? "正在读取…" : "还没有云端工程：先在文件菜单里「保存到云端」。";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                horizontal-alignment: center;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Button {
+                label: "刷新列表";
+                enabled: !root.data.busy;
+                clicked => { root.refresh(); }
+            }
+
+            Button {
+                label: "保存当前工程";
+                primary: true;
+                enabled: !root.data.busy;
+                clicked => { root.save(); }
+            }
+
+            Button {
+                label: "关闭";
+                clicked => { root.dismiss(); }
+            }
+        }
+    }
+}

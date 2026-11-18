@@ -141,16 +141,38 @@ fn refusal(status: u16, text: &str) -> String {
 /// 不用系统的代理设置，也不碰 rustls，理由见模块注释。
 #[cfg(windows)]
 fn login(body: &str) -> Result<(u16, String), String> {
+    api_call(
+        "POST",
+        &login_url(),
+        "application/json",
+        body.as_bytes(),
+        None,
+        READ,
+    )
+}
+
+/// 平台 API 的一次直连请求：方法、完整 URL、正文与可选的 Bearer 令牌。
+///
+/// 工程云同步（[`crate::cloud`]）复用它：同样是 Windows 上 OpenSSL 直连，
+/// 不走系统代理，不碰 rustls。`read` 是读等待，上传成片要给它足够的时间。
+#[cfg(windows)]
+pub(crate) fn api_call(
+    method: &str,
+    url: &str,
+    content_type: &str,
+    body: &[u8],
+    token: Option<&str>,
+    read: Duration,
+) -> Result<(u16, String), String> {
     use std::io::{Read, Write};
     use std::net::ToSocketAddrs;
 
     use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 
-    let url = login_url();
-    let (host, port, path) = split_url(&url)?;
+    let (host, port, path) = split_url(url)?;
 
-    let mut builder =
-        SslConnector::builder(SslMethod::tls()).map_err(|error| format!("TLS 初始化失败：{error}"))?;
+    let mut builder = SslConnector::builder(SslMethod::tls())
+        .map_err(|error| format!("TLS 初始化失败：{error}"))?;
     builder.set_verify(SslVerifyMode::PEER);
     let mut store = openssl::x509::store::X509StoreBuilder::new()
         .map_err(|error| format!("证书库初始化失败：{error}"))?;
@@ -181,33 +203,51 @@ fn login(body: &str) -> Result<(u16, String), String> {
         }
     }
     let socket = socket.ok_or_else(|| {
-        format!("连不上星籁账号服务（{host}:{port}）：{refusal}；请检查网络，或代理是否拦住了直连")
+        format!("连不上星籁服务（{host}:{port}）：{refusal}；请检查网络，或代理是否拦住了直连")
     })?;
-    socket.set_read_timeout(Some(READ)).ok();
-    socket.set_write_timeout(Some(READ)).ok();
-    let mut stream = connector.connect(host.as_str(), socket).map_err(|error| {
-        format!("与星籁账号服务的 TLS 握手失败（{host}）：{error}")
-    })?;
+    socket.set_read_timeout(Some(read)).ok();
+    socket.set_write_timeout(Some(read)).ok();
+    let mut stream = connector
+        .connect(host.as_str(), socket)
+        .map_err(|error| format!("与星籁服务的 TLS 握手失败（{host}）：{error}"))?;
 
-    let request = format!(
-        "POST {path} HTTP/1.1\r\n\
+    let mut request = format!(
+        "{method} {path} HTTP/1.1\r\n\
          Host: {host}\r\n\
-         Content-Type: application/json\r\n\
+         Content-Type: {content_type}\r\n\
          Accept: application/json\r\n\
          Content-Length: {}\r\n\
-         User-Agent: XingLaiCut/{}\r\n\
-         Connection: close\r\n\r\n{body}",
+         User-Agent: XingLaiCut/{}\r\n",
         body.len(),
         env!("CARGO_PKG_VERSION"),
     );
+    if let Some(token) = token {
+        request.push_str(&format!("Authorization: Bearer {token}\r\n"));
+    }
+    request.push_str("Connection: close\r\n\r\n");
+    let mut wire = request.into_bytes();
+    wire.extend_from_slice(body);
     stream
-        .write_all(request.as_bytes())
+        .write_all(&wire)
         .map_err(|error| format!("请求发不出去：{error}"))?;
     let mut raw = Vec::new();
     stream
         .read_to_end(&mut raw)
         .map_err(|error| format!("服务器的回复收不全（连接被中途关闭）：{error}"))?;
     read_response(&raw)
+}
+
+/// 别的平台：工程云同步只在 Windows 桌面版上做（平台的 TLS 形状要求）。
+#[cfg(not(windows))]
+pub(crate) fn api_call(
+    method: &str,
+    _url: &str,
+    _content_type: &str,
+    _body: &[u8],
+    _token: Option<&str>,
+    _read: Duration,
+) -> Result<(u16, String), String> {
+    Err(format!("工程云同步只在 Windows 桌面版可用（{method}）"))
 }
 
 /// `https://host[:port]/path` 拆成三样。
@@ -267,10 +307,7 @@ fn decode_chunks(body: &[u8]) -> String {
     let mut out = Vec::new();
     let mut at = 0;
     while at < body.len() {
-        let Some(line_end) = body[at..]
-            .windows(2)
-            .position(|window| window == b"\r\n")
-        else {
+        let Some(line_end) = body[at..].windows(2).position(|window| window == b"\r\n") else {
             break;
         };
         let size = std::str::from_utf8(&body[at..at + line_end])
@@ -552,7 +589,10 @@ mod tests {
             "手机号或密码不对，请重试"
         );
         assert_eq!(
-            super::refusal(401, r#"{"ok":false,"error":"bad_credentials","hint":"账号或密码错误"}"#),
+            super::refusal(
+                401,
+                r#"{"ok":false,"error":"bad_credentials","hint":"账号或密码错误"}"#
+            ),
             "账号或密码错误"
         );
         assert!(super::refusal(503, "busy").contains("503"));
@@ -580,7 +620,8 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn an_api_address_splits_into_host_port_and_path() {
-        let (host, port, path) = super::split_url("https://xinglaiai.com/ai-nav/api/auth/login").unwrap();
+        let (host, port, path) =
+            super::split_url("https://xinglaiai.com/ai-nav/api/auth/login").unwrap();
         assert_eq!(host, "xinglaiai.com");
         assert_eq!(port, 443);
         assert_eq!(path, "/ai-nav/api/auth/login");

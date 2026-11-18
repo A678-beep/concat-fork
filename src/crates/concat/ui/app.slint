@@ -50,6 +50,7 @@ import {
     MissingMediaItem,
 } from "dialogs/relink.slint";
 import { ConfirmData, ConfirmDialog } from "dialogs/confirm.slint";
+import { CloudData, CloudDialog, CloudItem } from "dialogs/cloud.slint";
 import { CaptionsDialog, CaptionsSheetData } from "dialogs/captions.slint";
 import { SpeechDialog, SpeechSheetData } from "dialogs/speech.slint";
 import { NewVoiceData, NewVoiceDialog } from "dialogs/new-voice.slint";
@@ -187,6 +188,8 @@ export {
     Sounds,
     VoiceCardData,
     NewVoiceData,
+    CloudData,
+    CloudItem,
 }
 export component App inherits Window {
     title: "星籁剪辑 XingLai Cut";
@@ -316,6 +319,18 @@ export component App inherits Window {
     // the library callbacks above.
     in property <string> project-name: I18n.t("common.untitledProject");
     in property <string> project-status: I18n.t("common.saved");
+
+    // 工程云同步：面板的状态与列表，由 Rust 在后台取回后写进来。
+    in property <[CloudItem]> cloud-items;
+    in property <bool> cloud-open;
+    in property <bool> cloud-busy;
+    in property <string> cloud-status;
+    in property <string> cloud-url;
+    callback cloud-closed();
+    callback cloud-refresh();
+    callback cloud-save();
+    callback cloud-open-pid(pid: string, name: string);
+    callback cloud-open-url();
     in property <bool> macos;
     /// The window is a phone's: one screen, held upright, driven by a
     /// finger. The editor is then the phone shell (ui/phone/) - no title
@@ -1180,6 +1195,32 @@ export component App inherits Window {
         data: root.confirm;
         confirmed => { root.confirm-accepted(); }
         dismissed => { root.confirm-dismissed(); }
+    }
+
+    // 工程云同步：文件菜单的保存/打开/上传都落在这张表上。
+    CloudDialog {
+        inset-top: root.safe-area-insets.top;
+        inset-bottom: root.safe-area-insets.bottom;
+        inset-left: root.safe-area-insets.left;
+        inset-right: root.safe-area-insets.right;
+        x: 0;
+        y: root.sheets-top;
+        width: root.width;
+        height: root.height - root.sheets-top;
+        data: {
+            open: root.cloud-open,
+            busy: root.cloud-busy,
+            status: root.cloud-status,
+            url: root.cloud-url,
+        };
+        items: root.cloud-items;
+
+        closed => { root.cloud-closed(); }
+        refresh => { root.cloud-refresh(); }
+        save => { root.cloud-save(); }
+        open-pid(pid, name) => { root.cloud-open-pid(pid, name); }
+        open-url => { root.cloud-open-url(); }
+        dismiss => { root.cloud-closed(); }
     }
 
     // Over everything but the tooltips and the menus, the sheets included:

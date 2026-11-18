@@ -24,6 +24,7 @@ pub mod awake;
 pub mod brush;
 pub mod capcut;
 pub mod cards;
+pub mod cloud;
 pub mod consolidate;
 #[cfg(test)]
 mod consolidate_tests;

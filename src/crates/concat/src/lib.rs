@@ -70,6 +70,7 @@ mod close_gate_tests;
 mod panes;
 mod prefs;
 mod presets;
+mod project_cloud;
 mod smoke_export;
 mod source;
 mod speed_ramp;
@@ -962,6 +963,49 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                 app.set_account_plan(SharedString::default());
                 app.set_account_expire(SharedString::default());
                 app.set_account_error(SharedString::default());
+            }
+        });
+    }
+
+    // ── 工程云同步 ──
+    // 面板的三颗按钮与列表的一行。真正的网络在 concat_host::cloud，
+    // 线程与结果落屏在 project_cloud；这里只转交。
+    {
+        let weak = app.as_weak();
+        app.on_cloud_refresh({
+            let weak = weak.clone();
+            move || project_cloud::refresh(weak.clone())
+        });
+    }
+    {
+        let weak = app.as_weak();
+        app.on_cloud_save({
+            let weak = weak.clone();
+            move || project_cloud::save_current(weak.clone())
+        });
+    }
+    {
+        let weak = app.as_weak();
+        app.on_cloud_closed(move || {
+            if let Some(app) = weak.upgrade() {
+                app.set_cloud_open(false);
+            }
+        });
+    }
+    {
+        let weak = app.as_weak();
+        app.on_cloud_open_pid(move |pid: SharedString, name: SharedString| {
+            project_cloud::open_selected(weak.clone(), pid.to_string(), name.to_string());
+        });
+    }
+    {
+        let weak = app.as_weak();
+        app.on_cloud_open_url(move || {
+            if let Some(app) = weak.upgrade() {
+                let url = app.get_cloud_url().to_string();
+                if !url.trim().is_empty() {
+                    let _ = opener::open(&url);
+                }
             }
         });
     }
@@ -2615,6 +2659,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         move |action| {
             log::debug!("menu: {action}");
             Shell::with(|shell, app| {
+                let mut cloud_action = 0u8;
                 {
                     // The edits a row makes say they were asked from the
                     // menu, unless a shortcut came in through here first.
@@ -2693,6 +2738,11 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                             state.split_at(at, true);
                         }
                         "save" => state.save(true),
+                        // 工程云同步：菜单收起后（此处仍借着 Studio）只记下
+                        // 要做哪一件，等 borrow 放掉再交给后台。
+                        "cloud-save" => cloud_action = 1,
+                        "cloud-open" => cloud_action = 2,
+                        "cloud-upload" => cloud_action = 3,
                         _ => {}
                     }
                 }
@@ -2720,6 +2770,16 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                 }
                 shell.studio.borrow_mut().refresh_art();
                 shell.studio.borrow().publish(&app, &shell.models);
+                // 云同步的活要在 Studio 的 borrow 放掉之后才开始：它们
+                // 自己会回来借 Studio 写通知。
+                if cloud_action != 0 {
+                    let weak = app.as_weak();
+                    match cloud_action {
+                        1 => project_cloud::save_current(weak),
+                        2 => project_cloud::refresh(weak),
+                        _ => project_cloud::upload_current(weak),
+                    }
+                }
             });
         }
     });

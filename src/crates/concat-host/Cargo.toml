@@ -54,6 +54,9 @@ concat-render.workspace = true
 serde = { version = "1", features = ["derive"] }
 schemars = { workspace = true, optional = true }
 serde_json.workspace = true
+# 工程云同步：工程正文 gzip 后 base64 交给平台，见 cloud.rs。
+flate2 = "1"
+base64 = "0.22"
 
 # Engine-owned audio playback: cpal talks to the output device, memmap2 keeps
 # decoded PCM disk-backed instead of resident.
