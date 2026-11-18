@@ -111,15 +111,17 @@ fn main() {
         let icon = "../../../assets/icons/concat.ico";
         println!("cargo:rerun-if-changed={icon}");
         // The file's name and description as Windows shows them in its
-        // properties, and as code signing checks them: "Concat" in every
+        // properties, and as code signing checks them: 星籁剪辑 in every
         // build, where the default would be the crate's lower-case name.
+        // Concat 的作者与 AGPL 的承诺写在 LegalCopyright 里，改不了也
+        // 不该改：这一份是建立在它上面的。
         winresource::WindowsResource::new()
             .set_icon(icon)
-            .set("ProductName", "Concat")
-            .set("FileDescription", "Concat")
+            .set("ProductName", "星籁剪辑 XingLai Cut")
+            .set("FileDescription", "星籁剪辑 XingLai Cut")
             .set(
                 "LegalCopyright",
-                "Copyright 2026 Jareer Abdullah, AGPL-3.0-or-later",
+                "星籁剪辑 (c) 2026 XingLai. Based on Concat, (c) 2026 Jareer Abdullah, AGPL-3.0-or-later",
             )
             .compile()
             .expect("could not embed the Windows icon");

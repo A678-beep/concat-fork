@@ -107,6 +107,33 @@ component HeaderIconButton inherits Rectangle {
     }
 }
 
+// 星籁剪辑：标记加名字。这一条本来是「窗口不必每帧说自己是谁」，
+// 改名之后它就是星籁的窗口，这一句让 Dock、任务栏和眼睛都对得上。
+component BrandStrip inherits HorizontalLayout {
+    spacing: 6px;
+    alignment: center;
+
+    Rectangle {
+        width: 17px;
+        height: 17px;
+        border-radius: 5px;
+        background: @linear-gradient(135deg, #22d3ee 0%, #6366f1 52%, #a855f7 100%);
+
+        VerticalLayout {
+            alignment: center;
+            Icon { glyph: Glyph.play; size: 9px; tint: #0b1020; }
+        }
+    }
+
+    Text {
+        text: "星籁剪辑";
+        color: Theme.fg-muted;
+        font-size: 11.5px;
+        font-weight: 500;
+        vertical-alignment: center;
+    }
+}
+
 export component TitleBar inherits Rectangle {
     in property <string> project-name: I18n.t("common.untitledProject");
     /// "saved", "saving…" — the little truth beside the name. Empty hides it.
@@ -210,9 +237,15 @@ export component TitleBar inherits Rectangle {
         padding-right: root.own-buttons ? 0px : 8px;
         spacing: 2px;
 
-        // No mark and no wordmark: the strip opens on the menus. A window
-        // does not need to say whose it is on every frame, and the launch
-        // screen's heading already carries the name where it means something.
+        // 星籁的标记与名字：这一条上先说一遍这窗口是谁的，然后才是菜单。
+        // 只有自己的宽度，别的一律留给菜单：否则 File 会被推到窗口中间。
+        if !root.covered: VerticalLayout {
+            horizontal-stretch: 0;
+            alignment: start;
+            padding-left: root.macos ? 2px : 4px;
+            padding-right: 8px;
+            BrandStrip { }
+        }
 
         // Each label reports its own position rather than a fixed one: they
         // are sized from their text, so where "View" starts depends on how

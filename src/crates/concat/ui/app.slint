@@ -189,7 +189,7 @@ export {
     NewVoiceData,
 }
 export component App inherits Window {
-    title: "Concat";
+    title: "星籁剪辑 XingLai Cut";
     // The taskbar's and Alt-Tab's picture on Windows, and the window
     // list's on X11. A Mac takes its Dock icon from the bundle and ignores
     // this; the .exe's own, for Explorer, is embedded by build.rs.
@@ -299,6 +299,17 @@ export component App inherits Window {
     in property <bool> can-drop;
     /// CapCut keeps drafts on this machine; see `concat_host::capcut`.
     in property <bool> capcut;
+
+    // 星籁 AI 账号，见 concat_host::account：登录了没有，叫谁，什么套餐，
+    // 到期哪天，出错说什么。登录在后台线程里做，回来的路上把这几样写好。
+    in property <bool> account-signed-in;
+    in property <string> account-name;
+    in property <string> account-plan;
+    in property <string> account-expire;
+    in property <string> account-error;
+    in property <bool> account-busy;
+    callback account-sign-in(phone: string, password: string);
+    callback account-sign-out();
 
     // Title bar. The drag/maximize pair must be handled in main.rs — a window
     // cannot drag itself from inside the scene graph; the rest are seams like
@@ -786,6 +797,14 @@ export component App inherits Window {
                 version: root.app-version;
                 can-drop: root.can-drop;
                 capcut: root.capcut;
+                signed-in: root.account-signed-in;
+                account-name: root.account-name;
+                account-plan: root.account-plan;
+                account-expire: root.account-expire;
+                account-error: root.account-error;
+                account-busy: root.account-busy;
+                sign-in(phone, password) => { root.account-sign-in(phone, password); }
+                sign-out => { root.account-sign-out(); }
 
                 compose => { root.start-compose(); }
                 open => { root.start-open(); }

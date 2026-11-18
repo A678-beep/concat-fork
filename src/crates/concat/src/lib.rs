@@ -402,6 +402,14 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
     app.set_can_drop(cfg!(not(any(target_os = "android", target_os = "ios"))));
     app.set_capcut(concat_host::capcut::drafts_folder().is_some());
+    // 星籁 AI 账号：上一回登录如果还在（DPAPI 解密得开），首屏一开就是
+    // 登录着的；重启保持登录就是这一步。
+    if let Some(account) = concat_host::account::load() {
+        app.set_account_signed_in(true);
+        app.set_account_name(account.display_name().into());
+        app.set_account_plan(account.plan_label().into());
+        app.set_account_expire(account.plan_expire_at.into());
+    }
 
     // The user's own packages - imported looks, and any effect folder they
     // or the community wrote - sit beside the built-ins from the first
@@ -909,6 +917,54 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     app.on_start_link(on_window!(|state, name: SharedString| {
         state.handle(Msg::Start(StartMsg::Link(name.to_string())));
     }));
+
+    // ── 星籁 AI 账号 ──
+    // 登录要连网，交给一条线程；回来的路上经事件循环把属性写好，
+    // 窗口不卡。见 concat_host::account。
+    {
+        let weak = app.as_weak();
+        app.on_account_sign_in(move |phone: SharedString, password: SharedString| {
+            let weak = weak.clone();
+            let phone = phone.to_string();
+            let password = password.to_string();
+            if let Some(app) = weak.upgrade() {
+                app.set_account_busy(true);
+                app.set_account_error(SharedString::default());
+            }
+            std::thread::spawn(move || {
+                let result = concat_host::account::sign_in(&phone, &password);
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(app) = weak.upgrade() else {
+                        return;
+                    };
+                    app.set_account_busy(false);
+                    match result {
+                        Ok(account) => {
+                            app.set_account_signed_in(true);
+                            app.set_account_name(account.display_name().into());
+                            app.set_account_plan(account.plan_label().into());
+                            app.set_account_expire(account.plan_expire_at.into());
+                            app.set_account_error(SharedString::default());
+                        }
+                        Err(message) => app.set_account_error(message.into()),
+                    }
+                });
+            });
+        });
+    }
+    {
+        let weak = app.as_weak();
+        app.on_account_sign_out(move || {
+            concat_host::account::sign_out();
+            if let Some(app) = weak.upgrade() {
+                app.set_account_signed_in(false);
+                app.set_account_name(SharedString::default());
+                app.set_account_plan(SharedString::default());
+                app.set_account_expire(SharedString::default());
+                app.set_account_error(SharedString::default());
+            }
+        });
+    }
 
     // ── the workspace's arrangement ──
     editor.on_workspace_resized(on_dock!(|state, width: f32, height: f32| {

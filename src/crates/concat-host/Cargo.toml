@@ -65,6 +65,9 @@ memmap2 = "0.9"
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
+# 登录平台的那一次 HTTPS：Aliyun WAF 只认 OpenSSL 形状的 ClientHello，
+# rustls 的会被重置（见 docs/REBRAND.md 第 4 节）；vendored 是静态链接。
+openssl = "0.10"
 windows-sys = { version = "0.61", features = [
   "Win32_Media",
   "Win32_System_SystemInformation",
@@ -94,3 +97,6 @@ tempfile = "3"
 
 [lints]
 workspace = true
+
+
+

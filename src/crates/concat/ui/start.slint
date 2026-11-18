@@ -1610,6 +1610,283 @@ component NewsCard inherits Pressable {
 // row, the projects, and - once the column is wide enough to spare it - a
 // learn-and-community panel beside the projects rather than under them,
 // so it is in view without a scroll and the projects keep the width.
+// ── 星籁：标记、字标、账号入口 ──────────────────────────────────────────
+//
+// 改名换标只到这里为止：Concat 的商标不在 AGPL 的授权里，界面上的名字
+// 与标记换成星籁自己的；其余一律是 Concat 的源码，版权声明与 LICENSE
+// 都在仓库里（见 THIRD_PARTY_NOTICES.md 与「关于」页）。
+
+/// 星籁剪辑的标记：一个青紫渐变的圆角方块，里头一枚播放的三角。
+component BrandMark inherits Rectangle {
+    border-radius: Math.min(self.width, self.height) * 0.28;
+    background: @linear-gradient(135deg, #22d3ee 0%, #6366f1 52%, #a855f7 100%);
+
+    VerticalLayout {
+        alignment: center;
+        Icon {
+            glyph: Glyph.play;
+            size: Math.min(parent.width, parent.height) * 0.46;
+            tint: #0b1020;
+        }
+    }
+}
+
+/// 标记加名字。首屏的左上角，标题栏也有一份小的。
+component BrandLockup inherits HorizontalLayout {
+    in property <bool> compact: false;
+
+    spacing: 10px;
+    alignment: start;
+
+    BrandMark {
+        width: root.compact ? 24px : 34px;
+        height: self.width;
+    }
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 0px;
+
+        Text {
+            text: "星籁剪辑";
+            color: Theme.fg;
+            font-size: root.compact ? 14px : 17px;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+        }
+
+        if !root.compact: Text {
+            text: "XINGLAI CUT · 基于 Concat（AGPL-3.0）";
+            color: Theme.fg-dim;
+            font-size: 9.5px;
+            letter-spacing: 0.5px;
+        }
+    }
+}
+
+/// 首屏右上角的账号入口：没登录时是一枚「登录」的按钮，登录后是
+/// 名字和套餐。点一下都开那张账号卡。
+component AccountChip inherits Rectangle {
+    in property <bool> signed-in;
+    in property <string> name;
+    in property <string> plan;
+
+    callback clicked();
+
+    height: 30px;
+    width: row.preferred-width + 24px;
+    border-radius: self.height / 2;
+    border-width: 1px;
+    border-color: touch.has-hover ? #a855f7 : (root.signed-in ? Theme.line : #6366f1);
+    background: Theme.launch-panel;
+
+    animate border-color { duration: 120ms; }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    row := HorizontalLayout {
+        x: 12px;
+        y: 0;
+        height: parent.height;
+        alignment: center;
+        spacing: 6px;
+
+        BrandMark { width: 15px; height: 15px; }
+
+        Text {
+            text: root.signed-in ? root.name + " · " + root.plan : "用星籁 AI 账号登录";
+            color: root.signed-in ? Theme.fg : #a78bfa;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+/// 账号卡上的两个字段：手机号与密码，样式照首屏的搜索框。
+/// 与 SearchField 一样只「播种」：外面给的文本是初值，键入由 edited
+/// 报出去，免得两处都写同一个属性。
+component LoginField inherits Rectangle {
+    in property <string> text;
+    in property <string> placeholder;
+    in property <bool> secret: false;
+
+    callback edited(text: string);
+
+    property <string> draft;
+    init => { root.draft = root.text; }
+    changed text => {
+        if (!input.has-focus) {
+            root.draft = root.text;
+        }
+    }
+
+    height: 40px;
+    border-radius: Theme.r-sm;
+    background: Theme.launch-field;
+    border-width: 1px;
+    border-color: input.has-focus ? #6366f1 : Theme.line;
+
+    input := TextInput {
+        x: 12px;
+        y: (parent.height - self.height) / 2;
+        width: parent.width - 24px;
+        text <=> root.draft;
+        single-line: true;
+        input-type: root.secret ? InputType.password : InputType.text;
+        color: Theme.fg;
+        font-size: Theme.fs-lg;
+        selection-background-color: Theme.accent;
+        selection-foreground-color: Theme.on-accent;
+        accessible-label: root.placeholder;
+        edited => { root.edited(self.text); }
+    }
+
+    if root.draft == "" && !input.has-focus: Text {
+        x: 12px;
+        y: (parent.height - self.height) / 2;
+        text: root.placeholder;
+        color: Theme.fg-dim;
+        font-size: Theme.fs-lg;
+    }
+}
+
+/// 星籁的按钮：登录是实心的，取消是描边的。
+component BrandButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <bool> quiet: false;
+
+    callback clicked();
+
+    height: 38px;
+    width: label-text.preferred-width + 36px;
+    border-radius: Theme.r-sm;
+    background: root.quiet ? (touch.has-hover ? Theme.field : Colors.transparent)
+        : root.enabled ? (touch.has-hover ? Theme.accent-hover : Theme.accent) : Theme.field;
+    border-width: root.quiet ? 1px : 0px;
+    border-color: Theme.line;
+
+    label-text := Text {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        text: root.label;
+        color: root.quiet ? Theme.fg-muted : (root.enabled ? Theme.on-accent : Theme.fg-dim);
+        font-size: Theme.fs-lg;
+        font-weight: 500;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { if (root.enabled) { root.clicked(); } }
+    }
+}
+
+/// 账号卡：没登录时是手机号加密码，登录后是人名、套餐和退出登录。
+component AccountDialog inherits Modal {
+    in property <bool> signed-in;
+    in property <string> name;
+    in property <string> plan;
+    in property <string> expire;
+    in property <string> error;
+    in property <bool> busy;
+
+    in-out property <string> phone;
+    in-out property <string> password;
+
+    callback submit(phone: string, password: string);
+    callback leave();
+
+    title: root.signed-in ? "星籁 AI 账号" : "登录星籁 AI 账号";
+    glyph: Glyph.circle-play;
+    surface-width: 420px;
+    dismissable: !root.busy;
+
+    VerticalLayout {
+        padding-left: 24px;
+        padding-right: 24px;
+        padding-top: 4px;
+        padding-bottom: 22px;
+        spacing: 12px;
+
+        if root.signed-in: Text {
+            text: "已登录：" + root.name;
+            color: Theme.fg;
+            font-size: 18px;
+            font-weight: 600;
+            wrap: word-wrap;
+        }
+
+        if root.signed-in: Text {
+            text: "套餐：" + root.plan + (root.expire == "" ? "" : " · 有效期至 " + root.expire);
+            color: Theme.fg-muted;
+            font-size: Theme.fs-lg;
+            wrap: word-wrap;
+        }
+
+        if root.signed-in: Text {
+            text: "登录状态用 Windows DPAPI 加密保存在本机，重启后仍在。";
+            color: Theme.fg-dim;
+            font-size: Theme.fs;
+            wrap: word-wrap;
+        }
+
+        if root.signed-in: HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+            BrandButton { label: "退出登录"; clicked => { root.leave(); } }
+            BrandButton { label: "关闭"; quiet: true; clicked => { root.closed(); } }
+        }
+
+        if !root.signed-in: Text {
+            text: "用星籁 AI 账号登录：工程与素材可以存到平台。";
+            color: Theme.fg-muted;
+            font-size: Theme.fs-lg;
+            wrap: word-wrap;
+        }
+
+        if !root.signed-in: LoginField {
+            placeholder: "手机号";
+            text: root.phone;
+            edited(value) => { root.phone = value; }
+        }
+
+        if !root.signed-in: LoginField {
+            placeholder: "密码";
+            secret: true;
+            text: root.password;
+            edited(value) => { root.password = value; }
+        }
+
+        if !root.signed-in && root.error != "": Text {
+            text: root.error;
+            color: #f87171;
+            font-size: Theme.fs-lg;
+            wrap: word-wrap;
+        }
+
+        if !root.signed-in: HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+            BrandButton {
+                label: root.busy ? "登录中…" : "登录";
+                enabled: !root.busy;
+                clicked => { root.submit(root.phone, root.password); }
+            }
+            BrandButton { label: "取消"; quiet: true; clicked => { root.closed(); } }
+        }
+
+        if !root.signed-in: Text {
+            text: "账号是 xinglaiai.com 上的账号；密码不保存，令牌加密后存在本机。";
+            color: Theme.fg-dim;
+            font-size: Theme.fs;
+            wrap: word-wrap;
+        }
+    }
+}
+
 component WideHome inherits Rectangle {
     in property <[RecentProjectData]> recents;
     in property <int> recents-total;
@@ -1620,6 +1897,10 @@ component WideHome inherits Rectangle {
     in property <bool> can-drop;
     /// CapCut has drafts on this machine, which can come in as projects.
     in property <bool> capcut;
+    /// 星籁 AI 账号：登录了没有，叫谁，什么套餐。
+    in property <bool> signed-in;
+    in property <string> account-name;
+    in property <string> account-plan;
 
     callback compose();
     callback open();
@@ -1630,6 +1911,8 @@ component WideHome inherits Rectangle {
     callback search-edited(query: string);
     callback sort-changed(sort: int);
     callback link(name: string);
+    /// 点右上角的账号入口：把那张账号卡开起来。
+    callback account-clicked();
 
     /// The margin the page keeps from the window's edges.
     property <length> pad: Math.max(24px, Math.min(64px, root.width / 18));
@@ -1667,6 +1950,26 @@ component WideHome inherits Rectangle {
                 width: root.main-w;
                 height: self.preferred-height;
                 alignment: start;
+
+                // ── 品牌 ─────────────────────────────────────────────
+                // 这一页是星籁剪辑的第一张脸：标记、名字、以及一句它是
+                // 从哪来的（Concat，AGPL-3.0）；右边是账号。
+                HorizontalLayout {
+                    spacing: 12px;
+                    BrandLockup { horizontal-stretch: 1; }
+
+                    VerticalLayout {
+                        alignment: center;
+                        AccountChip {
+                            signed-in: root.signed-in;
+                            name: root.account-name;
+                            plan: root.account-plan;
+                            clicked => { root.account-clicked(); }
+                        }
+                    }
+                }
+
+                Rectangle { height: 30px; }
 
                 // ── the greeting ─────────────────────────────────────
                 // Its own width, not the column's, so the gradient runs
@@ -1892,7 +2195,12 @@ component NarrowHome inherits Rectangle {
     /// https://github.com/jub0t/Concat/issues/222
     in property <bool> phone;
     in property <bool> capcut;
+    /// 星籁 AI 账号：登录了没有，叫谁，什么套餐。
+    in property <bool> signed-in;
+    in property <string> account-name;
+    in property <string> account-plan;
 
+    callback account-clicked();
     callback compose();
     callback open();
     callback import-capcut();
@@ -1920,6 +2228,25 @@ component NarrowHome inherits Rectangle {
             padding-top: 24px;
             padding-bottom: 28px;
             alignment: start;
+
+            // ── 品牌 ─────────────────────────────────────────────
+            HorizontalLayout {
+                spacing: 8px;
+                BrandLockup { compact: true; horizontal-stretch: 1; }
+
+                VerticalLayout {
+                    alignment: center;
+                    AccountChip {
+                        height: 26px;
+                        signed-in: root.signed-in;
+                        name: root.account-name;
+                        plan: root.account-plan;
+                        clicked => { root.account-clicked(); }
+                    }
+                }
+            }
+
+            Rectangle { height: 14px; }
 
             HorizontalLayout {
                 spacing: 8px;
@@ -2100,6 +2427,17 @@ export component StartScreen inherits Rectangle {
     in property <bool> phone;
     /// CapCut has drafts on this machine.
     in property <bool> capcut;
+    /// 星籁 AI 账号：登录了没有，叫谁，什么套餐，到期哪天，出错说什么。
+    in property <bool> signed-in;
+    in property <string> account-name;
+    in property <string> account-plan;
+    in property <string> account-expire;
+    in property <string> account-error;
+    in property <bool> account-busy;
+
+    /// 用手机号和密码登录，退出登录。
+    callback sign-in(phone: string, password: string);
+    callback sign-out();
 
     /// Put up the sheet a new project is described on.
     callback compose();
@@ -2117,6 +2455,8 @@ export component StartScreen inherits Rectangle {
     callback link(name: string);
 
     property <bool> narrow: root.phone || root.width < 680px;
+    /// 账号卡开着没有。
+    property <bool> panel;
 
     background: Theme.launch-page;
     clip: true;
@@ -2132,6 +2472,10 @@ export component StartScreen inherits Rectangle {
         version: root.version;
         can-drop: root.can-drop;
         capcut: root.capcut;
+        signed-in: root.signed-in;
+        account-name: root.account-name;
+        account-plan: root.account-plan;
+        account-clicked => { root.panel = true; }
         compose => { root.compose(); }
         open => { root.open(); }
         import-capcut => { root.import-capcut(); }
@@ -2153,6 +2497,10 @@ export component StartScreen inherits Rectangle {
         version: root.version;
         phone: root.phone;
         capcut: root.capcut;
+        signed-in: root.signed-in;
+        account-name: root.account-name;
+        account-plan: root.account-plan;
+        account-clicked => { root.panel = true; }
         compose => { root.compose(); }
         open => { root.open(); }
         import-capcut => { root.import-capcut(); }
@@ -2161,6 +2509,25 @@ export component StartScreen inherits Rectangle {
         forget-recent(path) => { root.forget-recent(path); }
         search-edited(query) => { root.search-edited(query); }
         link(name) => { root.link(name); }
+    }
+
+    // 账号卡：一张盖在首屏上的 sheet。它画在首页之上、窗口之内，
+    // 手机与窄窗都够用。
+    AccountDialog {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        open: root.panel;
+        signed-in: root.signed-in;
+        name: root.account-name;
+        plan: root.account-plan;
+        expire: root.account-expire;
+        error: root.account-error;
+        busy: root.account-busy;
+        submit(phone, password) => { root.sign-in(phone, password); }
+        leave => { root.sign-out(); root.panel = false; }
+        closed => { root.panel = false; }
     }
 }
 

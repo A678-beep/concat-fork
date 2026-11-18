@@ -1659,6 +1659,14 @@ export component SettingsDialog inherits Sheet {
                         font-size: Theme.fs-lg;
                         font-weight: Theme.weight-title;
                     }
+
+                    // AGPL 的义务写在明处：这一屏是谁、从哪来、源码在哪。
+                    Text {
+                        text: "基于 Concat（AGPL-3.0-or-later）构建 · 源码：github.com/A678-beep/concat-fork";
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
                 }
 
                 // The block an issue report is opened with. Every line in it

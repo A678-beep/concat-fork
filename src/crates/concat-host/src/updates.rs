@@ -33,8 +33,17 @@ use std::sync::atomic::AtomicBool;
 use crate::dirs::AppDirs;
 use crate::models;
 
-/// The repository the releases are read from.
-pub const REPO: &str = "jub0t/Concat";
+/// The repository the releases are read from: 我们的 fork。
+///
+/// 上游 `jub0t/Concat` 的发行版是 Concat 自己的构建，装进来会把星籁的
+/// 界面换回去，所以这里不能留上游的地址。
+pub const REPO: &str = "A678-beep/concat-fork";
+
+/// 自动更新开着没有：fork 还没有发行版，先关着。关着的时候
+/// [`fetch_releases`] 一个网络请求也不发，Settings > Version 说「还没有
+/// 发行版」，而不是转一圈再报错。要开的时候把它改成 `true`，往 fork 发
+/// 一个带 `manifest.json` 的 release 即可；见 docs/REBRAND.md。
+pub const SWITCHING: bool = false;
 
 /// The first release with a Version page: the earliest one a person can
 /// come back from, so the earliest one offered.
@@ -42,7 +51,8 @@ pub const FIRST_SWITCHABLE: Version = Version::new(0, 2, 5);
 
 /// GitHub's list of the repository's releases, newest first. A hundred
 /// covers years of releases at this pace.
-const RELEASES_URL: &str = "https://api.github.com/repos/jub0t/Concat/releases?per_page=100";
+const RELEASES_URL: &str =
+    "https://api.github.com/repos/A678-beep/concat-fork/releases?per_page=100";
 
 /// What a download that was stopped says.
 pub const CANCELLED: &str = "the download was cancelled";
@@ -172,7 +182,13 @@ fn github_message(value: &serde_json::Value) -> String {
 }
 
 /// Asks GitHub for the releases; see [`releases_from_json`].
+///
+/// [`SWITCHING`] off is the whole list empty: no request, no error, and
+/// nothing offered that would put a Concat build back over this one.
 pub fn fetch_releases() -> Result<Vec<Release>, String> {
+    if !SWITCHING {
+        return Ok(Vec::new());
+    }
     releases_from_json(&get_text(RELEASES_URL)?)
 }
 

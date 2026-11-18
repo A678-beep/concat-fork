@@ -1287,6 +1287,7 @@ dependencies = [
  "libc",
  "log",
  "memmap2",
+ "openssl",
  "png 0.17.16",
  "rustls",
  "rustls-native-certs",

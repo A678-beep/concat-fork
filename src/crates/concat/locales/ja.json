@@ -508,7 +508,7 @@
   "settings.checkingForUpdates": "確認中…",
   "settings.chooseFile": "ファイルを選択",
   "settings.chooseModelFile": "ダウンロードしたモデルファイルを選択",
-  "settings.concat": "Concat {0}",
+  "settings.concat": "XingLai Cut {0}",
   "settings.concatsMirror": "Concat のミラー",
   "settings.copySystemInformation": "システム情報をコピー",
   "settings.copyTheToken": "トークンをコピー",

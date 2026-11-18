@@ -96,8 +96,9 @@ pub fn shown<'a>(
 
 /// The official site, which the guides and the developer docs are pages of.
 const SITE: &str = "https://concat.standalones.org";
-/// The repository: the code, the issues, the releases.
-pub const REPOSITORY: &str = "https://github.com/jub0t/Concat";
+/// The repository: the code, the issues, the releases. 这是我们的 fork：
+/// 星籁剪辑的源码与改动都公开在这里（AGPL-3.0 的要求）。
+pub const REPOSITORY: &str = "https://github.com/A678-beep/concat-fork";
 
 /// Where each of the launch screen's links goes, by the name the screen
 /// sends. One table, so a moved page is one line here. Every address is a
@@ -118,9 +119,9 @@ pub fn link(name: &str) -> Option<String> {
         ),
         // The invite the README carries.
         "discord" => "https://discord.gg/DVuPfpXfqP".to_owned(),
-        // The notes for the release this build is, under the tag the
-        // release workflow pushes.
-        "release-notes" => format!("{REPOSITORY}/releases/tag/v{}", env!("CARGO_PKG_VERSION")),
+        // The fork's releases page: 星籁剪辑的安装包与发行说明都挂在这里，
+        // 上游的 tag 在 fork 里没有。
+        "release-notes" => format!("{REPOSITORY}/releases"),
         _ => return None,
     })
 }
@@ -722,7 +723,7 @@ mod tests {
         }
         assert_eq!(
             link("release-notes").unwrap(),
-            format!("{REPOSITORY}/releases/tag/v{}", env!("CARGO_PKG_VERSION"))
+            format!("{REPOSITORY}/releases")
         );
         assert_eq!(link("nowhere"), None);
     }

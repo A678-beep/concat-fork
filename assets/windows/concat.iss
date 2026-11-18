@@ -1,4 +1,6 @@
-; Concat's Windows installer.
+﻿; 星籁剪辑 (XingLai Cut) 的 Windows 安装包。
+; 基于 Concat（AGPL-3.0-or-later）构建；源码见
+; https://github.com/A678-beep/concat-fork 。
 ;
 ; Built by build-app.yml with Inno Setup from the staged folder the .msi
 ; is also made of, so the two ship the same files; this is the one a
@@ -33,22 +35,22 @@
 ; One id for the life of the product, so an install over an older one is
 ; an upgrade and not a second copy.
 AppId={{7B1E5C3A-3B9E-4F0B-9C6D-2F1D0C0A0C47}
-AppName=Concat
+AppName=星籁剪辑 XingLai Cut
 AppVersion={#Version}
-AppVerName=Concat {#Version}
-AppPublisher=Concat contributors
-AppPublisherURL=https://github.com/jub0t/Concat
-AppSupportURL=https://github.com/jub0t/Concat/issues
-AppUpdatesURL=https://github.com/jub0t/Concat/releases
-DefaultDirName={autopf}\Concat
-DefaultGroupName=Concat
+AppVerName=星籁剪辑 XingLai Cut {#Version}
+AppPublisher=星籁（XingLai）
+AppPublisherURL=https://xinglaiai.com
+AppSupportURL=https://github.com/A678-beep/concat-fork/issues
+AppUpdatesURL=https://github.com/A678-beep/concat-fork/releases
+DefaultDirName={autopf}\星籁剪辑
+DefaultGroupName=星籁剪辑
 DisableProgramGroupPage=yes
 LicenseFile=..\..\LICENSE
 OutputDir={#Out}
-OutputBaseFilename=Concat-{#Version}-windows-{#Suffix}-setup
+OutputBaseFilename=星籁剪辑-{#Version}-setup
 SetupIconFile=..\icons\concat.ico
 UninstallDisplayIcon={app}\concat.ico
-UninstallDisplayName=Concat
+UninstallDisplayName=星籁剪辑 XingLai Cut
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -108,11 +110,11 @@ Source: "{#Stage}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs crea
 Source: "..\icons\concat.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Concat"; Filename: "{app}\concat.exe"; IconFilename: "{app}\concat.ico"
+Name: "{autoprograms}\星籁剪辑"; Filename: "{app}\concat.exe"; IconFilename: "{app}\concat.ico"
 ; The way in when a graphics driver draws the window as coloured squares:
 ; it turns off Settings > General > Draw on the GPU, which that window hides.
-Name: "{autoprograms}\Concat (safe graphics)"; Filename: "{app}\concat.exe"; Parameters: "--software"; IconFilename: "{app}\concat.ico"
-Name: "{autodesktop}\Concat"; Filename: "{app}\concat.exe"; IconFilename: "{app}\concat.ico"; Tasks: desktopicon
+Name: "{autoprograms}\星籁剪辑（安全图形）"; Filename: "{app}\concat.exe"; Parameters: "--software"; IconFilename: "{app}\concat.ico"
+Name: "{autodesktop}\星籁剪辑"; Filename: "{app}\concat.exe"; IconFilename: "{app}\concat.ico"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\concat.exe"; Description: "{cm:LaunchProgram,Concat}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\concat.exe"; Description: "{cm:LaunchProgram,星籁剪辑}"; Flags: nowait postinstall skipifsilent
