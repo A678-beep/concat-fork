@@ -265,7 +265,7 @@ impl Engine {
 }
 
 /// WAV 的时长：走 chunk，按 data 的大小除以每秒字节数。
-fn wav_seconds(path: &Path) -> Option<f64> {
+pub(crate) fn wav_seconds(path: &Path) -> Option<f64> {
     let bytes = std::fs::read(path).ok()?;
     if bytes.len() < 44 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
         return None;
@@ -295,13 +295,13 @@ fn wav_seconds(path: &Path) -> Option<f64> {
 /// 进程的 CPU 时间：Windows 上开一个查询句柄，跑完读内核+用户时间。
 ///
 /// 句柄由 [`Drop`] 关；拿不到就是 0，不影响生成。
-struct CpuTimer {
+pub(crate) struct CpuTimer {
     #[cfg(windows)]
     handle: isize,
 }
 
 impl CpuTimer {
-    fn begin(pid: u32) -> CpuTimer {
+    pub(crate) fn begin(pid: u32) -> CpuTimer {
         #[cfg(windows)]
         {
             use windows_sys::Win32::System::Threading::{
@@ -322,7 +322,7 @@ impl CpuTimer {
     }
 
     /// 已经用掉的 CPU 时间，毫秒。
-    fn cpu_ms(&self) -> u64 {
+    pub(crate) fn cpu_ms(&self) -> u64 {
         #[cfg(windows)]
         {
             use windows_sys::Win32::Foundation::FILETIME;

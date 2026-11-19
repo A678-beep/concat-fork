@@ -66,6 +66,7 @@ import {
     RecentProjectData,
     StartData,
     StartScreen,
+    AccountDialog,
 } from "start.slint";
 import { TitleBar } from "title-bar.slint";
 import { PhoneEditor, PhoneSheets } from "phone/editor.slint";
@@ -316,8 +317,14 @@ export component App inherits Window {
     in property <string> account-expire;
     in property <string> account-error;
     in property <bool> account-busy;
+    /// 账号登录弹窗：AI 面板的「去登录」或云端未登录时的引导把它打开，
+    /// 首屏右上角的账号 chip 自己还有一张（见 start.slint）。
+    in property <bool> account-sheet;
     callback account-sign-in(phone: string, password: string);
     callback account-sign-out();
+    callback account-sheet-closed();
+    /// AI 面板里的「去登录」。
+    callback ai-login();
 
     // Title bar. The drag/maximize pair must be handled in main.rs — a window
     // cannot drag itself from inside the scene graph; the rest are seams like
@@ -387,7 +394,7 @@ export component App inherits Window {
     /// then, and nothing that acts on what the sheet covers.
     property <bool> sheet-up: root.start.composing || root.export.open || root.settings.open
         || root.project-sheet.open || root.new-voice.open || root.relink.open
-        || root.confirm.open || root.ai.open || root.ai.wizard-open;
+        || root.confirm.open || root.ai.open || root.ai.wizard-open || root.account-sheet;
     /// Which floating tool card is in front: "captions" or "speech". The
     /// one opened or grabbed last; Escape closes it first.
     property <string> front-tool: "captions";
@@ -1304,6 +1311,30 @@ export component App inherits Window {
         photo-clear => { root.ai-photo-clear(); }
         confirm-yes => { root.ai-confirm-yes(); }
         confirm-no => { root.ai-confirm-no(); }
+        login => { root.ai-login(); }
+    }
+
+    // 星籁账号登录卡：AI 面板里的「去登录」、以及云端未登录时的引导都开
+    // 这一张（首屏右上角的账号 chip 自己也有一张，见 start.slint）。
+    AccountDialog {
+        inset-top: root.safe-area-insets.top;
+        inset-bottom: root.safe-area-insets.bottom;
+        inset-left: root.safe-area-insets.left;
+        inset-right: root.safe-area-insets.right;
+        x: 0;
+        y: root.sheets-top;
+        width: root.width;
+        height: root.height - root.sheets-top;
+        open: root.account-sheet;
+        signed-in: root.account-signed-in;
+        name: root.account-name;
+        plan: root.account-plan;
+        expire: root.account-expire;
+        error: root.account-error;
+        busy: root.account-busy;
+        submit(phone, password) => { root.account-sign-in(phone, password); }
+        leave => { root.account-sign-out(); root.account-sheet-closed(); }
+        closed => { root.account-sheet-closed(); }
     }
 
     AiWizard {

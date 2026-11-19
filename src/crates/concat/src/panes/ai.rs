@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use concat_host::hardware::{Hardware, Tier};
 use concat_host::media::{self, MediaSummary};
-use concat_host::{cloud_ai, piper, plugins};
+use concat_host::{ai_models, cloud_ai, piper, plugins, zipvoice};
 use concat_project::Command;
 use concat_project::model::{MediaKind, MediaOrigin};
 
@@ -135,8 +135,19 @@ pub enum AiMsg {
     PluginOpen(String),
     /// 从服务器下载并安装一个插件。
     PluginDownload(String),
+    /// 下载+安装的结果（带 id，失败时好把那一行标成未上线）。
+    PluginDownloaded {
+        /// 哪个插件。
+        id: String,
+        /// 成功是插件名，失败是一句中文。
+        result: Box<Result<String, String>>,
+    },
+    /// 远端插件清单回来了（模型中心据此决定哪一项能下载）。
+    Packages(Box<Result<std::collections::HashMap<String, plugins::RemotePackage>, String>>),
     /// 刷新插件列表。
     PluginRefresh,
+    /// 打开账号登录。
+    Login,
     /// 挑照片。
     PhotoPick,
     /// 清掉照片。
@@ -191,6 +202,8 @@ pub struct AiPane {
     pub plugins: Vec<plugins::Plugin>,
     /// 装好的 Piper 引擎。
     pub piper: Option<piper::Engine>,
+    /// 装好的本地语音克隆引擎（ZipVoice）。
+    pub clone: Option<zipvoice::Engine>,
     /// 当前可选的音色（本地或云端，跟着运行方式走）。
     voices: Vec<VoiceRow>,
     /// 云端音色列表。
@@ -231,6 +244,14 @@ pub struct AiPane {
     pub signed_in: bool,
     /// 账号名，给面板显示。
     pub account: String,
+    /// 套餐名，给面板显示。
+    pub account_plan: String,
+    /// 远端插件清单；取到前是 None（模型中心先把「即将上线」写灰）。
+    packages: Option<std::collections::HashMap<String, plugins::RemotePackage>>,
+    /// 清单正在后台取。
+    packages_loading: bool,
+    /// 最近一次弹过的错误句：同一句不重复弹。
+    last_alert: String,
     /// 取消标志。
     cancel: Option<Arc<AtomicBool>>,
     /// 本地引擎上一个失败的原因，避免每次发布都重复猜。
@@ -263,6 +284,7 @@ impl Default for AiPane {
             hardware: None,
             plugins: Vec::new(),
             piper: None,
+            clone: None,
             voices: Vec::new(),
             cloud_voices: None,
             voice: 0,
@@ -283,6 +305,10 @@ impl Default for AiPane {
             confirm: None,
             signed_in: false,
             account: String::new(),
+            account_plan: String::new(),
+            packages: None,
+            packages_loading: false,
+            last_alert: String::new(),
             cancel: None,
             engine_issue: String::new(),
         }
@@ -339,12 +365,25 @@ impl AiPane {
                     None
                 }
             });
+        self.clone = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.engine() == "zipvoice")
+            .and_then(|plugin| match zipvoice::Engine::load(plugin) {
+                Ok(engine) => Some(engine),
+                Err(error) => {
+                    log::warn!("ai-plugins: 语音克隆引擎读不出来：{error}");
+                    None
+                }
+            });
         if let Some(account) = concat_host::account::load() {
             self.signed_in = !account.token.trim().is_empty();
             self.account = account.display_name();
+            self.account_plan = account.plan_label();
         } else {
             self.signed_in = false;
             self.account.clear();
+            self.account_plan.clear();
         }
         // 云端音色：只有真的走云端、且登录着才去取。
         if self.effective() == AiMode::Cloud
@@ -358,6 +397,23 @@ impl AiPane {
         if !self.busy {
             self.message = self.hint();
         }
+    }
+
+    /// 后台取一次远端插件清单，模型中心据此把能下载的点亮。
+    ///
+    /// 只取一次：清单不常变，用户在插件页点「刷新」会清掉重取。
+    fn load_packages(&mut self, studio: &mut Studio) {
+        if self.packages_loading {
+            return;
+        }
+        self.packages_loading = true;
+        let dirs = studio.host.dirs.clone();
+        spawn(
+            move || plugins::remote_manifest(&dirs),
+            |studio, _, _, packages| {
+                studio.handle(Msg::Ai(AiMsg::Packages(Box::new(Ok(packages)))));
+            },
+        );
     }
 
     /// 去平台取音色列表（后台）。
@@ -390,15 +446,33 @@ impl AiPane {
                     });
                 }
             }
-        } else if let Some(engine) = self.piper.as_ref() {
-            for voice in &engine.voices {
-                rows.push(VoiceRow {
-                    id: voice.id.clone(),
-                    name: format!("{} · {}", voice.name, voice.quality),
-                    detail: voice.tag.clone(),
-                    ready: true,
-                    cloned: false,
-                });
+        } else {
+            // 本地：Piper 的固定音色 + 语音克隆插件的参考音色，都在一张表里。
+            if let Some(engine) = self.piper.as_ref() {
+                for voice in &engine.voices {
+                    rows.push(VoiceRow {
+                        id: voice.id.clone(),
+                        name: format!("{} · {}", voice.name, voice.quality),
+                        detail: voice.tag.clone(),
+                        ready: true,
+                        cloned: false,
+                    });
+                }
+            }
+            if let Some(engine) = self.clone.as_ref() {
+                for voice in &engine.voices {
+                    rows.push(VoiceRow {
+                        id: voice.id.clone(),
+                        name: format!("{} · 本地克隆", voice.name),
+                        detail: if voice.tag.trim().is_empty() {
+                            "参考录音音色 · 完全离线".to_owned()
+                        } else {
+                            format!("{} · 完全离线", voice.tag)
+                        },
+                        ready: true,
+                        cloned: true,
+                    });
+                }
             }
         }
         self.voices = rows;
@@ -451,34 +525,41 @@ impl AiPane {
     /// 现在这条状态该说什么。
     fn hint(&self) -> String {
         match self.effective() {
-            AiMode::Local if self.piper.is_none() => {
+            AiMode::Local if self.piper.is_none() && self.clone.is_none() => {
                 if self.engine_issue.is_empty() {
-                    "本地配音插件还没装：到「插件」页导入 Piper 插件包（zip，约 100MB），装好即可离线配音。"
+                    "本地还没有可用的语音引擎：到「插件」页的模型中心下载「ZipVoice 零样本克隆」（约 160MB，支持克隆音色）或「Piper 本地配音」（约 100MB）。"
                         .to_owned()
                 } else {
                     format!("本地配音插件读不出来：{}", self.engine_issue)
                 }
             }
             AiMode::Cloud if !self.signed_in => {
-                "云端模式需要先登录星籁账号：回到首屏登录后再打开这个面板。".to_owned()
+                "云端模式需要先登录星籁账号：点下面的「去登录」，或回到首屏点右上角「登录 / 注册」。"
+                    .to_owned()
             }
             AiMode::Cloud => "云端模式：生成前会先让你确认上传素材与扣费。".to_owned(),
+            AiMode::Local if self.piper.is_some() && self.clone.is_some() => {
+                "本地模式：Piper 与语音克隆都可用，文字与音频都不出本机，不需要登录。".to_owned()
+            }
+            AiMode::Local if self.clone.is_some() => {
+                "本地模式：语音克隆引擎可用（参考录音克隆音色），文字与音频不出本机，不需要登录。"
+                    .to_owned()
+            }
             AiMode::Local => "本地模式：文字与音频都不出本机，不需要登录。".to_owned(),
             AiMode::Smart => String::new(),
         }
     }
 
-    /// 本地数字人的状态（一期只有入口）。
+    /// 本地数字人的状态：Wav2Lip 服务端包还没上线，先如实说清楚。
     fn digital_status(&self) -> String {
         let installed = self
             .plugins
             .iter()
             .any(|plugin| plugin.engine() == "wav2lip" && plugin.complete);
         if installed {
-            "Wav2Lip 插件已安装。本地数字人（二期）将在 0.2.13 接入；这一版可以用云端生成。"
-                .to_owned()
+            "Wav2Lip 插件已安装；本地数字人推理在 0.2.14 接入。这一版可用云端生成。".to_owned()
         } else {
-            "本地数字人是二期插件（Wav2Lip ONNX，可选 DirectML）：到「插件」页导入插件包或从服务器下载。这一版可用云端生成数字人。"
+            "本地数字人插件（Wav2Lip）服务端包还没上线，模型中心里显示「即将上线」；本机跑数字人建议用云端。"
                 .to_owned()
         }
     }
@@ -523,15 +604,37 @@ impl AiPane {
                 })
                 .unwrap_or_default()
                 .into(),
-            local_ready: self.piper.is_some(),
+            local_ready: self.piper.is_some() || self.clone.is_some(),
             local_path: self
                 .piper
                 .as_ref()
                 .map(|engine| engine.root.display().to_string())
+                .or_else(|| {
+                    self.clone
+                        .as_ref()
+                        .map(|engine| engine.root.display().to_string())
+                })
                 .unwrap_or_default()
                 .into(),
             signed_in: self.signed_in,
             account: self.account.as_str().into(),
+            account_plan: self.account_plan.as_str().into(),
+            account_line: if self.signed_in {
+                let name = if self.account.trim().is_empty() {
+                    "星籁用户".to_owned()
+                } else {
+                    self.account.clone()
+                };
+                let plan = if self.account_plan.trim().is_empty() {
+                    "未注明套餐".to_owned()
+                } else {
+                    self.account_plan.clone()
+                };
+                format!("{name} · {plan}（云端可用）")
+            } else {
+                "未登录（云端需登录）".to_owned()
+            }
+            .into(),
             cloud_cost: CLOUD_COST.into(),
             text: self.text.as_str().into(),
             voice: self.voice,
@@ -579,39 +682,118 @@ impl AiPane {
             .collect()
     }
 
-    /// 插件页的行。
-    pub fn plugin_rows(&self) -> Vec<AiPluginItem> {
-        self.plugins
-            .iter()
-            .map(|plugin| {
-                let kind = if plugin.engine() == "wav2lip" {
-                    "数字人"
+    /// 模型中心的行：目录里的每个模型一行，外加用户自己导入的插件。
+    ///
+    /// 「能不能下载」由远端清单（[`Self::packages`]）与
+    /// [`plugins::package_status`] 决定；清单没说、官方也没上线的，写「即将
+    /// 上线」并把按钮灰掉——点了不会发请求。
+    pub fn model_rows(&self) -> Vec<AiPluginItem> {
+        let mut rows = Vec::new();
+        for spec in &ai_models::MODELS {
+            let installed = self
+                .plugins
+                .iter()
+                .find(|plugin| plugin.manifest.id == spec.id);
+            let package = plugins::package_status(self.packages.as_ref(), spec.id);
+            let (fit_ok, fit_label) = match self.hardware.as_ref() {
+                Some(hardware) => ai_models::fit_reason(spec, hardware),
+                None => (true, "尚未检测".to_owned()),
+            };
+            let cloud = spec.id == "ai-background";
+            let builtin = spec.id == "cutout";
+            let voices = installed.map(|plugin| plugin.voices().len()).unwrap_or(0);
+            let state = if cloud {
+                if self.signed_in {
+                    "云端 · 已登录可用".to_owned()
                 } else {
-                    "本地配音"
-                };
-                let voices = plugin.voices().len();
-                let state = if plugin.complete {
+                    "云端 · 需登录".to_owned()
+                }
+            } else if builtin {
+                "已内置 · 首次使用自动下载".to_owned()
+            } else if let Some(plugin) = installed {
+                if plugin.complete {
                     if voices > 0 {
-                        format!("{voices} 个音色 · 已就绪")
+                        format!("已安装 · {voices} 个音色")
                     } else {
                         "已安装".to_owned()
                     }
                 } else {
-                    "缺少主程序".to_owned()
-                };
-                AiPluginItem {
-                    id: plugin.manifest.id.as_str().into(),
-                    name: plugin.manifest.name.as_str().into(),
-                    kind: kind.into(),
-                    version: plugin.manifest.version.as_str().into(),
-                    size: plugin.size_label().into(),
-                    state: state.into(),
-                    path: plugin.folder.display().to_string().into(),
-                    complete: plugin.complete,
-                    voices: i32::try_from(voices).unwrap_or(0),
+                    "已安装（缺主程序）".to_owned()
                 }
-            })
-            .collect()
+            } else if package.online() {
+                format!("可下载 · {}", plugins::human_size(package.size))
+            } else {
+                "即将上线".to_owned()
+            };
+            let downloadable = !cloud && !builtin && installed.is_none() && package.online() && fit_ok;
+            rows.push(AiPluginItem {
+                id: spec.id.into(),
+                name: spec.name.into(),
+                category: spec.kind.into(),
+                summary: spec.summary.into(),
+                effect: ai_models::stars(spec.effect).into(),
+                size: if cloud {
+                    "云端".into()
+                } else if let Some(plugin) = installed {
+                    plugin.size_label().into()
+                } else {
+                    plugins::human_size(spec.size_bytes).into()
+                },
+                requirement: requirement_label(spec).into(),
+                speed: spec.speed.into(),
+                fit: fit_label.into(),
+                fit_ok,
+                status: state.into(),
+                note: spec.note.into(),
+                path: installed
+                    .map(|plugin| plugin.folder.display().to_string())
+                    .unwrap_or_default()
+                    .into(),
+                installed: installed.is_some(),
+                downloadable,
+                complete: installed.is_some_and(|plugin| plugin.complete),
+                voices: i32::try_from(voices).unwrap_or(0),
+                version: installed
+                    .map(|plugin| plugin.manifest.version.clone())
+                    .unwrap_or_default()
+                    .into(),
+                cloud,
+            });
+        }
+        // 用户自己导入、目录里没有的插件：也列出来，能打开目录、能删。
+        for plugin in &self.plugins {
+            if ai_models::spec(&plugin.manifest.id).is_some() {
+                continue;
+            }
+            let voices = plugin.voices().len();
+            rows.push(AiPluginItem {
+                id: plugin.manifest.id.as_str().into(),
+                name: plugin.manifest.name.as_str().into(),
+                category: "本地插件".into(),
+                summary: plugin.manifest.description.as_str().into(),
+                effect: ai_models::stars(3).into(),
+                size: plugin.size_label().into(),
+                requirement: "—".into(),
+                speed: "—".into(),
+                fit: "已安装".into(),
+                fit_ok: true,
+                status: if plugin.complete {
+                    format!("已安装 · {voices} 个音色")
+                } else {
+                    "已安装（缺主程序）".to_owned()
+                }
+                .into(),
+                note: "导入的插件".into(),
+                path: plugin.folder.display().to_string().into(),
+                installed: true,
+                downloadable: false,
+                complete: plugin.complete,
+                voices: i32::try_from(voices).unwrap_or(0),
+                version: plugin.manifest.version.as_str().into(),
+                cloud: false,
+            });
+        }
+        rows
     }
 
     // ── 消息 ──
@@ -625,7 +807,12 @@ impl AiPane {
                 self.confirm_open = false;
                 self.confirm = None;
             }
-            AiMsg::Tab(tab) => self.tab = tab.clamp(0, 2),
+            AiMsg::Tab(tab) => {
+                self.tab = tab.clamp(0, 2);
+                if self.tab == 2 && !self.busy {
+                    self.load_packages(studio);
+                }
+            }
             AiMsg::Text(text) => {
                 self.text = text.chars().take(MAX_TEXT).collect();
             }
@@ -659,7 +846,11 @@ impl AiPane {
                 studio.prefs.ai_mode = Some(self.mode.key().to_owned());
                 studio.prefs.save(&studio.host.dirs);
                 self.open = true;
-                self.tab = if self.piper.is_some() { 0 } else { 2 };
+                self.tab = if self.piper.is_some() || self.clone.is_some() {
+                    0
+                } else {
+                    2
+                };
                 let dirs = studio.host.dirs.clone();
                 self.refresh(&dirs);
                 self.message = self.hint();
@@ -738,8 +929,8 @@ impl AiPane {
                 }
                 Err(error) => {
                     cloud_ai::forget_if_expired(&error);
+                    self.recheck_account(studio);
                     self.message = format!("云端音色取不到：{error}");
-                    self.recheck_account();
                 }
             },
             AiMsg::PhotoPick => self.pick_photo(studio),
@@ -750,7 +941,9 @@ impl AiPane {
             AiMsg::PluginRefresh => {
                 let dirs = studio.host.dirs.clone();
                 self.refresh(&dirs);
-                self.message = format!("本机插件：{} 个", self.plugins.len());
+                self.packages = None;
+                self.load_packages(studio);
+                self.message = format!("本机插件：{} 个；正在刷新模型中心…", self.plugins.len());
             }
             AiMsg::PluginImport => self.import_plugin(studio),
             AiMsg::PluginImported(result) => match *result {
@@ -759,16 +952,66 @@ impl AiPane {
                     self.stage.clear();
                     let dirs = studio.host.dirs.clone();
                     self.refresh(&dirs);
+                    // 安装成功后把上一次的失败提示收掉：0.2.12 里失败的红条
+                    // 会在成功之后还挡着，因为「完成」提示不覆盖失败提示。
+                    studio.dismiss_notice();
+                    self.last_alert.clear();
+                    self.last.clear();
                     self.message = format!("插件已安装：{name}；现在可以用本地配音了");
-                    studio.notify("本地 AI 插件已安装", false);
+                    studio.notify(&format!("插件已安装：{name}"), false);
                 }
                 Err(error) => {
                     self.busy = false;
                     self.stage.clear();
                     self.message = format!("插件导入失败：{error}");
-                    studio.notify(&error, true);
+                    self.alert(studio, &format!("插件导入失败：{error}"));
                 }
             },
+            AiMsg::PluginDownloaded { id, result } => match *result {
+                Ok(name) => {
+                    self.busy = false;
+                    self.stage.clear();
+                    self.progress = 0.0;
+                    let dirs = studio.host.dirs.clone();
+                    // 装好了，清单里那一行要显示「已安装」。
+                    self.packages = None;
+                    self.refresh(&dirs);
+                    self.last_alert.clear();
+                    self.last.clear();
+                    self.message = format!("{name} 已下载并安装；回到「配音」页即可选用");
+                    studio.dismiss_notice();
+                    studio.notify(&format!("{name} 已安装"), false);
+                }
+                Err(error) => {
+                    self.busy = false;
+                    self.stage.clear();
+                    self.progress = 0.0;
+                    let message = plugins::readable_download_error(&id, &error);
+                    // 404 / 未上线：这一行立刻灰成「即将上线」，不再给下载按钮。
+                    if message.contains("暂未上线") {
+                        self.mark_coming_soon(&id);
+                    }
+                    self.message = message.clone();
+                    self.alert(studio, &message);
+                }
+            },
+            AiMsg::Packages(result) => {
+                self.packages_loading = false;
+                match *result {
+                    Ok(packages) => {
+                        self.packages = Some(packages);
+                    }
+                    Err(error) => {
+                        log::warn!("ai-plugins: 插件清单取不到：{error}");
+                        // 清单取不到不是用户能修的事：不弹错误，按官方兜底表
+                        // 显示（Piper 仍可下，没上线的仍灰着）。
+                        self.packages = Some(std::collections::HashMap::new());
+                    }
+                }
+            }
+            AiMsg::Login => {
+                studio.request_login("星籁账号登录");
+            }
             AiMsg::PluginRemove(id) => match plugins::remove(&studio.host.dirs, &id) {
                 Ok(()) => {
                     let dirs = studio.host.dirs.clone();
@@ -778,7 +1021,7 @@ impl AiPane {
                 }
                 Err(error) => {
                     self.message = error.clone();
-                    studio.notify(&error, true);
+                    self.alert(studio, &error);
                 }
             },
             AiMsg::PluginOpen(id) => {
@@ -799,6 +1042,9 @@ impl AiPane {
         self.tab = tab.clamp(0, 2);
         let dirs = studio.host.dirs.clone();
         self.refresh(&dirs);
+        if self.tab == 2 && !self.busy {
+            self.load_packages(studio);
+        }
         if !studio.prefs.ai_wizard_seen {
             self.wizard_open = true;
         }
@@ -818,22 +1064,48 @@ impl AiPane {
         studio.prefs.save(&studio.host.dirs);
     }
 
-    /// 重新读登录状态；返回是否登录着。
-    fn recheck_account(&mut self) -> bool {
-        match concat_host::account::load() {
+    /// 重新读登录状态，并把全局的账号状态（首屏右上角、AI 面板底部）一起
+    /// 刷新；返回是否登录着。token 过期时这里会把它清掉并提示重新登录。
+    fn recheck_account(&mut self, studio: &mut Studio) -> bool {
+        let was = self.signed_in;
+        let account = concat_host::account::load();
+        self.apply_account(account.as_ref());
+        studio.account = account;
+        if was && !self.signed_in {
+            self.message = "星籁账号登录已失效：请重新登录后再用云端 AI".to_owned();
+            self.alert(studio, "登录已失效：请重新登录星籁账号");
+        }
+        self.signed_in
+    }
+
+    /// 把一份账号落进面板状态。
+    fn apply_account(&mut self, account: Option<&concat_host::account::Account>) {
+        match account {
             Some(account) if !account.token.trim().is_empty() => {
                 self.signed_in = true;
                 self.account = account.display_name();
-                true
+                self.account_plan = account.plan_label();
             }
             _ => {
-                if self.effective() == AiMode::Cloud {
-                    self.signed_in = false;
-                }
+                self.signed_in = false;
                 self.account.clear();
-                false
+                self.account_plan.clear();
             }
         }
+    }
+
+    /// 弹一条失败提示，但同一句不重复弹（同一个错误连点几次只响一次）。
+    fn alert(&mut self, studio: &mut Studio, message: &str) {
+        self.last_alert = message.to_owned();
+        studio.notify(message, true);
+    }
+
+    /// 把一个包在本地标成「未上线」：清单没更新、但下载已经 404 了。
+    fn mark_coming_soon(&mut self, id: &str) {
+        let package = plugins::coming_soon(id);
+        self.packages
+            .get_or_insert_with(std::collections::HashMap::new)
+            .insert(id.to_owned(), package);
     }
 
     // ── 配音 ──
@@ -857,37 +1129,56 @@ impl AiPane {
         }
     }
 
-    /// 本地 Piper 生成。
+    /// 本地生成：Piper 的固定音色，或 ZipVoice 克隆音色，按选中的音色走。
     fn generate_local(&mut self, project: &Path) {
-        let Some(engine) = self.piper.clone() else {
-            self.message = self.hint();
+        let Some(voice) = self.voices.get(self.voice.max(0) as usize).cloned() else {
+            self.message = "本地还没有音色：先去「插件」页的模型中心装一个引擎".to_owned();
             self.tab = 2;
             return;
         };
-        let Some(voice) = self.voices.get(self.voice.max(0) as usize).cloned() else {
-            self.message = "插件里没有可用音色".to_owned();
+        let piper_engine = self.piper.clone();
+        let clone_engine = self.clone.clone();
+        if piper_engine.is_none() && clone_engine.is_none() {
+            self.message = self.hint();
+            self.tab = 2;
             return;
-        };
-        let index = engine
-            .voices
-            .iter()
-            .position(|candidate| candidate.id == voice.id)
-            .unwrap_or(0);
+        }
         let text = self.text.trim().to_owned();
         let rate = self.rate;
         let cancel = Arc::new(AtomicBool::new(false));
         self.cancel = Some(Arc::clone(&cancel));
         let dir = project.join("ai_voice");
         let out = dir.join(format!("ai-voice-{}.wav", stamp()));
-        self.begin("本地配音生成中…");
-        let voice_name = engine
-            .voices
-            .get(index)
-            .map(|voice| voice.name.clone())
-            .unwrap_or_default();
+        let voice_id = voice.id.clone();
+        let voice_name = voice.name.clone();
+        let clone_voice = clone_engine.as_ref().and_then(|engine| {
+            engine
+                .voices
+                .iter()
+                .position(|candidate| candidate.id == voice_id)
+                .map(|index| (engine.clone(), index))
+        });
+        let piper_voice = piper_engine.as_ref().and_then(|engine| {
+            engine
+                .voices
+                .iter()
+                .position(|candidate| candidate.id == voice_id)
+                .map(|index| (engine.clone(), index))
+        });
+        self.begin(if clone_voice.is_some() {
+            "本地语音克隆生成中（CPU，约 1–2× 实时）…"
+        } else {
+            "本地配音生成中…"
+        });
         spawn_in_project(
             move || -> Result<Done, String> {
-                let spoken = engine.speak(index, &text, rate, &out, &cancel)?;
+                let spoken = if let Some((engine, index)) = clone_voice {
+                    engine.speak(index, &text, rate, &out, &cancel)?
+                } else if let Some((engine, index)) = piper_voice {
+                    engine.speak(index, &text, rate, &out, &cancel)?
+                } else {
+                    return Err("选中的音色不在已安装的引擎里：请重新选一个".to_owned());
+                };
                 let summary = media::probe(&spoken.path.to_string_lossy())?;
                 Ok(Done {
                     path: spoken.path.clone(),
@@ -905,9 +1196,12 @@ impl AiPane {
 
     /// 云端要花额度、要上传：先摆确认条。
     fn ask_cloud(&mut self, studio: &mut Studio, action: Confirm) {
-        self.recheck_account();
+        self.recheck_account(studio);
         if !self.signed_in {
-            self.message = "请先登录星籁账号，再使用云端 AI（首屏登录后回来）".to_owned();
+            // 未登录不是错误：直接引导登录，不弹红色提示。
+            self.message =
+                "云端 AI 需要登录星籁账号：已在弹窗里打开登录，登录后会自动刷新".to_owned();
+            studio.request_login("云端 AI 需要登录星籁账号");
             return;
         }
         if action == Confirm::Avatar && self.cloud_audio_url.is_none() {
@@ -925,7 +1219,6 @@ impl AiPane {
         }
         self.confirm = Some(action);
         self.confirm_open = true;
-        let _ = studio;
         if action == Confirm::Avatar {
             self.confirm_text =
                 "云端数字人会把你选的照片和口播音频上传到星籁平台（约 1–2 分钟生成），并按套餐扣费。确认继续？"
@@ -1102,10 +1395,10 @@ impl AiPane {
                     return;
                 }
                 cloud_ai::forget_if_expired(&error);
-                self.recheck_account();
+                self.recheck_account(studio);
                 self.message = format!("生成失败：{error}");
                 self.last = self.message.clone();
-                studio.notify(&self.message.clone(), true);
+                self.alert(studio, &self.message.clone());
             }
         }
     }
@@ -1234,8 +1527,18 @@ impl AiPane {
     }
 
     /// 从服务器下载一个插件包再装上。
+    ///
+    /// 只对清单里「真的有」的包发起请求：没上线的在界面上就灰着，走到这里
+    /// 也先按清单再确认一遍，不发注定 404 的请求。
     fn download_plugin(&mut self, studio: &mut Studio, id: &str) {
         if self.busy {
+            return;
+        }
+        let package = plugins::package_status(self.packages.as_ref(), id);
+        if !package.online() {
+            self.mark_coming_soon(id);
+            self.message = plugins::readable_download_error(id, "HTTP 404");
+            self.tab = 2;
             return;
         }
         let cancel = Arc::new(AtomicBool::new(false));
@@ -1243,12 +1546,18 @@ impl AiPane {
         self.busy = true;
         self.progress = 0.0;
         self.stage = format!(
-            "正在获取插件下载信息（约 {}）…",
-            plugins::human_size(plugins::download_size_hint(id))
+            "正在下载插件包（约 {}）…",
+            plugins::human_size(if package.size > 0 {
+                package.size
+            } else {
+                plugins::download_size_hint(id)
+            })
         );
         self.message = self.stage.clone();
         let dirs = studio.host.dirs.clone();
         let id = id.to_owned();
+        let package = package.clone();
+        let work_id = id.clone();
         spawn(
             move || -> Result<String, String> {
                 let mut last = -1.0f32;
@@ -1262,16 +1571,13 @@ impl AiPane {
                         studio.handle(Msg::Ai(AiMsg::Progress { fraction, stage }));
                     });
                 };
-                // 远端清单优先：运营换包/换地址不用改客户端；取不到就固定地址。
-                let package = plugins::remote_manifest(&dirs)
-                    .remove(&id)
-                    .unwrap_or_default();
                 let url = if package.url.trim().is_empty() {
-                    plugins::download_url(&id)
+                    plugins::download_url(&work_id)
                 } else {
                     package.url.clone()
                 };
-                let zip = plugins::download(&dirs, &id, &url, &package.sha256, &mut report, &cancel)?;
+                let zip =
+                    plugins::download(&dirs, &work_id, &url, &package.sha256, &mut report, &cancel)?;
                 let mut unpack = |fraction: f32, stage: &str| {
                     let stage = stage.to_owned();
                     host::on_ui(move |studio, _, _| {
@@ -1281,8 +1587,11 @@ impl AiPane {
                 let plugin = plugins::import_zip(&dirs, &zip, &mut unpack)?;
                 Ok(plugin.manifest.name)
             },
-            |studio, _, _, result| {
-                studio.handle(Msg::Ai(AiMsg::PluginImported(Box::new(result))));
+            move |studio, _, _, result| {
+                studio.handle(Msg::Ai(AiMsg::PluginDownloaded {
+                    id,
+                    result: Box::new(result),
+                }));
             },
         );
     }
@@ -1293,6 +1602,25 @@ impl Studio {
     pub fn remember_ai_mode(&mut self) {
         self.prefs.ai_mode = Some(self.ai.mode.key().to_owned());
         self.prefs.save(&self.host.dirs);
+    }
+
+    /// 打开账号登录弹窗，并说一句为什么要登录。
+    pub fn request_login(&mut self, why: &str) {
+        self.account_sheet = true;
+        self.ai.message = format!("{why}：在弹窗里登录后会自动刷新账号状态，不会上传任何素材");
+    }
+
+    /// 把上一次的失败提示收掉：成功之后不该还挂着一条红字。
+    pub fn dismiss_notice(&mut self) {
+        self.toast.up = false;
+    }
+
+    /// 从磁盘重读账号（登录、退出、token 过期之后都用它），并把 AI 面板
+    /// 与全局账号状态一起对齐。
+    pub fn reload_account(&mut self) {
+        let account = concat_host::account::load();
+        self.ai.apply_account(account.as_ref());
+        self.account = account;
     }
 
     /// 设置页要发布的 AI 数据：运行方式、硬件一句话、推荐理由。
@@ -1353,4 +1681,41 @@ fn stamp() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |time| time.as_secs())
+}
+
+/// 一个模型的硬件要求，写成人话：`显存 ≥6GB · 内存 ≥12GB`。
+fn requirement_label(spec: &ai_models::ModelSpec) -> String {
+    if spec.id == "ai-background" {
+        return "联网 + 星籁账号（可选 302.AI Key）".to_owned();
+    }
+    if spec.id == "cutout" {
+        return "纯 CPU · 内存 ≥2GB（随功能自动下载）".to_owned();
+    }
+    let mut parts: Vec<String> = Vec::new();
+    if spec.cuda {
+        parts.push("NVIDIA 显卡（CUDA）".to_owned());
+    }
+    if spec.vram_mb > 0 {
+        parts.push(format!("显存 ≥{}GB", gb_text(spec.vram_mb)));
+    }
+    if spec.ram_mb > 0 {
+        parts.push(format!("内存 ≥{}GB", gb_text(spec.ram_mb)));
+    }
+    if spec.vram_mb == 0 {
+        parts.push("纯 CPU".to_owned());
+    }
+    if parts.is_empty() {
+        "—".to_owned()
+    } else {
+        parts.join(" · ")
+    }
+}
+
+/// MB 按整数 GB 说。
+fn gb_text(mb: u64) -> u64 {
+    if mb >= 1024 {
+        (mb as f64 / 1024.0).round() as u64
+    } else {
+        mb
+    }
 }

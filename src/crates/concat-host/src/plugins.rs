@@ -28,17 +28,64 @@ pub const FOLDER: &str = "ai-plugins";
 /// 不用改客户端。取不到就回退到 [`DOWNLOAD`] 里的固定地址。
 pub const MANIFEST_URL: &str = "https://xinglaiai.com/ai-nav/api/ai-plugins/manifest.json";
 
-/// 官方的两个插件包（清单取不到时的兜底地址；清单里的 `url` 优先）。
-pub const DOWNLOAD: [(&str, &str); 2] = [
-    (
-        "piper",
-        "https://xinglaiai.com/ai-nav/api/ai-plugins/piper.zip",
-    ),
-    (
-        "wav2lip",
-        "https://xinglaiai.com/ai-nav/api/ai-plugins/wav2lip.zip",
-    ),
+/// 官方插件包都在这里，清单取不到时用；清单里的 `url` 优先。
+///
+/// `launched` 是「服务器上真的有这个包吗」的兜底：Wav2Lip 还没上线，清单里
+/// 也只是个占位（`size` 为 0），界面据此把它显示成「即将上线」，**不发起
+/// 下载请求**——0.2.12 里那个「下载失败 HTTP 404」就是从这里点出来的。
+pub const OFFICIAL: [Official; 3] = [
+    Official {
+        id: "piper",
+        url: "https://xinglaiai.com/ai-nav/api/ai-plugins/piper.zip",
+        size: 100_003_538,
+        sha256: "950b979ea1944400ed2b9673a4282f2dcf5ed0c082c23eb4646d84e3d32c7374",
+        launched: true,
+    },
+    Official {
+        id: "wav2lip",
+        url: "https://xinglaiai.com/ai-nav/api/ai-plugins/wav2lip.zip",
+        size: 0,
+        sha256: "",
+        launched: false,
+    },
+    Official {
+        id: "voice-clone",
+        url: "https://xinglaiai.com/ai-nav/api/ai-plugins/voice-clone.zip",
+        size: 177_134_608,
+        sha256: "7bb338489ceb2ceafa2adb62c31f843463afdf6d8e8f295745ca663672d893bb",
+        launched: true,
+    },
 ];
+
+/// 一个官方插件包：地址、大小、校验和，以及它上线了没有。
+#[derive(Clone, Copy, Debug)]
+pub struct Official {
+    /// 稳定 id，与清单里的键一致。
+    pub id: &'static str,
+    /// 下载地址。
+    pub url: &'static str,
+    /// 字节数；0 表示还没上线。
+    pub size: u64,
+    /// 十六进制 sha256；空则不校验。
+    pub sha256: &'static str,
+    /// 服务器上已经有这个包。
+    pub launched: bool,
+}
+
+/// 按 id 找一个官方包。
+pub fn official(id: &str) -> Option<&'static Official> {
+    OFFICIAL.iter().find(|package| package.id == id)
+}
+
+/// 官方的固定下载地址（清单取不到时的兜底）。
+pub fn download_url(id: &str) -> String {
+    if let Ok(url) = std::env::var("XINGLAI_AI_PLUGIN_URL") {
+        if !url.trim().is_empty() {
+            return url.trim().to_owned();
+        }
+    }
+    official(id).map(|package| package.url.to_owned()).unwrap_or_default()
+}
 
 /// 远端清单里一个插件包。
 #[derive(Clone, Debug, Default)]
@@ -47,10 +94,53 @@ pub struct RemotePackage {
     pub version: String,
     /// 下载地址；空则用固定地址。
     pub url: String,
-    /// 字节数，0 表示没说。
+    /// 字节数，0 表示「还没上线」（运营先占个位）。
     pub size: u64,
     /// 十六进制 sha256；空则不校验。
     pub sha256: String,
+}
+
+impl RemotePackage {
+    /// 服务器上真的有这个包：清单给了地址、给了大小。
+    ///
+    /// 0.2.12 的清单里 Wav2Lip 是 `{"url": "...wav2lip.zip", "size": 0}`，
+    /// 点下载就是 404。大小是 0 或地址是空的条目一律当「未上线」，界面不
+    /// 给下载按钮——不是等下载失败了才说。
+    pub fn online(&self) -> bool {
+        self.size > 0 && !self.url.trim().is_empty()
+    }
+}
+
+/// 一个包的可用状态，给界面决定显示什么。
+pub fn package_status(
+    remote: Option<&std::collections::HashMap<String, RemotePackage>>,
+    id: &str,
+) -> RemotePackage {
+    if let Some(package) = remote.and_then(|map| map.get(id)) {
+        return package.clone();
+    }
+    match official(id) {
+        Some(package) if package.launched => RemotePackage {
+            version: "1.0.0".to_owned(),
+            url: package.url.to_owned(),
+            size: package.size,
+            sha256: package.sha256.to_owned(),
+        },
+        _ => coming_soon(id),
+    }
+}
+
+/// 清单里的一行没上线时的样子：地址留着（运营换包后不用改客户端），大小 0。
+pub fn coming_soon(id: &str) -> RemotePackage {
+    match official(id) {
+        Some(package) => RemotePackage {
+            version: "0.0.0".to_owned(),
+            url: package.url.to_owned(),
+            size: 0,
+            sha256: String::new(),
+        },
+        None => RemotePackage::default(),
+    }
 }
 
 /// 取一次远端插件清单；取不到或格式不认识就是空表，调用方用固定地址。
@@ -99,15 +189,29 @@ pub fn remote_manifest(dirs: &crate::AppDirs) -> std::collections::HashMap<Strin
                 .trim()
                 .to_owned()
         };
+        // 运营可以显式标「未上线」：`available:false`，或 `status` 是
+        // soon / offline / planned。标了就按大小 0 算，界面灰着。
+        let offline = row
+            .get("available")
+            .and_then(serde_json::Value::as_bool)
+            == Some(false)
+            || matches!(
+                field("status").to_ascii_lowercase().as_str(),
+                "soon" | "offline" | "planned" | "coming-soon" | "pending"
+            );
+        let size = if offline {
+            0
+        } else {
+            row.get("size")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0)
+        };
         out.insert(
             id.clone(),
             RemotePackage {
                 version: field("version"),
                 url: field("url"),
-                size: row
-                    .get("size")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0),
+                size,
                 sha256: field("sha256").to_ascii_lowercase(),
             },
         );
@@ -139,6 +243,10 @@ pub struct Manifest {
     pub download_url: String,
     /// 音色表；没有就扫 `voices_dir` 里的 `*.onnx`。
     pub voices: Vec<VoiceEntry>,
+    /// 引擎自己的参数（相对插件根）：ZipVoice 的 encoder/decoder/vocoder、
+    /// 数据目录、词表等。认字的引擎读，不认的忽略——清单格式不必为每个
+    /// 引擎再加一遍字段。
+    pub extra: std::collections::HashMap<String, String>,
 }
 
 /// 清单里的一条音色。
@@ -157,6 +265,9 @@ pub struct VoiceEntry {
     pub config: String,
     /// 质量：`标准`/`轻量`。
     pub quality: String,
+    /// 这个音色自己的参数：ZipVoice 的 `referenceAudio`/`referenceText`，
+    /// 覆盖插件级 `extra` 里的同名项。
+    pub extra: std::collections::HashMap<String, String>,
 }
 
 /// 本机装着的一个插件。
@@ -648,27 +759,69 @@ fn sha256_of(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-/// 下载地址：官方表里的，或环境变量 `XINGLAI_AI_PLUGIN_URL`（给测试与自建
-/// 镜像用）。
-pub fn download_url(id: &str) -> String {
-    if let Ok(url) = std::env::var("XINGLAI_AI_PLUGIN_URL") {
-        if !url.trim().is_empty() {
-            return url.trim().to_owned();
-        }
-    }
-    DOWNLOAD
-        .iter()
-        .find(|(key, _)| *key == id)
-        .map(|(_, url)| (*url).to_owned())
-        .unwrap_or_default()
-}
-
-/// 包有多大：官方没给，界面上写个大概；有 `Content-Length` 时下载进度更准。
+/// 包有多大：清单没给、界面又要显示时的大概数字。
 pub fn download_size_hint(id: &str) -> u64 {
     match id {
         "piper" => 110 * 1024 * 1024,
+        "voice-clone" => 177_134_608,
         "wav2lip" => 220 * 1024 * 1024,
         _ => 100 * 1024 * 1024,
+    }
+}
+
+/// 把下载失败的底层错误翻成一句用户能看懂的话。
+///
+/// [`crate::direct`] 和 [`download`] 的报错是给日志看的（`HTTP 404`、
+/// `operation timed out`），直接弹到界面上就是 0.2.12 用户截图里的
+/// 「下载失败 HTTP 404」。这里按原因归成四类：没上线、超时、网络、其他。
+pub fn readable_download_error(id: &str, raw: &str) -> String {
+    let name = match official(id) {
+        Some(package) if !package.launched => "这个插件".to_owned(),
+        _ => name_of(id),
+    };
+    let lower = raw.to_ascii_lowercase();
+    let not_launched = raw.contains("404")
+        || raw.contains("暂未上线")
+        || lower.contains("not found")
+        || lower.contains("已下线");
+    if not_launched {
+        return format!("{name}暂未上线：服务器上还没有这个安装包，上线后这里会亮起来，请稍后再试。");
+    }
+    let timeout = raw.contains("超时")
+        || raw.contains("timed out")
+        || raw.contains("timeout")
+        || raw.contains("收不全")
+        || raw.contains("中途断了")
+        || raw.contains("连接被中途关闭");
+    if timeout {
+        return "网络超时：服务器带宽较慢或网络不稳定，请稍后重试".to_owned();
+    }
+    let offline = raw.contains("连不上")
+        || raw.contains("连接失败")
+        || raw.contains("地址解析失败")
+        || raw.contains("握手失败")
+        || lower.contains("connection refused")
+        || lower.contains("connection reset")
+        || lower.contains("dns");
+    if offline {
+        return "网络连接失败：请检查网络（或代理是否拦住了直连）后重试".to_owned();
+    }
+    if raw.contains("500") || raw.contains("502") || raw.contains("503") || raw.contains("504") {
+        return "服务器暂时不可用，请稍后重试".to_owned();
+    }
+    if raw.contains("校验失败") || raw.contains("已取消") || raw.contains("插件包里没找到") {
+        return raw.to_owned();
+    }
+    format!("下载失败：{raw}")
+}
+
+/// 一个 id 在界面上的中文名。
+fn name_of(id: &str) -> String {
+    match id {
+        "piper" => "本地配音插件".to_owned(),
+        "voice-clone" => "本地语音克隆插件".to_owned(),
+        "wav2lip" => "本地数字人插件".to_owned(),
+        other => format!("插件「{other}」"),
     }
 }
 
@@ -710,5 +863,50 @@ mod tests {
     fn sizes_read_as_people_say_them() {
         assert_eq!(human_size(1536), "2 KB");
         assert_eq!(human_size(5 * 1024 * 1024), "5.0 MB");
+    }
+
+    /// 清单里 `size == 0` 的条目是「还没上线」，不是「能下载」。
+    #[test]
+    fn a_placeholder_package_is_not_downloadable() {
+        let placeholder = RemotePackage {
+            url: "https://example.test/wav2lip.zip".to_owned(),
+            size: 0,
+            ..RemotePackage::default()
+        };
+        assert!(!placeholder.online(), "size 0 means not launched");
+        let real = RemotePackage {
+            url: "https://example.test/voice-clone.zip".to_owned(),
+            size: 177_134_608,
+            ..RemotePackage::default()
+        };
+        assert!(real.online());
+        assert!(!coming_soon("wav2lip").online());
+        assert!(!coming_soon("not-official").online());
+    }
+
+    /// 兜底表里 Wav2Lip 没上线，Piper 与语音克隆上线了。
+    #[test]
+    fn the_official_table_says_what_is_launched() {
+        assert!(official("piper").unwrap().launched);
+        assert!(!official("wav2lip").unwrap().launched);
+        assert!(official("voice-clone").unwrap().launched);
+        let fallback = package_status(None, "voice-clone");
+        assert!(fallback.online());
+        assert_eq!(fallback.size, 177_134_608);
+        assert!(!package_status(None, "wav2lip").online());
+    }
+
+    /// 404、超时、连不上都翻成人话。
+    #[test]
+    fn a_download_failure_is_said_in_chinese() {
+        let missing = readable_download_error("wav2lip", "下载失败（HTTP 404）");
+        assert!(missing.contains("暂未上线"), "{missing}");
+        assert!(!missing.contains("404"), "{missing}");
+        let timeout = readable_download_error("piper", "服务器的回复收不全（连接被中途关闭）");
+        assert!(timeout.contains("网络超时"), "{timeout}");
+        let offline = readable_download_error("piper", "连不上 xinglaiai.com：拒绝连接");
+        assert!(offline.contains("网络连接失败"), "{offline}");
+        let verify = readable_download_error("piper", "插件包校验失败：期望 a，实际 b");
+        assert!(verify.contains("校验失败"), "{verify}");
     }
 }

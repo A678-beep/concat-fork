@@ -2016,7 +2016,30 @@ impl Studio {
         });
         app.set_ai_photo(self.ai.photo_image());
         sync(&models.ai_voices, self.ai.voice_rows());
-        sync(&models.ai_plugins, self.ai.plugin_rows());
+        sync(&models.ai_plugins, self.ai.model_rows());
+        // 星籁账号：登录状态是 Studio 的一份，登录/退出/过期都在这里落屏。
+        // 首屏右上角的账号 chip 与 AI 面板底部的账号行读这两组属性。
+        let account = self.account.as_ref();
+        app.set_account_signed_in(account.is_some_and(|account| !account.token.trim().is_empty()));
+        app.set_account_name(
+            account
+                .map(|account| account.display_name())
+                .unwrap_or_default()
+                .into(),
+        );
+        app.set_account_plan(
+            account
+                .map(|account| account.plan_label())
+                .unwrap_or_default()
+                .into(),
+        );
+        app.set_account_expire(
+            account
+                .map(|account| account.plan_expire_at.clone())
+                .unwrap_or_default()
+                .into(),
+        );
+        app.set_account_sheet(self.account_sheet);
         app.set_ai_voice_names(ModelRc::from(Rc::new(VecModel::from(
             self.ai
                 .voice_rows()

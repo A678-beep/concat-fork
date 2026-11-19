@@ -1664,23 +1664,29 @@ component BrandLockup inherits HorizontalLayout {
     }
 }
 
-/// 首屏右上角的账号入口：没登录时是一枚「登录」的按钮，登录后是
-/// 名字和套餐。点一下都开那张账号卡。
+/// 首屏右上角的账号入口：没登录时是一枚显式的「登录 / 注册」按钮，登录后是
+/// 头像 + 名字 + 套餐 + 一个下拉箭头（点开是账号菜单）。0.2.12 里它只是一
+/// 行字，用户看不出能点——这一版把「能点」画出来：按钮形状、悬停变色、箭头。
 component AccountChip inherits Rectangle {
     in property <bool> signed-in;
     in property <string> name;
     in property <string> plan;
+    /// 账号菜单开着。
+    in property <bool> open: false;
 
     callback clicked();
 
-    height: 30px;
-    width: row.preferred-width + 24px;
+    height: 34px;
+    width: row.preferred-width + 26px;
     border-radius: self.height / 2;
     border-width: 1px;
-    border-color: touch.has-hover ? #a855f7 : (root.signed-in ? Theme.line : #6366f1);
-    background: Theme.launch-panel;
+    border-color: touch.has-hover || root.open ? #a855f7 : (root.signed-in ? Theme.line : #6366f1);
+    background: root.signed-in
+        ? (touch.has-hover ? Theme.launch-field : Theme.launch-panel)
+        : (touch.has-hover ? #7c3aed55 : Theme.launch-panel);
 
     animate border-color { duration: 120ms; }
+    animate background { duration: 120ms; }
 
     touch := TouchArea {
         mouse-cursor: pointer;
@@ -1692,15 +1698,45 @@ component AccountChip inherits Rectangle {
         y: 0;
         height: parent.height;
         alignment: center;
-        spacing: 6px;
+        spacing: 8px;
 
-        BrandMark { width: 15px; height: 15px; }
+        // 头像：一枚渐变圆的星籁标记。
+        if root.signed-in: Rectangle {
+            width: 22px;
+            height: 22px;
+            border-radius: 11px;
+            background: @linear-gradient(135deg, #22d3ee 0%, #6366f1 52%, #a855f7 100%);
+
+            Text {
+                text: "星";
+                color: #0b1020;
+                font-size: 11px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                width: parent.width;
+                height: parent.height;
+            }
+        }
+
+        if !root.signed-in: BrandMark { width: 16px; height: 16px; }
 
         Text {
-            text: root.signed-in ? root.name + " · " + root.plan : "用星籁 AI 账号登录";
-            color: root.signed-in ? Theme.fg : #a78bfa;
+            text: root.signed-in
+                ? root.name + (root.plan == "" ? "" : " · " + root.plan)
+                : "登录 / 注册";
+            color: root.signed-in ? Theme.fg : #c4b5fd;
             font-size: 12px;
+            font-weight: root.signed-in ? 400 : 600;
             vertical-alignment: center;
+            overflow: elide;
+            max-width: 200px;
+        }
+
+        if root.signed-in: Icon {
+            glyph: Glyph.chevron-down;
+            size: 11px;
+            tint: touch.has-hover ? #c4b5fd : Theme.fg-dim;
         }
     }
 }
@@ -1785,21 +1821,32 @@ component BrandButton inherits Rectangle {
 }
 
 /// 账号卡：没登录时是手机号加密码，登录后是人名、套餐和退出登录。
-component AccountDialog inherits Modal {
+/// `switch-mode` 是「切换账号」：登录着也把输入框摆出来，登录成功后换成新账号。
+export component AccountDialog inherits Modal {
     in property <bool> signed-in;
     in property <string> name;
     in property <string> plan;
     in property <string> expire;
     in property <string> error;
     in property <bool> busy;
+    /// 从「切换账号」打开：即使登录着也显示登录表单（由外面决定）。
+    in property <bool> switch-mode;
 
     in-out property <string> phone;
     in-out property <string> password;
 
     callback submit(phone: string, password: string);
     callback leave();
+    /// 点了「切换账号」。
+    callback switch-mode-requested();
+    /// 点了「取消切换」。
+    callback switch-cancelled();
 
-    title: root.signed-in ? "星籁 AI 账号" : "登录星籁 AI 账号";
+    /// 要显示登录表单：没登录，或者正在切换账号。
+    property <bool> shows-login: !root.signed-in || root.switch-mode;
+
+    title: root.signed-in && !root.switch-mode ? "星籁 AI 账号"
+        : root.switch-mode ? "切换星籁 AI 账号" : "登录星籁 AI 账号";
     glyph: Glyph.circle-play;
     surface-width: 420px;
     dismissable: !root.busy;
@@ -1826,18 +1873,32 @@ component AccountDialog inherits Modal {
             wrap: word-wrap;
         }
 
-        if root.signed-in: Text {
+        if root.signed-in && !root.switch-mode: Text {
             text: "登录状态用 Windows DPAPI 加密保存在本机，重启后仍在。";
             color: Theme.fg-dim;
             font-size: Theme.fs;
             wrap: word-wrap;
         }
 
-        if root.signed-in: HorizontalLayout {
+        if root.signed-in && root.switch-mode: Text {
+            text: "输入另一个星籁账号即可切换；当前账号的登录信息会被换掉。";
+            color: Theme.fg-dim;
+            font-size: Theme.fs;
+            wrap: word-wrap;
+        }
+
+        if root.signed-in && !root.switch-mode: HorizontalLayout {
             spacing: 10px;
             alignment: start;
+            BrandButton { label: "切换账号"; clicked => { root.switch-mode-requested(); } }
             BrandButton { label: "退出登录"; clicked => { root.leave(); } }
             BrandButton { label: "关闭"; quiet: true; clicked => { root.closed(); } }
+        }
+
+        if root.signed-in && root.switch-mode: HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+            BrandButton { label: "取消切换"; quiet: true; clicked => { root.switch-cancelled(); } }
         }
 
         if !root.signed-in: Text {
@@ -1847,27 +1908,27 @@ component AccountDialog inherits Modal {
             wrap: word-wrap;
         }
 
-        if !root.signed-in: LoginField {
+        if root.shows-login: LoginField {
             placeholder: "手机号";
             text: root.phone;
             edited(value) => { root.phone = value; }
         }
 
-        if !root.signed-in: LoginField {
+        if root.shows-login: LoginField {
             placeholder: "密码";
             secret: true;
             text: root.password;
             edited(value) => { root.password = value; }
         }
 
-        if !root.signed-in && root.error != "": Text {
+        if root.shows-login && root.error != "": Text {
             text: root.error;
             color: #f87171;
             font-size: Theme.fs-lg;
             wrap: word-wrap;
         }
 
-        if !root.signed-in: HorizontalLayout {
+        if root.shows-login: HorizontalLayout {
             spacing: 10px;
             alignment: start;
             BrandButton {
@@ -1878,11 +1939,96 @@ component AccountDialog inherits Modal {
             BrandButton { label: "取消"; quiet: true; clicked => { root.closed(); } }
         }
 
-        if !root.signed-in: Text {
+        if root.shows-login: Text {
             text: "账号是 xinglaiai.com 上的账号；密码不保存，令牌加密后存在本机。";
             color: Theme.fg-dim;
             font-size: Theme.fs;
             wrap: word-wrap;
+        }
+    }
+}
+
+/// 账号菜单的一行。
+component AccountMenuRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> danger: false;
+
+    callback clicked();
+
+    height: 34px;
+    border-radius: Theme.r-sm;
+    background: touch.has-hover ? Theme.launch-field : Colors.transparent;
+
+    Text {
+        x: 10px;
+        y: (parent.height - self.height) / 2;
+        text: root.label;
+        color: root.danger ? #f87171 : Theme.fg;
+        font-size: Theme.fs-lg;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// 登录后点账号 chip 弹出来的小菜单：账号信息 / 切换账号 / 退出登录。
+component AccountMenu inherits Rectangle {
+    in property <string> name;
+    in property <string> plan;
+
+    callback info();
+    callback switch-account();
+    callback sign-out();
+
+    width: 240px;
+    height: menu.preferred-height + 20px;
+    border-radius: Theme.r;
+    background: Theme.launch-panel;
+    border-width: 1px;
+    border-color: Theme.line-strong;
+    drop-shadow-blur: 18px;
+    drop-shadow-offset-y: 6px;
+    drop-shadow-color: #00000055;
+
+    menu := VerticalLayout {
+        padding: 8px;
+        spacing: 2px;
+
+        Rectangle {
+            height: 30px;
+
+            Text {
+                x: 10px;
+                y: (parent.height - self.height) / 2;
+                text: root.name + (root.plan == "" ? "" : " · " + root.plan);
+                color: Theme.fg;
+                font-size: Theme.fs;
+                font-weight: 600;
+                overflow: elide;
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.line;
+        }
+
+        AccountMenuRow {
+            label: "账号信息";
+            clicked => { root.info(); }
+        }
+
+        AccountMenuRow {
+            label: "切换账号";
+            clicked => { root.switch-account(); }
+        }
+
+        AccountMenuRow {
+            label: "退出登录";
+            danger: true;
+            clicked => { root.sign-out(); }
         }
     }
 }
@@ -1901,6 +2047,8 @@ component WideHome inherits Rectangle {
     in property <bool> signed-in;
     in property <string> account-name;
     in property <string> account-plan;
+    /// 账号菜单开着。
+    in property <bool> account-menu-open;
 
     callback compose();
     callback open();
@@ -1911,7 +2059,7 @@ component WideHome inherits Rectangle {
     callback search-edited(query: string);
     callback sort-changed(sort: int);
     callback link(name: string);
-    /// 点右上角的账号入口：把那张账号卡开起来。
+    /// 点右上角的账号入口：没登录开登录卡，登录了就开/关账号菜单。
     callback account-clicked();
 
     /// The margin the page keeps from the window's edges.
@@ -1964,6 +2112,7 @@ component WideHome inherits Rectangle {
                             signed-in: root.signed-in;
                             name: root.account-name;
                             plan: root.account-plan;
+                            open: root.account-menu-open;
                             clicked => { root.account-clicked(); }
                         }
                     }
@@ -2199,6 +2348,8 @@ component NarrowHome inherits Rectangle {
     in property <bool> signed-in;
     in property <string> account-name;
     in property <string> account-plan;
+    /// 账号菜单开着。
+    in property <bool> account-menu-open;
 
     callback account-clicked();
     callback compose();
@@ -2237,10 +2388,11 @@ component NarrowHome inherits Rectangle {
                 VerticalLayout {
                     alignment: center;
                     AccountChip {
-                        height: 26px;
+                        height: 30px;
                         signed-in: root.signed-in;
                         name: root.account-name;
                         plan: root.account-plan;
+                        open: root.account-menu-open;
                         clicked => { root.account-clicked(); }
                     }
                 }
@@ -2457,9 +2609,35 @@ export component StartScreen inherits Rectangle {
     property <bool> narrow: root.phone || root.width < 680px;
     /// 账号卡开着没有。
     property <bool> panel;
+    /// 账号菜单（登录后点 chip 弹出）开着没有。
+    property <bool> menu;
+    /// 账号卡是「切换账号」打开的：登录着也显示登录表单。
+    property <bool> switch-mode;
+
+    /// 换了账号（名字变了）就把账号卡收起来；登录成功也一样。
+    changed account-name => {
+        if (root.panel && root.signed-in) {
+            root.panel = false;
+            root.switch-mode = false;
+        }
+        root.menu = false;
+    }
+    changed signed-in => {
+        if (root.signed-in) {
+            root.panel = false;
+            root.switch-mode = false;
+        }
+        root.menu = false;
+    }
 
     background: Theme.launch-page;
     clip: true;
+
+    /// 页面边距，和 WideHome 的 pad 同一套算法：账号菜单要靠它对齐到 chip 下面。
+    property <length> menu-pad: Math.max(24px, Math.min(64px, root.width / 18));
+    property <length> menu-top: Math.max(28px, Math.min(72px, root.height / 12));
+    property <length> menu-x: (root.width - Math.min(root.width - 2 * root.menu-pad, 1360px)) / 2
+        + Math.min(root.width - 2 * root.menu-pad, 1360px) - 240px;
 
     if !root.narrow: WideHome {
         width: root.width;
@@ -2475,7 +2653,10 @@ export component StartScreen inherits Rectangle {
         signed-in: root.signed-in;
         account-name: root.account-name;
         account-plan: root.account-plan;
-        account-clicked => { root.panel = true; }
+        account-menu-open: root.menu;
+        account-clicked => {
+            if (root.signed-in) { root.menu = !root.menu; } else { root.panel = true; root.switch-mode = false; }
+        }
         compose => { root.compose(); }
         open => { root.open(); }
         import-capcut => { root.import-capcut(); }
@@ -2500,7 +2681,10 @@ export component StartScreen inherits Rectangle {
         signed-in: root.signed-in;
         account-name: root.account-name;
         account-plan: root.account-plan;
-        account-clicked => { root.panel = true; }
+        account-menu-open: root.menu;
+        account-clicked => {
+            if (root.signed-in) { root.menu = !root.menu; } else { root.panel = true; root.switch-mode = false; }
+        }
         compose => { root.compose(); }
         open => { root.open(); }
         import-capcut => { root.import-capcut(); }
@@ -2509,6 +2693,31 @@ export component StartScreen inherits Rectangle {
         forget-recent(path) => { root.forget-recent(path); }
         search-edited(query) => { root.search-edited(query); }
         link(name) => { root.link(name); }
+    }
+
+    // 账号菜单：点别处先关它，再轮到别的东西。
+    if root.menu: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: Colors.transparent;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            clicked => { root.menu = false; }
+        }
+
+        AccountMenu {
+            x: root.narrow ? root.width - self.width - 16px : root.menu-x;
+            y: root.narrow ? 60px : root.menu-top + 42px;
+            name: root.account-name;
+            plan: root.account-plan;
+            info => { root.menu = false; root.panel = true; root.switch-mode = false; }
+            switch-account => { root.menu = false; root.panel = true; root.switch-mode = true; }
+            sign-out => { root.menu = false; root.sign-out(); }
+        }
     }
 
     // 账号卡：一张盖在首屏上的 sheet。它画在首页之上、窗口之内，
@@ -2525,9 +2734,12 @@ export component StartScreen inherits Rectangle {
         expire: root.account-expire;
         error: root.account-error;
         busy: root.account-busy;
+        switch-mode: root.switch-mode;
         submit(phone, password) => { root.sign-in(phone, password); }
-        leave => { root.sign-out(); root.panel = false; }
-        closed => { root.panel = false; }
+        leave => { root.sign-out(); root.panel = false; root.switch-mode = false; }
+        closed => { root.panel = false; root.switch-mode = false; }
+        switch-mode-requested => { root.switch-mode = true; }
+        switch-cancelled => { root.switch-mode = false; }
     }
 }
 

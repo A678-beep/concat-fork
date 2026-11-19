@@ -20,6 +20,8 @@
 //! and cancels through flags, and the caller decides which thread it runs on.
 
 pub mod account;
+/// 本地 AI 模型目录：效果、大小、显存内存要求、本机适不适合。
+pub mod ai_models;
 pub mod awake;
 pub mod brush;
 pub mod capcut;
@@ -67,6 +69,8 @@ pub mod templates;
 pub mod titles;
 pub mod updates;
 pub mod voices;
+/// 本地语音克隆引擎：ZipVoice 插件的一次生成。
+pub mod zipvoice;
 
 pub use brush::{Brushes, RegionRequest};
 pub use cutout::{AnalyseRequest, Cutouts};

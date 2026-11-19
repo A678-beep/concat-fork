@@ -25,23 +25,45 @@ export struct AiVoiceItem {
     cloned: bool,
 }
 
-/// 插件页的一行。
+/// 模型中心的一行。
 export struct AiPluginItem {
     id: string,
     name: string,
-    kind: string,
-    version: string,
+    /// 分类：本地配音 / 语音克隆 / 数字人 / 抠像 / 背景生成。
+    category: string,
+    /// 一句话说明。
+    summary: string,
+    /// 效果星级，`★★★★☆`。
+    effect: string,
+    /// 安装包大小。
     size: string,
-    state: string,
+    /// 硬件要求：显存/内存。
+    requirement: string,
+    /// 本机预计耗时。
+    speed: string,
+    /// 本机适配结论。
+    fit: string,
+    /// 本机跑得动。
+    fit-ok: bool,
+    /// 已安装 / 可下载 / 即将上线 / 云端 · 需登录。
+    status: string,
+    /// 限制或补充说明。
+    note: string,
+    /// 装在哪。
     path: string,
+    installed: bool,
+    downloadable: bool,
     complete: bool,
     voices: int,
+    version: string,
+    /// 云端能力（没有本地包）。
+    cloud: bool,
 }
 
 /// AI 面板的状态。所有字段由 Rust 写好；面板只读。
 export struct AiData {
     open: bool,
-    /// 0 配音、1 数字人、2 插件。
+    /// 0 配音、1 数字人、2 模型中心。
     tab: int,
     /// 运行方式设置：0 智能、1 仅本地、2 仅云端。
     mode: int,
@@ -65,6 +87,10 @@ export struct AiData {
     signed-in: bool,
     /// 登录着的账号名。
     account: string,
+    /// 登录着的套餐名。
+    account-plan: string,
+    /// 账号状态一行：`验收商家A改 · 基础版（云端可用）` / `未登录（云端需登录）`。
+    account-line: string,
     /// 云端计费说明。
     cloud-cost: string,
     /// 配音文字。
@@ -520,10 +546,11 @@ component DigitalPage inherits VerticalLayout {
     }
 }
 
-// 插件页。
-component PluginPage inherits VerticalLayout {
+// 模型中心：能装在本机的 AI 模型一张清单，谁想用就下哪个；没上线的灰着写
+// 「即将上线」，点了也不发请求。云端能力（AI 背景生成）单列一行，需登录。
+component ModelPage inherits VerticalLayout {
     in property <AiData> data;
-    in property <[AiPluginItem]> plugins;
+    in property <[AiPluginItem]> models;
 
     callback import-zip();
     callback download(string);
@@ -536,82 +563,155 @@ component PluginPage inherits VerticalLayout {
     DialogSection {
         first: true;
         ruled: false;
-        title: "本机 AI 插件";
-        hint: "插件是装在本机的离线引擎包：拷进去即装好，删掉即卸掉。";
+        title: "本地模型中心";
+        hint: "本地模型文件大也不要紧：谁想用就下哪个，不想用就走云端（默认关闭、需登录、按次确认）。";
 
-        if root.plugins.length == 0: Rectangle {
-            height: 64px;
-            border-radius: Theme.r;
-            background: Theme.well;
+        HorizontalLayout {
+            spacing: 8px;
 
-            VerticalLayout {
-                alignment: center;
-                spacing: 4px;
-                Text {
-                    text: "还没有装任何本地 AI 插件";
-                    color: Theme.fg;
-                    font-size: Theme.fs;
-                    horizontal-alignment: center;
-                }
-                Text {
-                    text: "导入 Piper 插件包（zip，约 100MB）即可离线配音；Wav2Lip 是二期的数字人插件。";
-                    color: Theme.fg-dim;
-                    font-size: Theme.fs-sm;
-                    horizontal-alignment: center;
-                }
+            Text {
+                text: "共 " + root.models.length + " 项 · 效果按同类别比较";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Text {
+                text: "「即将上线」的条目点了不会发请求";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
             }
         }
 
-        for plugin[index] in root.plugins: Rectangle {
-            height: 56px;
+        for model[index] in root.models: Rectangle {
+            height: 116px;
             border-radius: Theme.r;
             background: Math.mod(index, 2) == 0 ? Theme.field : Theme.well;
 
             HorizontalLayout {
-                padding-left: 10px;
-                padding-right: 8px;
-                spacing: 8px;
+                padding-left: 12px;
+                padding-right: 10px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 10px;
 
                 VerticalLayout {
-                    alignment: center;
-                    spacing: 2px;
+                    horizontal-stretch: 1;
+                    spacing: 3px;
+                    alignment: start;
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            text: model.name;
+                            color: Theme.fg;
+                            font-size: Theme.fs;
+                            font-weight: 600;
+                        }
+
+                        Text {
+                            text: model.category;
+                            color: Theme.accent;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                        }
+
+                        Text {
+                            text: model.effect;
+                            color: #fbbf24;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle { horizontal-stretch: 1; }
+
+                        Text {
+                            text: model.status;
+                            color: model.installed ? Theme.fg-muted
+                                : model.downloadable ? Theme.accent : Theme.fg-dim;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                        }
+                    }
+
                     Text {
-                        text: plugin.name + "  v" + plugin.version;
-                        color: Theme.fg;
-                        font-size: Theme.fs;
+                        text: model.summary;
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
                         overflow: elide;
                     }
+
                     Text {
-                        text: plugin.kind + " · " + plugin.size + " · " + plugin.state;
+                        text: "大小 " + model.size + " · " + model.requirement;
                         color: Theme.fg-dim;
                         font-size: Theme.fs-sm;
                         overflow: elide;
                     }
+
+                    Text {
+                        text: "预计耗时 " + model.speed;
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-sm;
+                        overflow: elide;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            text: model.fit;
+                            color: model.fit-ok ? Theme.fg-muted : #f87171;
+                            font-size: Theme.fs-sm;
+                        }
+
+                        Text {
+                            horizontal-stretch: 1;
+                            text: model.note;
+                            color: Theme.fg-dim;
+                            font-size: Theme.fs-sm;
+                            overflow: elide;
+                        }
+                    }
                 }
 
-                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout {
+                    width: 130px;
+                    alignment: center;
+                    spacing: 6px;
 
-                Text {
-                    width: 220px;
-                    text: plugin.path;
-                    color: Theme.fg-dim;
-                    font-family: Theme.font-technical;
-                    font-size: Theme.fs-sm;
-                    overflow: elide;
-                    vertical-alignment: center;
-                }
+                    if model.installed: Button {
+                        label: "打开目录";
+                        ghost: true;
+                        clicked => { root.open(model.id); }
+                    }
 
-                Button {
-                    label: "打开目录";
-                    ghost: true;
-                    clicked => { root.open(plugin.id); }
-                }
+                    if model.installed: Button {
+                        label: "删除";
+                        danger: true;
+                        ghost: true;
+                        clicked => { root.remove(model.id); }
+                    }
 
-                Button {
-                    label: "删除";
-                    danger: true;
-                    ghost: true;
-                    clicked => { root.remove(plugin.id); }
+                    if !model.installed && model.cloud: Button {
+                        label: "云端 · 需登录";
+                        enabled: false;
+                    }
+
+                    if !model.installed && !model.cloud && model.downloadable: Button {
+                        label: "下载并安装";
+                        primary: true;
+                        enabled: !root.data.busy;
+                        clicked => { root.download(model.id); }
+                    }
+
+                    if !model.installed && !model.cloud && !model.downloadable: Button {
+                        label: "即将上线";
+                        enabled: false;
+                    }
                 }
             }
         }
@@ -627,33 +727,24 @@ component PluginPage inherits VerticalLayout {
             }
 
             Button {
-                label: "下载 Piper（约 110MB）";
-                enabled: !root.data.busy;
-                clicked => { root.download("piper"); }
-            }
-
-            Button {
-                label: "下载数字人插件（二期）";
-                enabled: !root.data.busy;
-                clicked => { root.download("wav2lip"); }
-            }
-
-            Button {
                 label: "刷新";
                 ghost: true;
                 enabled: !root.data.busy;
                 clicked => { root.refresh(); }
             }
-        }
 
-        Text {
-            text: "安装位置：" + (root.data.local-path != ""
-                ? root.data.local-path
-                : "%APPDATA%\\app.concat.editor\\ai-plugins\\<插件名>\\");
-            color: Theme.fg-dim;
-            font-family: Theme.font-technical;
-            font-size: Theme.fs-sm;
-            overflow: elide;
+            Rectangle { horizontal-stretch: 1; }
+
+            Text {
+                text: "安装位置：" + (root.data.local-path != ""
+                    ? root.data.local-path
+                    : "%APPDATA%\\app.concat.editor\\ai-plugins\\<插件名>\\");
+                color: Theme.fg-dim;
+                font-family: Theme.font-technical;
+                font-size: Theme.fs-sm;
+                overflow: elide;
+                vertical-alignment: center;
+            }
         }
     }
 }
@@ -782,6 +873,8 @@ export component AiDialog inherits Modal {
     callback photo-clear();
     callback confirm-yes();
     callback confirm-no();
+    /// 打开星籁账号登录（未登录时的「去登录」）。
+    callback login();
 
     open: root.data.open;
     title: "星籁 AI · 本地优先";
@@ -838,7 +931,7 @@ export component AiDialog inherits Modal {
         SegmentedControl {
             height: 30px;
             tabs: true;
-            options: ["配音", "数字人", "插件"];
+            options: ["配音", "数字人", "模型"];
             current: root.data.tab;
             changed(index) => { root.tab-changed(index); }
         }
@@ -864,9 +957,9 @@ export component AiDialog inherits Modal {
             cancel => { root.cancel(); }
         }
 
-        if root.data.tab == 2: PluginPage {
+        if root.data.tab == 2: ModelPage {
             data: root.data;
-            plugins: root.plugins;
+            models: root.plugins;
             import-zip => { root.plugin-import(); }
             download(id) => { root.plugin-download(id); }
             open(id) => { root.plugin-open(id); }
@@ -934,6 +1027,50 @@ export component AiDialog inherits Modal {
             color: Theme.fg-muted;
             font-size: Theme.fs-sm;
             wrap: word-wrap;
+        }
+
+        // 账号状态：已登录显示名字与套餐（云端可用），未登录给「去登录」。
+        // 和首屏右上角的账号 chip 是同一份状态，登录成功后这里自动变。
+        Rectangle {
+            height: 36px;
+            border-radius: Theme.r-sm;
+            background: Theme.field;
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 8px;
+                spacing: 8px;
+
+                VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        glyph: Glyph.circle-play;
+                        size: 14px;
+                        tint: root.data.signed-in ? Theme.accent : Theme.fg-dim;
+                    }
+                }
+
+                Text {
+                    text: root.data.account-line;
+                    color: root.data.signed-in ? Theme.fg : Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                if !root.data.signed-in: Button {
+                    label: "去登录";
+                    primary: true;
+                    clicked => { root.login(); }
+                }
+
+                if root.data.signed-in: Button {
+                    label: "刷新账号";
+                    ghost: true;
+                    clicked => { root.login(); }
+                }
+            }
         }
 
         HorizontalLayout {

@@ -923,8 +923,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     }));
 
     // ── 星籁 AI 账号 ──
-    // 登录要连网，交给一条线程；回来的路上经事件循环把属性写好，
-    // 窗口不卡。见 concat_host::account。
+    // 登录要连网，交给一条线程；回来的路上经事件循环把账号落进 Studio，
+    // 再走一次 publish——首屏右上角的账号 chip、AI 面板底部的账号状态、
+    // 云端能力一起刷新。见 concat_host::account。
     {
         let weak = app.as_weak();
         app.on_account_sign_in(move |phone: SharedString, password: SharedString| {
@@ -942,33 +943,58 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                         return;
                     };
                     app.set_account_busy(false);
-                    match result {
-                        Ok(account) => {
-                            app.set_account_signed_in(true);
-                            app.set_account_name(account.display_name().into());
-                            app.set_account_plan(account.plan_label().into());
-                            app.set_account_expire(account.plan_expire_at.into());
-                            app.set_account_error(SharedString::default());
+                    Shell::with(|shell, app| {
+                        let mut studio = shell.studio.borrow_mut();
+                        match result {
+                            Ok(account) => {
+                                studio.account = Some(account);
+                                studio.account_sheet = false;
+                                // 登录成功：AI 面板的账号状态与云端音色一起刷新。
+                                let dirs = studio.host.dirs.clone();
+                                studio.ai.refresh(&dirs);
+                            }
+                            Err(message) => {
+                                app.set_account_error(message.into());
+                            }
                         }
-                        Err(message) => app.set_account_error(message.into()),
-                    }
+                        studio.publish(&app, &shell.models);
+                    });
                 });
             });
         });
     }
     {
-        let weak = app.as_weak();
         app.on_account_sign_out(move || {
             concat_host::account::sign_out();
-            if let Some(app) = weak.upgrade() {
-                app.set_account_signed_in(false);
-                app.set_account_name(SharedString::default());
-                app.set_account_plan(SharedString::default());
-                app.set_account_expire(SharedString::default());
+            Shell::with(|shell, app| {
+                let mut studio = shell.studio.borrow_mut();
+                studio.account = None;
+                studio.account_sheet = false;
+                let dirs = studio.host.dirs.clone();
+                studio.ai.refresh(&dirs);
+                drop(studio);
                 app.set_account_error(SharedString::default());
-            }
+                let studio = shell.studio.borrow();
+                studio.publish(&app, &shell.models);
+            });
         });
     }
+    // 登录卡关掉（用户点了取消或 ×）。
+    app.on_account_sheet_closed(move || {
+        Shell::with(|shell, app| {
+            shell.studio.borrow_mut().account_sheet = false;
+            let studio = shell.studio.borrow();
+            studio.publish(&app, &shell.models);
+        });
+    });
+    // AI 面板里的「去登录」：直接在编辑窗口上开登录卡。
+    app.on_ai_login(move || {
+        Shell::with(|shell, app| {
+            shell.studio.borrow_mut().request_login("星籁账号登录");
+            let studio = shell.studio.borrow();
+            studio.publish(&app, &shell.models);
+        });
+    });
 
     // ── 工程云同步 ──
     // 面板的三颗按钮与列表的一行。真正的网络在 concat_host::cloud，

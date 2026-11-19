@@ -1248,6 +1248,12 @@ pub struct Studio {
     pub voiceover: crate::panes::voiceover::VoiceoverPane,
     /// 星籁 AI：算力选择、本地插件、配音/数字人面板。
     pub ai: crate::panes::ai::AiPane,
+    /// 星籁 AI 账号：本机登录着的那一份，登录/退出/过期都更新它，发布时
+    /// 落到首屏右上角与 AI 面板底部。见 concat_host::account。
+    pub account: Option<concat_host::account::Account>,
+    /// 账号登录弹窗开着没有：AI 面板的「去登录」和云端未登录时的引导都
+    /// 把它打开，登录成功后自动关掉。
+    pub account_sheet: bool,
     /// Every speaker the voice engine offers, in its own order.
     /// The looks the Text page offers; see `presets`.
     pub text_presets: Vec<TextPreset>,
@@ -3180,6 +3186,8 @@ impl Studio {
             meters: crate::meters::MeterFeed::default(),
             voiceover: crate::panes::voiceover::VoiceoverPane::default(),
             ai,
+            account: concat_host::account::load(),
+            account_sheet: false,
             text_presets,
             installed_fonts: presets::installed_fonts(&host.dirs),
             system_fonts: Vec::new(),
