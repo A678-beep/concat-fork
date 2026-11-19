@@ -806,6 +806,9 @@ pub struct Models {
     pub speech_samples: Rc<VecModel<SharedString>>,
     /// The microphones the voiceover panel lists.
     pub voiceover_devices: Rc<VecModel<SharedString>>,
+    /// AI 面板的音色下拉与插件列表。
+    pub ai_voices: Rc<VecModel<crate::ui::AiVoiceItem>>,
+    pub ai_plugins: Rc<VecModel<crate::ui::AiPluginItem>>,
     pub speech_sample_waves: Rc<VecModel<SharedString>>,
     pub speech_sample_details: Rc<VecModel<SharedString>>,
     /// The Audio page's shelves.
@@ -891,6 +894,8 @@ impl Models {
             speaker_avatars: Rc::new(VecModel::default()),
             speech_samples: Rc::new(VecModel::default()),
             voiceover_devices: Rc::new(VecModel::default()),
+            ai_voices: Rc::new(VecModel::default()),
+            ai_plugins: Rc::new(VecModel::default()),
             speech_sample_waves: Rc::new(VecModel::default()),
             speech_sample_details: Rc::new(VecModel::default()),
             sounds_mine: Rc::new(VecModel::default()),
@@ -1241,6 +1246,8 @@ pub struct Studio {
     pub meters: crate::meters::MeterFeed,
     /// The voiceover take, while one runs.
     pub voiceover: crate::panes::voiceover::VoiceoverPane,
+    /// 星籁 AI：算力选择、本地插件、配音/数字人面板。
+    pub ai: crate::panes::ai::AiPane,
     /// Every speaker the voice engine offers, in its own order.
     /// The looks the Text page offers; see `presets`.
     pub text_presets: Vec<TextPreset>,
@@ -3048,6 +3055,9 @@ impl Studio {
     /// read off disk.
     pub fn new(host: Host) -> Self {
         let prefs = Preferences::load(&host.dirs);
+        // 星籁 AI 的面板：本机插件、算力检测与首次向导。插件目录只扫一遍，
+        // 后面每次开面板或导入后再扫。
+        let ai = crate::panes::ai::AiPane::new(&host.dirs, &prefs);
         // The panels where the last session left them, while Settings says
         // to; a saved dock this build cannot read is the default instead.
         let saved = prefs.layout.as_ref().filter(|_| prefs.remembers_layout());
@@ -3169,6 +3179,7 @@ impl Studio {
             source: None,
             meters: crate::meters::MeterFeed::default(),
             voiceover: crate::panes::voiceover::VoiceoverPane::default(),
+            ai,
             text_presets,
             installed_fonts: presets::installed_fonts(&host.dirs),
             system_fonts: Vec::new(),

@@ -25,14 +25,20 @@ pub mod brush;
 pub mod capcut;
 pub mod cards;
 pub mod cloud;
+/// 云端 AI（默认关闭）：配音与照片数字人，需要登录与额度。
+pub mod cloud_ai;
 pub mod consolidate;
 #[cfg(test)]
 mod consolidate_tests;
 pub mod crash;
 pub mod cutout;
+/// 平台自己的 HTTPS 直连下载（OpenSSL，不走系统代理）。
+pub mod direct;
 pub mod dirs;
 pub mod enhance;
 pub mod export;
+/// 本机算力检测：显卡、显存、内存、磁盘与推荐的运行档位。
+pub mod hardware;
 pub mod jobs;
 pub mod lock;
 pub mod logs;
@@ -41,7 +47,11 @@ pub mod media;
 pub mod memory;
 pub mod models;
 pub mod net;
+/// 本地配音引擎：Piper 插件的一次生成。
+pub mod piper;
 pub mod playback;
+/// 本地 AI 插件：安装、导入、删除、扫描。
+pub mod plugins;
 pub mod preview;
 #[cfg(test)]
 mod project_save_tests;

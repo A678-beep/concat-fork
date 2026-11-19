@@ -51,6 +51,7 @@ import {
 } from "dialogs/relink.slint";
 import { ConfirmData, ConfirmDialog } from "dialogs/confirm.slint";
 import { CloudData, CloudDialog, CloudItem } from "dialogs/cloud.slint";
+import { AiData, AiDialog, AiPluginItem, AiVoiceItem, AiWizard } from "dialogs/ai.slint";
 import { CaptionsDialog, CaptionsSheetData } from "dialogs/captions.slint";
 import { SpeechDialog, SpeechSheetData } from "dialogs/speech.slint";
 import { NewVoiceData, NewVoiceDialog } from "dialogs/new-voice.slint";
@@ -190,6 +191,9 @@ export {
     NewVoiceData,
     CloudData,
     CloudItem,
+    AiData,
+    AiPluginItem,
+    AiVoiceItem,
 }
 export component App inherits Window {
     title: "星籁剪辑 XingLai Cut";
@@ -243,7 +247,8 @@ export component App inherits Window {
     }
     property <bool> sheet-open: root.export.open || root.settings.open
         || root.project-sheet.open || root.captions.open || root.speech.open
-        || root.start.composing || root.new-voice.open;
+        || root.start.composing || root.new-voice.open
+        || root.ai.open || root.ai.wizard-open;
     changed sheet-open => {
         if (!root.sheet-open) {
             keys.focus();
@@ -331,6 +336,36 @@ export component App inherits Window {
     callback cloud-save();
     callback cloud-open-pid(pid: string, name: string);
     callback cloud-open-url();
+
+    // 星籁 AI：本地优先的算力选择、本地配音（Piper 插件）、照片数字人、
+    // 插件管理，以及默认关闭的云端兜底。状态与两列由 Rust 写好；这里只转发。
+    in property <AiData> ai;
+    in property <[AiVoiceItem]> ai-voices;
+    in property <[string]> ai-voice-names;
+    in property <[AiPluginItem]> ai-plugins;
+    in property <image> ai-photo;
+    callback ai-closed();
+    callback ai-tab-changed(tab: int);
+    callback ai-text-edited(text: string);
+    callback ai-voice-changed(index: int);
+    callback ai-rate-changed(value: float);
+    callback ai-generate();
+    callback ai-preview();
+    callback ai-cancel();
+    callback ai-mode-changed(index: int);
+    callback ai-redetect();
+    callback ai-wizard-local();
+    callback ai-wizard-cloud();
+    callback ai-wizard-close();
+    callback ai-plugin-import();
+    callback ai-plugin-download(id: string);
+    callback ai-plugin-open(id: string);
+    callback ai-plugin-remove(id: string);
+    callback ai-plugin-refresh();
+    callback ai-photo-pick();
+    callback ai-photo-clear();
+    callback ai-confirm-yes();
+    callback ai-confirm-no();
     in property <bool> macos;
     /// The window is a phone's: one screen, held upright, driven by a
     /// finger. The editor is then the phone shell (ui/phone/) - no title
@@ -352,7 +387,7 @@ export component App inherits Window {
     /// then, and nothing that acts on what the sheet covers.
     property <bool> sheet-up: root.start.composing || root.export.open || root.settings.open
         || root.project-sheet.open || root.new-voice.open || root.relink.open
-        || root.confirm.open;
+        || root.confirm.open || root.ai.open || root.ai.wizard-open;
     /// Which floating tool card is in front: "captions" or "speech". The
     /// one opened or grabbed last; Escape closes it first.
     property <string> front-tool: "captions";
@@ -432,6 +467,8 @@ export component App inherits Window {
     callback settings-proxies-changed(on: bool);
     callback settings-remember-layout-changed(on: bool);
     callback settings-gpu-changed(on: bool);
+    callback settings-ai-mode-changed(index: int);
+    callback settings-ai-redetect();
     callback settings-magnetic-changed(on: bool);
     callback settings-download-source-changed(index: int);
     callback settings-download-base-edited(text: string);
@@ -611,7 +648,7 @@ export component App inherits Window {
     // `keys`), so what a row says is what works on the machine it is on.
     //
     // What still lives in bindings here is the window's own: the menu
-    // bar's F10 and Alt+F/E/V, and opening, closing and quitting. A
+    // bar's F10 and Alt+F/E/V/A, and opening, closing and quitting. A
     // binding on this scope is matched before `key-pressed` below runs,
     // so these hold their keys whatever the keymap says — which is why
     // Settings › Shortcuts turns those chords away rather than letting a
@@ -649,6 +686,12 @@ export component App inherits Window {
             keys: @keys(Alt + V);
             enabled: !root.on-start && !root.macos && !root.phone;
             activated => { root.open-menu-from-keys(2); }
+        }
+
+        KeyBinding {
+            keys: @keys(Alt + A);
+            enabled: !root.on-start && !root.macos && !root.phone;
+            activated => { root.open-menu-from-keys(3); }
         }
         // Open and leaving work from the launch screen too: it opens
         // projects, and it is a window.
@@ -1088,6 +1131,8 @@ export component App inherits Window {
         proxies-changed(on) => { root.settings-proxies-changed(on); }
         remember-layout-changed(on) => { root.settings-remember-layout-changed(on); }
         gpu-changed(on) => { root.settings-gpu-changed(on); }
+        ai-mode-changed(index) => { root.settings-ai-mode-changed(index); }
+        ai-redetect => { root.settings-ai-redetect(); }
         magnetic-changed(on) => { root.settings-magnetic-changed(on); }
         download-source-changed(index) => { root.settings-download-source-changed(index); }
         download-base-edited(text) => { root.settings-download-base-edited(text); }
@@ -1223,6 +1268,61 @@ export component App inherits Window {
         dismiss => { root.cloud-closed(); }
     }
 
+    // 星籁 AI 面板：本地优先，云端兜底。浮在编辑器和已有面板之上；向导
+    // 声明在它后面，第一次用 AI 时向导是更该看到的那张。
+    AiDialog {
+        inset-top: root.safe-area-insets.top;
+        inset-bottom: root.safe-area-insets.bottom;
+        inset-left: root.safe-area-insets.left;
+        inset-right: root.safe-area-insets.right;
+        x: 0;
+        y: root.sheets-top;
+        width: root.width;
+        height: root.height - root.sheets-top;
+        data: root.ai;
+        voices: root.ai-voices;
+        voice-names: root.ai-voice-names;
+        plugins: root.ai-plugins;
+        photo: root.ai-photo;
+
+        closed => { root.ai-closed(); }
+        tab-changed(tab) => { root.ai-tab-changed(tab); }
+        text-edited(text) => { root.ai-text-edited(text); }
+        voice-changed(index) => { root.ai-voice-changed(index); }
+        rate-changed(value) => { root.ai-rate-changed(value); }
+        generate => { root.ai-generate(); }
+        preview => { root.ai-preview(); }
+        cancel => { root.ai-cancel(); }
+        mode-changed(index) => { root.ai-mode-changed(index); }
+        redetect => { root.ai-redetect(); }
+        plugin-import => { root.ai-plugin-import(); }
+        plugin-download(id) => { root.ai-plugin-download(id); }
+        plugin-open(id) => { root.ai-plugin-open(id); }
+        plugin-remove(id) => { root.ai-plugin-remove(id); }
+        plugin-refresh => { root.ai-plugin-refresh(); }
+        photo-pick => { root.ai-photo-pick(); }
+        photo-clear => { root.ai-photo-clear(); }
+        confirm-yes => { root.ai-confirm-yes(); }
+        confirm-no => { root.ai-confirm-no(); }
+    }
+
+    AiWizard {
+        inset-top: root.safe-area-insets.top;
+        inset-bottom: root.safe-area-insets.bottom;
+        inset-left: root.safe-area-insets.left;
+        inset-right: root.safe-area-insets.right;
+        x: 0;
+        y: root.sheets-top;
+        width: root.width;
+        height: root.height - root.sheets-top;
+        data: root.ai;
+
+        closed => { root.ai-wizard-close(); }
+        pick-local => { root.ai-wizard-local(); }
+        pick-cloud => { root.ai-wizard-cloud(); }
+        dismiss => { root.ai-wizard-close(); }
+    }
+
     // Over everything but the tooltips and the menus, the sheets included:
     // an export that failed behind a dialog is exactly the case a notice is
     // for. Only its card takes events, so covering the window costs the
@@ -1270,8 +1370,8 @@ export component App inherits Window {
         token: root.app-menu-token;
         keyboard: root.menu-by-keyboard;
         selected(id) => { root.app-menu-selected(id); }
-        // The arrows walk the strip: File, Edit, View and round again.
-        neighbour(by) => { root.open-menu-from-keys(Math.mod(root.open-menu + by, 3)); }
+        // The arrows walk the strip: File, Edit, View, AI and round again.
+        neighbour(by) => { root.open-menu-from-keys(Math.mod(root.open-menu + by, 4)); }
     }
 
 }

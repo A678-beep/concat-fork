@@ -289,6 +289,21 @@ export component TitleBar inherits Rectangle {
                 }
             }
         }
+        // 星籁自己的菜单：AI 配音、照片数字人、本地插件与算力。名字就是
+        // "AI"，不翻译。
+        if !root.minimal && !root.covered: aimenu := MenuLabel {
+            label: "AI";
+            current: root.menu == 3;
+            clicked => {
+                root.menu-opened(3, aimenu.absolute-position.x - root.absolute-position.x, false);
+            }
+            property <int> asked: root.keyboard-token;
+            changed asked => {
+                if (root.keyboard-menu == 3) {
+                    root.menu-opened(3, aimenu.absolute-position.x - root.absolute-position.x, true);
+                }
+            }
+        }
 
         Rectangle { horizontal-stretch: 1; }
 

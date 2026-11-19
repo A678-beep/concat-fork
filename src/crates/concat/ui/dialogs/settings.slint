@@ -86,6 +86,12 @@ export struct SettingsData {
     gpu: bool,
     /// there is a software rasteriser to draw on instead: Windows, Linux
     gpu-switchable: bool,
+    /// 星籁 AI 运行方式：0 智能（按硬件）、1 仅本地、2 仅云端
+    ai-mode: int,
+    /// 本机算力一句话：CPU、内存、显卡、显存、系统盘
+    ai-hardware: string,
+    /// 为什么这样推荐
+    ai-reason: string,
     /// the log goes to the system's share sheet, not to a folder shown:
     /// Android
     shares-log: bool,
@@ -680,6 +686,9 @@ export component SettingsDialog inherits Sheet {
     callback proxies-changed(on: bool);
     callback remember-layout-changed(on: bool);
     callback gpu-changed(on: bool);
+    /// 星籁 AI：运行方式（0 智能 / 1 仅本地 / 2 仅云端）与重新检测硬件。
+    callback ai-mode-changed(index: int);
+    callback ai-redetect();
     callback magnetic-changed(on: bool);
     callback download-source-changed(index: int);
     callback download-base-edited(text: string);
@@ -1057,6 +1066,44 @@ export component SettingsDialog inherits Sheet {
                     on: root.data.gpu;
                     open: false;
                     switched(on) => { root.gpu-changed(on); }
+                }
+
+                // 星籁 AI：本地优先、云端兜底。检测结果、推荐理由与选择都在
+                // 这里；AI 面板顶部会显示同一份。
+                DialogSection {
+                    ruled: false;
+                    title: "AI 运行方式";
+                    hint: "本地：完全离线、不上传、不需登录；云端：需登录星籁账号并按套餐额度计费。";
+
+                    SegmentedControl {
+                        width: 280px;
+                        options: ["智能", "仅本地", "仅云端"];
+                        current: root.data.ai-mode;
+                        changed(index) => { root.ai-mode-changed(index); }
+                    }
+
+                    Text {
+                        text: root.data.ai-hardware;
+                        color: Theme.fg;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+
+                    Text {
+                        text: root.data.ai-reason;
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+
+                    HorizontalLayout {
+                        alignment: start;
+                        Button {
+                            label: "重新检测硬件";
+                            ghost: true;
+                            clicked => { root.ai-redetect(); }
+                        }
+                    }
                 }
 
             }

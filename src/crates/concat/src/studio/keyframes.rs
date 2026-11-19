@@ -2009,6 +2009,21 @@ impl Studio {
             |data| app.set_relink(data),
         );
         app.set_confirm(self.confirm_data());
+        // 星籁 AI：面板状态与两列（音色、插件）。模型已经交出去一次，
+        // 这里只同步行。
+        set_changed(app.get_ai(), self.ai.data(self), |a, b| a == b, |data| {
+            app.set_ai(data)
+        });
+        app.set_ai_photo(self.ai.photo_image());
+        sync(&models.ai_voices, self.ai.voice_rows());
+        sync(&models.ai_plugins, self.ai.plugin_rows());
+        app.set_ai_voice_names(ModelRc::from(Rc::new(VecModel::from(
+            self.ai
+                .voice_rows()
+                .into_iter()
+                .map(|row| row.name)
+                .collect::<Vec<SharedString>>(),
+        ))));
 
         // The speech sheets, and the lists they choose from.
         let transcribers = installed(&self.settings.transcribers);
@@ -2789,6 +2804,45 @@ impl Studio {
                     t("shortcuts.nextEdit"),
                     Glyph::None,
                     &keymap::label(&self.prefs, "next-edit"),
+                    true,
+                ),
+            ],
+            // 星籁 AI：本地优先的配音、照片数字人、本地插件与算力向导。
+            3 => vec![
+                row(
+                    "ai-voice",
+                    "AI 配音（本地优先）".to_owned(),
+                    Glyph::Volume,
+                    "",
+                    true,
+                ),
+                row(
+                    "ai-avatar",
+                    "照片数字人".to_owned(),
+                    Glyph::Image,
+                    "",
+                    true,
+                ),
+                row(
+                    "ai-plugins",
+                    "本地 AI 插件…".to_owned(),
+                    Glyph::Sparkle,
+                    "",
+                    true,
+                ),
+                rule(),
+                row(
+                    "ai-wizard",
+                    "算力向导（硬件检测）".to_owned(),
+                    Glyph::Help,
+                    "",
+                    true,
+                ),
+                row(
+                    "ai-settings",
+                    "AI 运行方式…".to_owned(),
+                    Glyph::Settings,
+                    "",
                     true,
                 ),
             ],

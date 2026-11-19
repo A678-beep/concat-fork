@@ -63,6 +63,10 @@ pub enum SettingsMsg {
     /// The GPU switch: on, the window and the compositor draw on the GPU;
     /// off, in software. Read at the next launch.
     GpuChanged(bool),
+    /// 星籁 AI 运行方式：整页的三段选择（0 智能 / 1 仅本地 / 2 仅云端），
+    /// 以及重新检测硬件。
+    AiModeChanged(i32),
+    AiRedetect,
     /// The magnetic timeline switch; the tray's button is the same fact.
     MagneticChanged(bool),
     DownloadSourceChanged(i32),
@@ -421,6 +425,25 @@ impl SettingsPane {
                 // Read only at launch: offered as a restart now, which
                 // saves and reopens the project, or later.
                 studio.confirm = Some(crate::studio::Confirm::Restart);
+            }
+            SettingsMsg::AiModeChanged(index) => {
+                let index = index.clamp(0, 2);
+                log::info!(
+                    "settings: AI 运行方式 → {}",
+                    match index {
+                        1 => "仅本地",
+                        2 => "仅云端",
+                        _ => "智能",
+                    }
+                );
+                studio.ai.set_mode(index);
+                studio.remember_ai_mode();
+                let dirs = studio.host.dirs.clone();
+                studio.ai.refresh(&dirs);
+            }
+            SettingsMsg::AiRedetect => {
+                studio.ai.hardware = Some(concat_host::hardware::Hardware::detect());
+                log::info!("settings: 重新检测本机算力");
             }
             SettingsMsg::MagneticChanged(on) => {
                 log::info!("settings: Magnetic timeline {}", on_off(on));
@@ -989,8 +1012,12 @@ impl SettingsPane {
 
     /// The sheet as Slint shows it.
     pub fn data(&self, studio: &Studio) -> SettingsData {
+        let (ai_mode, ai_hardware, ai_reason) = studio.ai_settings_rows();
         SettingsData {
             open: self.open,
+            ai_mode,
+            ai_hardware: ai_hardware.into(),
+            ai_reason: ai_reason.into(),
             tab: self.tab,
             // The keymap's rows as the page draws them: the chord each
             // action is on now, and whether that moved from the one it

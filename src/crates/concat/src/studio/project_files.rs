@@ -482,6 +482,11 @@ impl Studio {
             self.note_activity(activity);
         }
         match msg {
+            crate::panes::Msg::Ai(msg) => {
+                let mut pane = std::mem::take(&mut self.ai);
+                pane.update(msg, self);
+                self.ai = pane;
+            }
             crate::panes::Msg::Export(msg) => {
                 let mut pane = std::mem::take(&mut self.export);
                 pane.update(msg, self);

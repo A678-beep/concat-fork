@@ -105,6 +105,7 @@ mod wayland_drop {
 use dock::{Dock, SEAT_MIN_GRAB, SEAT_MIN_H, SEAT_MIN_W};
 use host::{Host, Shell};
 use panes::Msg;
+use panes::ai::AiMsg;
 use panes::captions::CaptionsMsg;
 use panes::export::ExportMsg;
 use panes::media_bin::MediaMsg;
@@ -614,6 +615,8 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         app.global::<Sounds>()
             .set_styles(ModelRc::from(models.voice_styles.clone()));
         app.set_voiceover_devices(ModelRc::from(models.voiceover_devices.clone()));
+        app.set_ai_voices(ModelRc::from(models.ai_voices.clone()));
+        app.set_ai_plugins(ModelRc::from(models.ai_plugins.clone()));
         app.set_app_menu_items(ModelRc::from(models.bar.clone()));
         app.set_transcribers(ModelRc::from(models.transcribers.clone()));
         app.set_voices(ModelRc::from(models.voices.clone()));
@@ -1009,6 +1012,76 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
             }
         });
     }
+
+    // ── 星籁 AI ──
+    // 面板上的每个动作都变成一条 AiMsg 交给 Studio；插件、线程、云端与
+    // 插入时间轴都在 panes::ai 里，这里只转交。
+    app.on_ai_closed(on_window!(|state| {
+        state.handle(Msg::Ai(AiMsg::Close));
+    }));
+    app.on_ai_tab_changed(on_window!(|state, tab: i32| {
+        state.handle(Msg::Ai(AiMsg::Tab(tab)));
+    }));
+    app.on_ai_text_edited(on_window!(|state, text: SharedString| {
+        state.handle(Msg::Ai(AiMsg::Text(text.to_string())));
+    }));
+    app.on_ai_voice_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Ai(AiMsg::Voice(index)));
+    }));
+    app.on_ai_rate_changed(on_window!(|state, value: f32| {
+        state.handle(Msg::Ai(AiMsg::Rate(value)));
+    }));
+    app.on_ai_generate(on_window!(|state| {
+        state.handle(Msg::Ai(AiMsg::Generate));
+    }));
+    app.on_ai_preview(on_window!(|state| {
+        state.handle(Msg::Ai(AiMsg::Preview));
+    }));
+    app.on_ai_cancel(on_window!(|state| {
+        state.handle(Msg::Ai(AiMsg::Cancel));
+    }));
+    app.on_ai_mode_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Ai(AiMsg::Mode(index)));
+    }));
+    app.on_ai_redetect(on_window!(|state| {
+        state.handle(Msg::Ai(AiMsg::Redetect));
+    }));
+    app.on_ai_wizard_local(on_window!(|state| {
+        state.handle(Msg::Ai(AiMsg::WizardLocal));
+    }));
+    app.on_ai_wizard_cloud(on_window!(|state| {
+        state.handle(Msg::Ai(AiMsg::WizardCloud));
+    }));
+    app.on_ai_wizard_close(on_window!(|state| {
+        state.handle(Msg::Ai(AiMsg::WizardClose));
+    }));
+    app.on_ai_plugin_import(on_window!(|state| {
+        state.handle(Msg::Ai(AiMsg::PluginImport));
+    }));
+    app.on_ai_plugin_download(on_window!(|state, id: SharedString| {
+        state.handle(Msg::Ai(AiMsg::PluginDownload(id.to_string())));
+    }));
+    app.on_ai_plugin_open(on_window!(|state, id: SharedString| {
+        state.handle(Msg::Ai(AiMsg::PluginOpen(id.to_string())));
+    }));
+    app.on_ai_plugin_remove(on_window!(|state, id: SharedString| {
+        state.handle(Msg::Ai(AiMsg::PluginRemove(id.to_string())));
+    }));
+    app.on_ai_plugin_refresh(on_window!(|state| {
+        state.handle(Msg::Ai(AiMsg::PluginRefresh));
+    }));
+    app.on_ai_photo_pick(on_window!(|state| {
+        state.handle(Msg::Ai(AiMsg::PhotoPick));
+    }));
+    app.on_ai_photo_clear(on_window!(|state| {
+        state.handle(Msg::Ai(AiMsg::PhotoClear));
+    }));
+    app.on_ai_confirm_yes(on_window!(|state| {
+        state.handle(Msg::Ai(AiMsg::CloudConfirm));
+    }));
+    app.on_ai_confirm_no(on_window!(|state| {
+        state.handle(Msg::Ai(AiMsg::CloudCancel));
+    }));
 
     // ── the workspace's arrangement ──
     editor.on_workspace_resized(on_dock!(|state, width: f32, height: f32| {
@@ -2421,6 +2494,12 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     app.on_settings_gpu_changed(on_window!(|state, on: bool| {
         state.handle(Msg::Settings(SettingsMsg::GpuChanged(on)));
     }));
+    app.on_settings_ai_mode_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Settings(SettingsMsg::AiModeChanged(index)));
+    }));
+    app.on_settings_ai_redetect(on_window!(|state| {
+        state.handle(Msg::Settings(SettingsMsg::AiRedetect));
+    }));
     app.on_settings_magnetic_changed(on_window!(|state, on: bool| {
         state.handle(Msg::Settings(SettingsMsg::MagneticChanged(on)));
     }));
@@ -2743,6 +2822,14 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                         "cloud-save" => cloud_action = 1,
                         "cloud-open" => cloud_action = 2,
                         "cloud-upload" => cloud_action = 3,
+                        // 星籁 AI 菜单：开面板的某一页，或算一次硬件、改运行方式。
+                        "ai-voice" => state.handle(Msg::Ai(AiMsg::OpenTab(0))),
+                        "ai-avatar" => state.handle(Msg::Ai(AiMsg::OpenTab(1))),
+                        "ai-plugins" => state.handle(Msg::Ai(AiMsg::OpenTab(2))),
+                        "ai-wizard" => {
+                            state.ai.wizard_open = true;
+                        }
+                        "ai-settings" => state.handle(Msg::Settings(SettingsMsg::Open)),
                         _ => {}
                     }
                 }

@@ -1,0 +1,957 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 XingLai contributors
+
+// 星籁 AI 面板：算力选择、本地配音（Piper 插件）、照片数字人、插件管理，
+// 以及默认关闭的云端兜底。文案是中文，和云同步面板一样只服务星籁剪辑。
+//
+// 三样事实决定这张表：本机硬件够不够（顶部一行检测结果与理由）、现在选的
+// 运行方式（智能/仅本地/仅云端，分段控件 + 一句常驻说明）、以及要生成什么
+// （配音页 / 数字人页 / 插件页）。
+
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { Button, DialogSection, Field, Modal, Progress } from "../primitives/modal.slint";
+import { SegmentedControl } from "../primitives/segmented-control.slint";
+import { Select } from "../primitives/select.slint";
+import { ResizeBox } from "../primitives/resize-box.slint";
+import { Rail } from "../inspector/controls.slint";
+
+/// 音色下拉的一行。
+export struct AiVoiceItem {
+    id: string,
+    name: string,
+    detail: string,
+    ready: bool,
+    cloned: bool,
+}
+
+/// 插件页的一行。
+export struct AiPluginItem {
+    id: string,
+    name: string,
+    kind: string,
+    version: string,
+    size: string,
+    state: string,
+    path: string,
+    complete: bool,
+    voices: int,
+}
+
+/// AI 面板的状态。所有字段由 Rust 写好；面板只读。
+export struct AiData {
+    open: bool,
+    /// 0 配音、1 数字人、2 插件。
+    tab: int,
+    /// 运行方式设置：0 智能、1 仅本地、2 仅云端。
+    mode: int,
+    /// 实际会走哪边：0 本地、1 云端。
+    effective: int,
+    /// "本地" 或 "云端"。
+    effective-label: string,
+    /// 顶部常驻小字：现在用什么、为什么。
+    reason: string,
+    /// 检测到的硬件，一句话。
+    hardware: string,
+    /// 档位名："本地可用（较慢）"。
+    tier: string,
+    /// 耗时预估。
+    estimate: string,
+    /// 本地 Piper 装好了。
+    local-ready: bool,
+    /// 本地插件的安装位置。
+    local-path: string,
+    /// 星籁账号登录着。
+    signed-in: bool,
+    /// 登录着的账号名。
+    account: string,
+    /// 云端计费说明。
+    cloud-cost: string,
+    /// 配音文字。
+    text: string,
+    /// 选中的音色下标。
+    voice: int,
+    /// 语速 0.8–1.3。
+    rate: float,
+    /// 正在生成/下载。
+    busy: bool,
+    /// 进度 0..1。
+    progress: float,
+    /// 正在做什么。
+    stage: string,
+    /// 常驻说明/最近一次结果。
+    message: string,
+    /// 最近一次生成的结果句。
+    last: string,
+    /// 有可以试听的音频。
+    has-audio: bool,
+    /// 那条音频的名字。
+    audio-name: string,
+    /// 照片文件名。
+    photo-name: string,
+    /// 照片大小。
+    photo-size: string,
+    has-photo: bool,
+    /// Wav2Lip 插件装好了。
+    digital-ready: bool,
+    /// 数字人这件事现在的状态说明。
+    digital-status: string,
+    /// 首次算力向导开着。
+    wizard-open: bool,
+    /// 云端确认条开着。
+    confirm-open: bool,
+    /// 确认条上的字。
+    confirm-text: string,
+    /// "智能"/"仅本地"/"仅云端"。
+    mode-label: string,
+}
+
+// 一个小的标签：档位、来源、"本地生成、未上传" 之类。
+component Tag inherits Rectangle {
+    in property <string> text;
+    in property <bool> accent;
+
+    height: 20px;
+    width: tag-text.preferred-width + 14px;
+    border-radius: Theme.r-xs;
+    background: root.accent ? Theme.accent-soft : Theme.field;
+
+    tag-text := Text {
+        x: 7px;
+        y: (parent.height - self.height) / 2;
+        text: root.text;
+        color: root.accent ? Theme.fg : Theme.fg-muted;
+        font-size: Theme.fs-sm;
+        vertical-alignment: center;
+    }
+}
+
+// 顶部一行：运行方式、登录状态、重新检测。
+component ModeBar inherits HorizontalLayout {
+    in property <AiData> data;
+
+    callback mode-changed(int);
+    callback redetect();
+
+    spacing: 10px;
+
+    Text {
+        text: "AI 运行方式";
+        color: Theme.fg;
+        font-size: Theme.fs;
+        vertical-alignment: center;
+    }
+
+    SegmentedControl {
+        width: 280px;
+        options: ["智能", "仅本地", "仅云端"];
+        current: root.data.mode;
+        changed(index) => { root.mode-changed(index); }
+    }
+
+    Tag {
+        text: root.data.effective-label;
+        accent: true;
+    }
+
+    Rectangle { horizontal-stretch: 1; }
+
+    if root.data.signed-in: Text {
+        text: "已登录：" + root.data.account;
+        color: Theme.fg-muted;
+        font-size: Theme.fs-sm;
+        vertical-alignment: center;
+    }
+
+    if !root.data.signed-in: Text {
+        text: "未登录（云端需要登录）";
+        color: Theme.fg-dim;
+        font-size: Theme.fs-sm;
+        vertical-alignment: center;
+    }
+
+    Button {
+        label: "重新检测";
+        ghost: true;
+        clicked => { root.redetect(); }
+    }
+}
+
+// 配音页。
+component VoicePage inherits VerticalLayout {
+    in property <AiData> data;
+    in property <[AiVoiceItem]> voices;
+    in property <[string]> voice-names;
+
+    callback text-edited(string);
+    callback voice-changed(int);
+    callback rate-changed(float);
+    callback generate();
+    callback preview();
+    callback cancel();
+
+    // 输入框与滑块的本地副本：TextInput / Rail 的绑定在用户第一次改它时
+    // 会被丢掉，所以这里像朗读面板一样，打开时从数据里播种，之后不再覆盖
+    // 正在编辑的那一份。
+    property <string> draft;
+    property <float> rate-v;
+    property <bool> typing;
+    changed data => {
+        if (!root.typing) {
+            root.draft = root.data.text;
+        }
+        root.rate-v = root.data.rate;
+    }
+    init => {
+        root.draft = root.data.text;
+        root.rate-v = root.data.rate;
+    }
+
+    spacing: 8px;
+
+    // 文字。
+    DialogSection {
+        first: true;
+        ruled: false;
+        title: "配音文字";
+
+        box := ResizeBox {
+            content-height: words.preferred-height;
+            focused: words.has-focus;
+
+            words := TextInput {
+                x: box.pad-x;
+                y: box.pad-y;
+                width: parent.width - self.x - 2 * box.pad-x;
+                height: Math.max(self.preferred-height, box.view-height);
+                cursor-position-changed(at) => { box.reveal(at.y, self.font-size * 1.4); }
+                text <=> root.draft;
+                edited => { root.text-edited(self.text); }
+                color: Theme.fg;
+                font-size: Theme.fs-lg;
+                single-line: false;
+                wrap: char-wrap;
+                selection-background-color: Theme.accent;
+                selection-foreground-color: Theme.on-accent;
+                changed has-focus => { root.typing = self.has-focus; }
+            }
+
+            if root.draft == "" && !words.has-focus: Text {
+                x: 0;
+                y: box.pad-y;
+                text: "输入要配音的文字，例如：大家好，欢迎来到星籁剪辑……";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-lg;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+
+            Text {
+                text: "上限 2000 字";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Text {
+                text: "本地配音不需要登录，完全离线";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // 音色与语速。
+    DialogSection {
+        ruled: false;
+        title: "音色与语速";
+
+        HorizontalLayout {
+            spacing: 10px;
+
+            Text {
+                text: "音色";
+                width: 44px;
+                color: Theme.fg-muted;
+                font-size: Theme.fs;
+                vertical-alignment: center;
+            }
+
+            Select {
+                horizontal-stretch: 1;
+                options: root.voice-names;
+                current: root.data.voice;
+                placeholder: root.data.local-ready || root.data.effective == 1
+                    ? "选择音色" : "先装本地配音插件";
+                changed(index) => { root.voice-changed(index); }
+            }
+        }
+
+        if root.voices.length > 0: Text {
+            text: root.data.voice >= 0 && root.data.voice < root.voices.length
+                ? root.voices[root.data.voice].detail : "";
+            color: Theme.fg-dim;
+            font-size: Theme.fs-sm;
+            overflow: elide;
+        }
+
+        HorizontalLayout {
+            spacing: 10px;
+
+            Text {
+                text: "语速";
+                width: 44px;
+                color: Theme.fg-muted;
+                font-size: Theme.fs;
+                vertical-alignment: center;
+            }
+
+            Rail {
+                horizontal-stretch: 1;
+                value <=> root.rate-v;
+                minimum: 0.8;
+                maximum: 1.3;
+                step: 0.02;
+                default-value: 1.0;
+                changed(v) => { root.rate-changed(v); }
+            }
+
+            Text {
+                width: 46px;
+                text: root.rate-v + "×";
+                color: Theme.fg;
+                font-family: Theme.font-technical;
+                font-size: Theme.fs;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // 动作与结果。
+    HorizontalLayout {
+        spacing: 8px;
+
+        Button {
+            label: root.data.effective == 1 ? "云端生成配音" : "生成配音并插入";
+            primary: true;
+            enabled: !root.data.busy && !root.data.confirm-open
+                && (root.data.effective == 1 ? root.data.signed-in : root.data.local-ready);
+            clicked => { root.generate(); }
+        }
+
+        Button {
+            label: "试听";
+            enabled: root.data.has-audio && !root.data.busy;
+            clicked => { root.preview(); }
+        }
+
+        if root.data.busy: Button {
+            label: "取消";
+            ghost: true;
+            clicked => { root.cancel(); }
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        if root.data.effective == 1 && !root.data.signed-in: Button {
+            label: "去登录";
+            ghost: true;
+            clicked => { root.generate(); }
+        }
+    }
+
+    if root.data.last != "": Text {
+        text: root.data.last;
+        color: Theme.fg-muted;
+        font-size: Theme.fs-sm;
+        wrap: word-wrap;
+    }
+}
+
+// 照片数字人页（一期：入口与说明；云端可用）。
+component DigitalPage inherits VerticalLayout {
+    in property <AiData> data;
+    in property <image> photo;
+
+    callback photo-pick();
+    callback photo-clear();
+    callback generate();
+    callback cancel();
+
+    spacing: 8px;
+
+    DialogSection {
+        first: true;
+        ruled: false;
+        title: "照片";
+
+        HorizontalLayout {
+            spacing: 12px;
+
+            Rectangle {
+                width: 132px;
+                height: 168px;
+                border-radius: Theme.r;
+                background: Theme.well;
+                clip: true;
+
+                if root.data.has-photo: Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: root.photo;
+                    image-fit: cover;
+                }
+
+                if !root.data.has-photo: VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: "还没有照片";
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-sm;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+
+            VerticalLayout {
+                spacing: 6px;
+
+                Text {
+                    text: root.data.has-photo
+                        ? root.data.photo-name + "（" + root.data.photo-size + "）"
+                        : "选一张 JPG/PNG 照片（≤10MB）";
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                }
+
+                Text {
+                    text: "照片会做成一段推近的片段，配上口播音轨；已标注「AI 生成」。";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    Button {
+                        label: root.data.has-photo ? "换一张" : "选择照片";
+                        enabled: !root.data.busy;
+                        clicked => { root.photo-pick(); }
+                    }
+
+                    if root.data.has-photo: Button {
+                        label: "清掉";
+                        ghost: true;
+                        enabled: !root.data.busy;
+                        clicked => { root.photo-clear(); }
+                    }
+                }
+
+                Text {
+                    text: "口播音频：" + (root.data.has-audio
+                        ? root.data.audio-name
+                        : "还没有，先去「配音」页生成一段");
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    overflow: elide;
+                }
+            }
+        }
+    }
+
+    DialogSection {
+        ruled: false;
+        title: "生成方式";
+        hint: root.data.digital-status;
+
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+
+            Tag {
+                text: root.data.effective == 1 ? "云端生成（会上传）" : "本地生成、未上传";
+                accent: root.data.effective == 0;
+            }
+
+            Tag {
+                text: root.data.digital-ready ? "Wav2Lip 插件已装" : "Wav2Lip 插件未装（二期）";
+            }
+        }
+
+        Text {
+            text: root.data.digital-status;
+            color: Theme.fg-dim;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Button {
+                label: "生成数字人片段";
+                primary: true;
+                enabled: !root.data.busy && !root.data.confirm-open
+                    && root.data.has-photo && root.data.has-audio
+                    && root.data.effective == 1 && root.data.signed-in;
+                clicked => { root.generate(); }
+            }
+
+            if root.data.busy: Button {
+                label: "取消";
+                ghost: true;
+                clicked => { root.cancel(); }
+            }
+        }
+
+        Text {
+            text: "说明：照片 + 口播音轨，推近镜头，未做口型同步；成片落在工程目录 ai_avatar/，可在时间轴上裁剪与调整。";
+            color: Theme.fg-dim;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+    }
+}
+
+// 插件页。
+component PluginPage inherits VerticalLayout {
+    in property <AiData> data;
+    in property <[AiPluginItem]> plugins;
+
+    callback import-zip();
+    callback download(string);
+    callback open(string);
+    callback remove(string);
+    callback refresh();
+
+    spacing: 8px;
+
+    DialogSection {
+        first: true;
+        ruled: false;
+        title: "本机 AI 插件";
+        hint: "插件是装在本机的离线引擎包：拷进去即装好，删掉即卸掉。";
+
+        if root.plugins.length == 0: Rectangle {
+            height: 64px;
+            border-radius: Theme.r;
+            background: Theme.well;
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 4px;
+                Text {
+                    text: "还没有装任何本地 AI 插件";
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "导入 Piper 插件包（zip，约 100MB）即可离线配音；Wav2Lip 是二期的数字人插件。";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+
+        for plugin[index] in root.plugins: Rectangle {
+            height: 56px;
+            border-radius: Theme.r;
+            background: Math.mod(index, 2) == 0 ? Theme.field : Theme.well;
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 8px;
+                spacing: 8px;
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+                    Text {
+                        text: plugin.name + "  v" + plugin.version;
+                        color: Theme.fg;
+                        font-size: Theme.fs;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: plugin.kind + " · " + plugin.size + " · " + plugin.state;
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-sm;
+                        overflow: elide;
+                    }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Text {
+                    width: 220px;
+                    text: plugin.path;
+                    color: Theme.fg-dim;
+                    font-family: Theme.font-technical;
+                    font-size: Theme.fs-sm;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+
+                Button {
+                    label: "打开目录";
+                    ghost: true;
+                    clicked => { root.open(plugin.id); }
+                }
+
+                Button {
+                    label: "删除";
+                    danger: true;
+                    ghost: true;
+                    clicked => { root.remove(plugin.id); }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Button {
+                label: "导入插件包…";
+                primary: true;
+                enabled: !root.data.busy;
+                clicked => { root.import-zip(); }
+            }
+
+            Button {
+                label: "下载 Piper（约 110MB）";
+                enabled: !root.data.busy;
+                clicked => { root.download("piper"); }
+            }
+
+            Button {
+                label: "下载数字人插件（二期）";
+                enabled: !root.data.busy;
+                clicked => { root.download("wav2lip"); }
+            }
+
+            Button {
+                label: "刷新";
+                ghost: true;
+                enabled: !root.data.busy;
+                clicked => { root.refresh(); }
+            }
+        }
+
+        Text {
+            text: "安装位置：" + (root.data.local-path != ""
+                ? root.data.local-path
+                : "%APPDATA%\\app.concat.editor\\ai-plugins\\<插件名>\\");
+            color: Theme.fg-dim;
+            font-family: Theme.font-technical;
+            font-size: Theme.fs-sm;
+            overflow: elide;
+        }
+    }
+}
+
+// 算力向导：第一次用 AI 时弹一次，讲清楚检测结果与两条路。
+export component AiWizard inherits Modal {
+    in property <AiData> data;
+
+    callback pick-local();
+    callback pick-cloud();
+    callback dismiss();
+
+    open: root.data.wizard-open;
+    title: "算力向导 · 这台机器怎么跑 AI";
+    glyph: Glyph.none;
+    surface-width: 560px;
+
+    VerticalLayout {
+        padding: 18px;
+        spacing: 12px;
+
+        Text {
+            text: "检测结果";
+            color: Theme.fg-dim;
+            font-size: Theme.fs-sm;
+        }
+
+        Text {
+            text: root.data.hardware;
+            color: Theme.fg;
+            font-size: Theme.fs;
+            wrap: word-wrap;
+        }
+
+        Text {
+            text: "显存为驱动自报口径：独显是专用显存，核显是共享内存。";
+            color: Theme.fg-dim;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Tag { text: root.data.tier; accent: true; }
+            Tag { text: root.data.effective == 1 ? "建议：云端" : "建议：本地"; }
+        }
+
+        Text {
+            text: root.data.reason;
+            color: Theme.fg-muted;
+            font-size: Theme.fs;
+            wrap: word-wrap;
+        }
+
+        Text {
+            text: root.data.estimate;
+            color: Theme.fg-dim;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.line;
+        }
+
+        Text {
+            text: "选一条路，之后随时能在面板顶部或设置里改：";
+            color: Theme.fg;
+            font-size: Theme.fs;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Button {
+                label: "用本地（装/导入插件）";
+                primary: true;
+                clicked => { root.pick-local(); }
+            }
+
+            Button {
+                label: "用云端（登录）";
+                clicked => { root.pick-cloud(); }
+            }
+
+            Button {
+                label: "稍后决定";
+                ghost: true;
+                clicked => { root.dismiss(); }
+            }
+        }
+
+        Text {
+            text: "本地：完全离线、不上传、不需登录；云端：需登录星籁账号并按套餐额度计费，每次生成前都会确认。";
+            color: Theme.fg-dim;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+    }
+}
+
+// AI 面板本体。
+export component AiDialog inherits Modal {
+    in property <AiData> data;
+    in property <[AiVoiceItem]> voices;
+    in property <[string]> voice-names;
+    in property <[AiPluginItem]> plugins;
+    in property <image> photo;
+
+    callback tab-changed(int);
+    callback text-edited(string);
+    callback voice-changed(int);
+    callback rate-changed(float);
+    callback generate();
+    callback preview();
+    callback cancel();
+    callback mode-changed(int);
+    callback redetect();
+    callback plugin-import();
+    callback plugin-download(string);
+    callback plugin-open(string);
+    callback plugin-remove(string);
+    callback plugin-refresh();
+    callback photo-pick();
+    callback photo-clear();
+    callback confirm-yes();
+    callback confirm-no();
+
+    open: root.data.open;
+    title: "星籁 AI · 本地优先";
+    glyph: Glyph.none;
+    surface-width: 780px;
+    surface-height: 660px;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+
+        ModeBar {
+            data: root.data;
+            mode-changed(index) => { root.mode-changed(index); }
+            redetect => { root.redetect(); }
+        }
+
+        Text {
+            text: root.data.reason;
+            color: Theme.fg-muted;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Tag { text: root.data.tier; accent: true; }
+            Tag { text: root.data.effective == 1 ? "云端 · 需确认上传" : "本地 · 不上传"; }
+            Rectangle { horizontal-stretch: 1; }
+            Text {
+                text: root.data.hardware;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+        }
+
+        Text {
+            text: "显存为驱动自报口径：独显是专用显存，核显是共享内存。";
+            color: Theme.fg-dim;
+            font-size: Theme.fs-sm;
+            overflow: elide;
+        }
+
+        Text {
+            text: root.data.estimate;
+            color: Theme.fg-dim;
+            font-size: Theme.fs-sm;
+            overflow: elide;
+        }
+
+        SegmentedControl {
+            height: 30px;
+            tabs: true;
+            options: ["配音", "数字人", "插件"];
+            current: root.data.tab;
+            changed(index) => { root.tab-changed(index); }
+        }
+
+        if root.data.tab == 0: VoicePage {
+            data: root.data;
+            voices: root.voices;
+            voice-names: root.voice-names;
+            text-edited(text) => { root.text-edited(text); }
+            voice-changed(index) => { root.voice-changed(index); }
+            rate-changed(value) => { root.rate-changed(value); }
+            generate => { root.generate(); }
+            preview => { root.preview(); }
+            cancel => { root.cancel(); }
+        }
+
+        if root.data.tab == 1: DigitalPage {
+            data: root.data;
+            photo: root.photo;
+            photo-pick => { root.photo-pick(); }
+            photo-clear => { root.photo-clear(); }
+            generate => { root.generate(); }
+            cancel => { root.cancel(); }
+        }
+
+        if root.data.tab == 2: PluginPage {
+            data: root.data;
+            plugins: root.plugins;
+            import-zip => { root.plugin-import(); }
+            download(id) => { root.plugin-download(id); }
+            open(id) => { root.plugin-open(id); }
+            remove(id) => { root.plugin-remove(id); }
+            refresh => { root.plugin-refresh(); }
+        }
+
+        // 进度。
+        if root.data.busy: VerticalLayout {
+            spacing: 4px;
+            Progress {
+                value: root.data.progress;
+                live: true;
+            }
+            Text {
+                text: root.data.stage;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-sm;
+            }
+        }
+
+        // 云端确认条：默认不上传任何素材。
+        if root.data.confirm-open: Rectangle {
+            border-radius: Theme.r;
+            background: Theme.accent-soft;
+            border-width: 1px;
+            border-color: Theme.accent;
+
+            VerticalLayout {
+                padding: 10px;
+                spacing: 8px;
+
+                Text {
+                    text: root.data.confirm-text;
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: root.data.cloud-cost;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Button {
+                        label: "确认上传并生成";
+                        primary: true;
+                        clicked => { root.confirm-yes(); }
+                    }
+                    Button {
+                        label: "取消，不上传";
+                        ghost: true;
+                        clicked => { root.confirm-no(); }
+                    }
+                }
+            }
+        }
+
+        Text {
+            text: root.data.message;
+            color: Theme.fg-muted;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Text {
+                text: "本地生成的内容不上传云端；云端生成会明确提示并逐次确认。";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Button {
+                label: "关闭";
+                clicked => { root.closed(); }
+            }
+        }
+    }
+}

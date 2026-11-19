@@ -14,6 +14,7 @@
 //! The panes move here one at a time from the window's controller; the
 //! export sheet is the first, and the shape the rest follow.
 
+pub mod ai;
 pub mod captions;
 pub mod export;
 pub mod glide;
@@ -32,6 +33,8 @@ pub mod voiceover;
 /// One thing that happened, to one pane.
 #[derive(Debug)]
 pub enum Msg {
+    /// 到 AI 面板（本地插件、云端兜底、算力向导）。
+    Ai(ai::AiMsg),
     /// To the export sheet.
     Export(export::ExportMsg),
     /// To the settings sheet.

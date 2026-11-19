@@ -75,6 +75,20 @@ pub struct Preferences {
     pub tts_model: Option<String>,
     /// The chosen voice id.
     pub tts_voice: Option<i32>,
+    /// AI 运行方式：`smart`（默认，按硬件自动）/ `local`（仅本地插件）/
+    /// `cloud`（仅云端，需登录）。缺省或认不出的值是 `smart`。
+    #[serde(default)]
+    pub ai_mode: Option<String>,
+    /// 首次使用的「算力向导」看过了没有。看过之后不再自己弹出来；
+    /// 菜单里仍可随时打开。
+    #[serde(default)]
+    pub ai_wizard_seen: bool,
+    /// 本地配音上次选的音色 id（插件里的 `zh_CN-huayan-medium` 之类）。
+    #[serde(default)]
+    pub ai_voice: Option<String>,
+    /// 本地配音上次选的语速，0.8–1.3。
+    #[serde(default)]
+    pub ai_rate: Option<f32>,
     /// The interface's locale code ("de", "pt-BR", ...); absent is English.
     pub locale: Option<String>,
     /// Package ids starred in the effect libraries, in no order. One list
