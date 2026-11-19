@@ -130,18 +130,18 @@ pub const MODELS: [ModelSpec; 11] = [
     ModelSpec {
         id: "wav2lip",
         name: "Wav2Lip 口型同步",
-        summary: "照片/视频 + 音频 → 对口型说话视频，最快的一档",
+        summary: "照片 + 配音 → 对口型说话视频，本机离线，DirectML 或 CPU 都能跑",
         kind: KIND_AVATAR,
         engine: "wav2lip",
         effect: 3,
-        size_bytes: 220_000_000,
+        size_bytes: 258_790_891,
         vram_mb: 2048,
-        ram_mb: 4096,
+        ram_mb: 8192,
         cuda: false,
         directml: true,
         cpu_ok: true,
-        speed: "10 秒片段：DirectML 约 1–3 分钟，纯 CPU 约 3–6 分钟",
-        note: "口型准，但底模 96×96，脸大/要高清时一般；服务端包未就位",
+        speed: "本机实测：10 秒片段约 6 秒（DirectML）/ 约 38 秒（纯 CPU）",
+        note: "只动嘴、不摇头；清晰度取决于照片，效果不如云端数字人（Hedra 级）；装一次以后完全离线",
     },
     ModelSpec {
         id: "sadtalker",
@@ -253,9 +253,9 @@ pub fn fits(spec: &ModelSpec, hardware: &Hardware) -> bool {
 
 /// 能不能跑，以及界面上那句为什么。
 ///
-/// 先看最硬的门槛：CUDA、显存、内存。都过了就是能跑；慢不慢在
-/// [`ModelSpec::speed`] 里单独说——「能跑但慢」是用户自己决定的事，
-/// 不替他把模型藏起来。
+/// 先看最硬的门槛：CUDA、内存——这两样过不去就是跑不动。显存只对
+/// **不能退 CPU** 的模型是硬门槛；能走 CPU 的模型（比如 Wav2Lip）显存
+/// 不够只是「慢一些」，照样不适配成红色。
 pub fn fit_reason(spec: &ModelSpec, hardware: &Hardware) -> (bool, String) {
     let gpu = &hardware.gpu;
     let discrete = gpu.discrete && gpu.vram_mb > 0;
@@ -269,7 +269,9 @@ pub fn fit_reason(spec: &ModelSpec, hardware: &Hardware) -> (bool, String) {
         };
         return (false, format!("需要 NVIDIA 显卡（{what}）"));
     }
-    if spec.vram_mb > 0 && gpu.vram_mb < spec.vram_mb {
+    // 显存门槛：不能退 CPU 的模型、以及目录里按 CUDA 显卡设计的模型，
+    // 显存不够就是跑不动；能退 CPU 的模型（Wav2Lip）不够也只是慢一些。
+    if spec.vram_mb > 0 && gpu.vram_mb < spec.vram_mb && (!spec.cpu_ok || spec.cuda) {
         return (
             false,
             format!(
@@ -288,6 +290,13 @@ pub fn fit_reason(spec: &ModelSpec, hardware: &Hardware) -> (bool, String) {
                 gb(hardware.ram_mb)
             ),
         );
+    }
+    // 有显卡加速的：不是纯 CPU，也不是「能跑但慢」。
+    if spec.directml && discrete && gpu.vram_mb >= spec.vram_mb.max(1024) {
+        return (true, "适配本机（DirectML 显卡加速）".to_owned());
+    }
+    if spec.cpu_ok && spec.vram_mb > 0 && gpu.vram_mb < spec.vram_mb {
+        return (true, "适配本机（纯 CPU，慢一些）".to_owned());
     }
     if spec.vram_mb == 0 && spec.cpu_ok {
         return (true, "适配本机（纯 CPU）".to_owned());
@@ -363,7 +372,18 @@ mod tests {
     fn an_integrated_machine_still_fits_cpu_models() {
         let integrated = machine("Intel", 0, 16384, false);
         assert!(fits(spec("voice-clone").unwrap(), &integrated));
-        assert!(fits(spec("wav2lip").unwrap(), &integrated));
+        let (ok, why) = fit_reason(spec("wav2lip").unwrap(), &integrated);
+        assert!(ok, "{why}");
+        assert!(why.contains("CPU"), "{why}");
+    }
+
+    /// 这台 AMD 机器上 Wav2Lip 走 DirectML，说清楚用的是显卡加速。
+    #[test]
+    fn an_amd_machine_gets_directml_for_the_avatar() {
+        let amd = machine("AMD", 8176, 32558, true);
+        let (ok, why) = fit_reason(spec("wav2lip").unwrap(), &amd);
+        assert!(ok, "{why}");
+        assert!(why.contains("DirectML"), "{why}");
     }
 
     #[test]

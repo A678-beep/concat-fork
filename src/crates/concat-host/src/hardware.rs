@@ -144,9 +144,10 @@ impl Hardware {
                 mb_to_gb(self.ram_mb)
             ),
             Tier::LocalSlow => format!(
-                "检测到 {gpu}、{}GB 内存：本地配音很快；本地数字人可跑但较慢（约 {} 分钟/条），默认本地，也可在设置里切到云端",
+                "检测到 {gpu}、{}GB 内存：本地配音很快；本地数字人可跑但较慢（10 秒片段约 {}-{} 秒），默认本地，也可在设置里切到云端",
                 mb_to_gb(self.ram_mb),
-                avatar_minutes(self)
+                self.avatar_seconds().0,
+                self.avatar_seconds().1
             ),
             Tier::CloudRec => format!(
                 "检测到 {gpu}、{}GB 内存：本地推理偏吃力，默认推荐云端（需登录星籁账号，按套餐额度计费）",
@@ -164,19 +165,34 @@ impl Hardware {
         }
     }
 
-    /// 本地数字人的预估耗时档。
-    pub fn avatar_minutes(&self) -> (u64, u64) {
+    /// 本地数字人的预估耗时档，秒：`(最快, 最慢)`，按 10 秒片段算。
+    ///
+    /// 数字是 0.2.14 在这台 i5-12600KF + RX 6600 上实测的：Wav2Lip-256
+    /// 一帧 256×256，DirectML 约 11 毫秒、纯 CPU 约 146 毫秒，10 秒配音
+    /// 250 帧，所以显卡加速约 5–6 秒、纯 CPU 约 38 秒；加上配音与编码，
+    /// 上面再留一点余量。
+    pub fn avatar_seconds(&self) -> (u64, u64) {
         match self.tier {
-            Tier::LocalFast => (2, 6),
-            Tier::LocalSlow => (8, 20),
-            Tier::CloudRec => (20, 60),
+            Tier::LocalFast => (5, 12),
+            Tier::LocalSlow => (20, 60),
+            Tier::CloudRec => (60, 120),
         }
     }
 
     /// 本地数字人估时的中文说法。
     pub fn avatar_estimate(&self) -> String {
-        let (low, high) = self.avatar_minutes();
-        format!("本地数字人约 {low}–{high} 分钟/条（10 秒片段，CPU 回退更慢）")
+        let (low, high) = self.avatar_seconds();
+        match self.tier {
+            Tier::LocalFast => format!(
+                "本地数字人：10 秒片段约 {low}–{high} 秒（DirectML 显卡加速；没有显卡加速时约 40 秒）"
+            ),
+            Tier::LocalSlow => format!(
+                "本地数字人：10 秒片段约 {low}–{high} 秒（显卡加速有限时会慢一些；建议云端）"
+            ),
+            Tier::CloudRec => format!(
+                "本地数字人：10 秒片段约 {low}–{high} 秒（纯 CPU）；本机建议用云端数字人"
+            ),
+        }
     }
 }
 
@@ -211,11 +227,6 @@ fn mb_to_gb(mb: u64) -> String {
     } else {
         format!("{mb}MB")
     }
-}
-
-fn avatar_minutes(machine: &Hardware) -> String {
-    let (low, high) = machine.avatar_minutes();
-    format!("{low}–{high}")
 }
 
 /// 配置目录所在的盘。Windows 上就是系统盘。

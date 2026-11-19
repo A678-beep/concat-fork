@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 XingLai contributors
 
-//! AI 面板：智能算力选择、本地配音（Piper）、照片数字人（二期插件占位）、
+//! AI 面板：智能算力选择、本地配音（Piper）、照片数字人（Wav2Lip 插件）、
 //! 本地插件管理，以及默认关闭的云端兜底。
 //!
 //! 「智能」是默认：本机检测出独显与内存够用就走本地（素材不出本机），
@@ -11,7 +11,8 @@
 //!
 //! 生成出来的文件一律落在工程目录：本地配音 `ai_voice/*.wav`，云端配音
 //! `ai_voice/*.mp3`，数字人 `ai_avatar/*.mp4`，然后进素材库、上时间轴（当前
-//! 播放头位置）。本地数字人是二期插件，这一版只做入口与说明。
+//! 播放头位置）。本地数字人走 Wav2Lip 插件：照片 + 文案（先由本地音色配音）
+//! → 对口型视频，全程离线；云端数字人是兜底。
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -19,7 +20,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use concat_host::hardware::{Hardware, Tier};
 use concat_host::media::{self, MediaSummary};
-use concat_host::{ai_models, cloud_ai, piper, plugins, zipvoice};
+use concat_host::{ai_models, cloud_ai, piper, plugins, wav2lip, zipvoice};
 use concat_project::Command;
 use concat_project::model::{MediaKind, MediaOrigin};
 
@@ -31,6 +32,9 @@ use crate::ui::{AiData, AiPluginItem, AiVoiceItem};
 
 /// 云端每次生成的提醒，界面上常驻。
 const CLOUD_COST: &str = "云端：需登录星籁账号，按套餐额度扣费（配音约 ¥0.004/51 字，数字人按次扣）；素材会上传到云端，每次生成前都会确认。";
+
+/// 本地数字人的效果预期，界面上常驻。
+const AVATAR_LIMIT: &str = "只动嘴、不摇头：清晰度取决于照片；效果不如云端数字人（Hedra 级），但完全离线、不花钱、素材不出本机。";
 
 /// 配音文字上限，与界面一致。
 const MAX_TEXT: usize = 2000;
@@ -204,6 +208,10 @@ pub struct AiPane {
     pub piper: Option<piper::Engine>,
     /// 装好的本地语音克隆引擎（ZipVoice）。
     pub clone: Option<zipvoice::Engine>,
+    /// 装好的本地数字人引擎（Wav2Lip）。
+    pub digital: Option<wav2lip::Engine>,
+    /// 数字人插件读不出来时的原因（装上了但缺文件/缺 ffmpeg）。
+    digital_issue: String,
     /// 当前可选的音色（本地或云端，跟着运行方式走）。
     voices: Vec<VoiceRow>,
     /// 云端音色列表。
@@ -285,6 +293,8 @@ impl Default for AiPane {
             plugins: Vec::new(),
             piper: None,
             clone: None,
+            digital: None,
+            digital_issue: String::new(),
             voices: Vec::new(),
             cloud_voices: None,
             voice: 0,
@@ -376,6 +386,21 @@ impl AiPane {
                     None
                 }
             });
+        self.digital = None;
+        self.digital_issue.clear();
+        if let Some(plugin) = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.engine() == "wav2lip")
+        {
+            match wav2lip::Engine::load(plugin) {
+                Ok(engine) => self.digital = Some(engine),
+                Err(error) => {
+                    log::warn!("ai-plugins: 数字人引擎读不出来：{error}");
+                    self.digital_issue = error;
+                }
+            }
+        }
         if let Some(account) = concat_host::account::load() {
             self.signed_in = !account.token.trim().is_empty();
             self.account = account.display_name();
@@ -550,25 +575,36 @@ impl AiPane {
         }
     }
 
-    /// 本地数字人的状态：Wav2Lip 服务端包还没上线，先如实说清楚。
+    /// 本地数字人的状态：插件装没装、能不能跑、下一步该做什么。
     fn digital_status(&self) -> String {
-        let installed = self
-            .plugins
-            .iter()
-            .any(|plugin| plugin.engine() == "wav2lip" && plugin.complete);
-        if installed {
-            "Wav2Lip 插件已安装；本地数字人推理在 0.2.14 接入。这一版可用云端生成。".to_owned()
+        if let Some(engine) = self.digital.as_ref() {
+            match engine.ready() {
+                Ok(()) => "本地数字人已就绪：照片 + 文案（用本地音色先配音）→ 对口型视频，全程离线、不上传。生成后自动插入时间轴。".to_owned(),
+                Err(error) => format!("数字人插件装上了，但这条链路还缺东西：{error}"),
+            }
+        } else if !self.digital_issue.trim().is_empty() {
+            format!(
+                "数字人插件已安装但读不出来：{}；请在「模型」页删掉再重下一次",
+                self.digital_issue.trim()
+            )
         } else {
-            "本地数字人插件（Wav2Lip）服务端包还没上线，模型中心里显示「即将上线」；本机跑数字人建议用云端。"
-                .to_owned()
+            "还没有装本地数字人插件：到「模型」页下载「Wav2Lip 口型同步」（约 300MB，一次装好、之后完全离线、不花钱）。".to_owned()
         }
     }
 
-    /// 数字人插件装没装。
+    /// 数字人插件装好且能跑。
     fn digital_ready(&self) -> bool {
-        self.plugins
-            .iter()
-            .any(|plugin| plugin.engine() == "wav2lip" && plugin.complete)
+        self.digital
+            .as_ref()
+            .is_some_and(|engine| engine.ready().is_ok())
+    }
+
+    /// 本机数字人预计耗时，一句话。
+    fn avatar_estimate(&self) -> String {
+        self.hardware
+            .as_ref()
+            .map(Hardware::avatar_estimate)
+            .unwrap_or_else(|| "本机硬件还没有检测".to_owned())
     }
 
     /// 发布给 Slint 的数据。
@@ -661,6 +697,8 @@ impl AiPane {
             has_photo: self.photo.is_some(),
             digital_ready: self.digital_ready(),
             digital_status: self.digital_status().into(),
+            avatar_estimate: self.avatar_estimate().into(),
+            avatar_limit: AVATAR_LIMIT.into(),
             wizard_open: self.wizard_open,
             confirm_open: self.confirm_open,
             confirm_text: self.confirm_text.as_str().into(),
@@ -1405,22 +1443,20 @@ impl AiPane {
 
     // ── 数字人 ──
 
-    /// 「生成数字人片段」：本地是二期插件（给说明与入口），云端走 /autoedit/avatar。
+    /// 「生成数字人片段」：本地走 Wav2Lip 插件，云端走 /autoedit/avatar。
     fn digital(&mut self, studio: &mut Studio) {
         if self.busy {
             return;
         }
         if matches!(self.effective(), AiMode::Local) {
-            self.message = if self.digital_ready() {
-                "Wav2Lip 插件已装好，但本地数字人推理在 0.2.13 接入；这一版请切到「仅云端」生成。"
-                    .to_owned()
-            } else {
-                "本地数字人是二期插件：先到「插件」页导入 Wav2Lip 插件包；这一版可以用云端生成。"
-                    .to_owned()
-            };
-            self.tab = 2;
-            return;
+            self.digital_local(studio);
+        } else {
+            self.digital_cloud(studio);
         }
+    }
+
+    /// 云端数字人（兜底）：照片 + 云端配音的音频 → 平台生成。
+    fn digital_cloud(&mut self, studio: &mut Studio) {
         if self.photo.is_none() {
             self.message = "请先选择一张照片（JPG/PNG，≤10MB）".to_owned();
             return;
@@ -1431,6 +1467,145 @@ impl AiPane {
             return;
         }
         self.ask_cloud(studio, Confirm::Avatar);
+    }
+
+    /// 本地数字人：照片 + 文案（先用本地音色配音）或已有本地配音
+    /// → Wav2Lip 逐帧对口型 → mp4 → 插入时间轴。全程离线。
+    fn digital_local(&mut self, studio: &mut Studio) {
+        let Some(project) = project_dir(studio) else {
+            self.message = "请先打开一个工程：数字人成片要放进工程目录".to_owned();
+            return;
+        };
+        let Some(photo) = self.photo.as_ref() else {
+            self.message = "请先选择一张正脸照片（JPG/PNG，≤10MB）".to_owned();
+            return;
+        };
+        let Some(engine) = self.digital.clone() else {
+            self.message = self.digital_status();
+            self.tab = 2;
+            return;
+        };
+        if let Err(error) = engine.ready() {
+            self.message = format!("本地数字人还不能用：{error}");
+            self.tab = 2;
+            return;
+        }
+        let text = self.text.trim().to_owned();
+        // 有文案就先配音（用「配音」页选中的本地音色）；没文案就用最近
+        // 一次生成的配音——两条路都只用本机，不上传。
+        let existing = self.last_audio.clone().filter(|path| path.is_file());
+        let voice = if text.is_empty() {
+            if existing.is_none() {
+                self.message =
+                    "请先输入一段文案（会用「配音」页选中的本地音色念出来），或先在「配音」页生成一段配音"
+                        .to_owned();
+                self.tab = 0;
+                return;
+            }
+            None
+        } else {
+            match self.pick_local_voice() {
+                Some(voice) => Some(voice),
+                None => {
+                    self.message =
+                        "本地还没有可用的配音音色：请先在「模型」页装 Piper 或 ZipVoice 插件"
+                            .to_owned();
+                    self.tab = 2;
+                    return;
+                }
+            }
+        };
+        let bytes = photo.bytes.clone();
+        let extension = if photo.mime.contains("png") { "png" } else { "jpg" };
+        let rate = self.rate;
+        let voice_name = voice
+            .as_ref()
+            .map(|voice| voice.label())
+            .unwrap_or_else(|| "已有配音".to_owned());
+        let dir = project.join("ai_avatar");
+        let audio_dir = project.join("ai_voice");
+        let stamp = stamp();
+        let output = dir.join(format!("local-avatar-{stamp}.mp4"));
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.cancel = Some(Arc::clone(&cancel));
+        self.begin(if voice.is_some() {
+            "本地数字人：先用本地音色配音…"
+        } else {
+            "本地数字人：读取已有配音…"
+        });
+        spawn_in_project(
+            move || -> Result<Done, String> {
+                let report = |fraction: f32, stage: &str| {
+                    let stage = stage.to_owned();
+                    host::on_ui(move |studio, _, _| {
+                        studio.handle(Msg::Ai(AiMsg::Progress { fraction, stage }));
+                    });
+                };
+                let audio = match voice {
+                    Some(voice) => {
+                        report(0.02, "本地配音生成中…");
+                        let audio_out = audio_dir.join(format!("avatar-voice-{stamp}.wav"));
+                        let spoken = voice.speak(&text, rate, &audio_out, &cancel)?;
+                        report(
+                            0.15,
+                            &format!("配音好了（{}），开始对口型…", spoken.voice_name),
+                        );
+                        audio_out
+                    }
+                    None => {
+                        let existing =
+                            existing.ok_or_else(|| "没有可用的配音：请先生成一段".to_owned())?;
+                        report(0.15, "用已有配音开始对口型…");
+                        existing
+                    }
+                };
+                let photo_path = write_temp_photo(&bytes, extension)?;
+                let rendered = engine.render(
+                    &wav2lip::Request {
+                        photo: photo_path.clone(),
+                        audio,
+                        output,
+                        fps: 25,
+                        max_side: wav2lip::MAX_SIDE,
+                    },
+                    &mut |fraction, stage| report(0.15 + 0.85 * fraction, stage),
+                    &cancel,
+                );
+                let _ = std::fs::remove_file(&photo_path);
+                let rendered = rendered?;
+                let summary = media::probe(&rendered.path.to_string_lossy())?;
+                Ok(Done {
+                    path: rendered.path.clone(),
+                    summary,
+                    name: format!("照片数字人 · 本地（{voice_name}）"),
+                    detail: rendered.summary(),
+                    cloud_audio_url: None,
+                })
+            },
+            |studio, _, _, result| {
+                studio.handle(Msg::Ai(AiMsg::Finished(Box::new(result))));
+            },
+        );
+    }
+
+    /// 当前选中的音色落在哪个本地引擎里：ZipVoice 优先，其次 Piper。
+    fn pick_local_voice(&self) -> Option<LocalVoice> {
+        let row = self.voices.get(self.voice.max(0) as usize)?;
+        if let Some(engine) = self.clone.as_ref()
+            && let Some(index) = engine.voices.iter().position(|voice| voice.id == row.id)
+        {
+            return Some(LocalVoice::Clone(engine.clone(), index));
+        }
+        if let Some(engine) = self.piper.as_ref()
+            && let Some(index) = engine.voices.iter().position(|voice| voice.id == row.id)
+        {
+            return Some(LocalVoice::Piper(engine.clone(), index));
+        }
+        // 音色表还没刷新（例如刚装完插件）：退到第一个可用音色。
+        if let Some(engine) = self.clone.as_ref() {
+            return Some(LocalVoice::Clone(engine.clone(), 0));
+        }
+        self.piper.as_ref().map(|engine| LocalVoice::Piper(engine.clone(), 0))
     }
 
     /// 挑照片：读进内存（≤10MB），并做成预览图。
@@ -1681,6 +1856,59 @@ fn stamp() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |time| time.as_secs())
+}
+
+/// 本地数字人的配音方案：Piper 的固定音色或 ZipVoice 的克隆音色。
+#[derive(Clone)]
+enum LocalVoice {
+    /// ZipVoice 克隆音色。
+    Clone(zipvoice::Engine, usize),
+    /// Piper 固定音色。
+    Piper(piper::Engine, usize),
+}
+
+impl LocalVoice {
+    /// 界面上显示的音色名。
+    fn label(&self) -> String {
+        match self {
+            LocalVoice::Clone(engine, index) => engine
+                .voices
+                .get(*index)
+                .map(|voice| format!("{} · 本地克隆", voice.name))
+                .unwrap_or_else(|| "克隆音色".to_owned()),
+            LocalVoice::Piper(engine, index) => engine
+                .voices
+                .get(*index)
+                .map(|voice| voice.name.clone())
+                .unwrap_or_else(|| "本地音色".to_owned()),
+        }
+    }
+
+    /// 念一段文字，得到一条 WAV。
+    fn speak(
+        &self,
+        text: &str,
+        rate: f32,
+        out: &Path,
+        cancel: &AtomicBool,
+    ) -> Result<piper::Spoken, String> {
+        match self {
+            LocalVoice::Clone(engine, index) => engine.speak(*index, text, rate, out, cancel),
+            LocalVoice::Piper(engine, index) => engine.speak(*index, text, rate, out, cancel),
+        }
+    }
+}
+
+/// 把照片写进临时目录，给数字人引擎按路径读；成功与否由调用方删掉。
+fn write_temp_photo(bytes: &[u8], extension: &str) -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join("xinglai-wav2lip");
+    std::fs::create_dir_all(&dir).map_err(|error| format!("临时目录建不出来：{error}"))?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |time| time.as_nanos());
+    let path = dir.join(format!("face-{}-{nanos}.{extension}", std::process::id()));
+    std::fs::write(&path, bytes).map_err(|error| format!("照片写不进临时目录：{error}"))?;
+    Ok(path)
 }
 
 /// 一个模型的硬件要求，写成人话：`显存 ≥6GB · 内存 ≥12GB`。

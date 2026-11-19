@@ -122,6 +122,10 @@ export struct AiData {
     digital-ready: bool,
     /// 数字人这件事现在的状态说明。
     digital-status: string,
+    /// 本机数字人预计耗时（10 秒片段口径，实测）。
+    avatar-estimate: string,
+    /// 数字人的效果预期与限制，如实说明。
+    avatar-limit: string,
     /// 首次算力向导开着。
     wizard-open: bool,
     /// 云端确认条开着。
@@ -400,74 +404,76 @@ component VoicePage inherits VerticalLayout {
     }
 }
 
-// 照片数字人页（一期：入口与说明；云端可用）。
+// 照片数字人页：照片 + 配音（或文案先用本地音色配音）→ 对口型说话视频。
+// 本地走 Wav2Lip 插件（完全离线），云端是兜底（会上传、按次扣费）。
+// 版面按 AI 面板 660px 的高度排：两段（照片与配音、生成），不往下滚。
 component DigitalPage inherits VerticalLayout {
     in property <AiData> data;
     in property <image> photo;
 
     callback photo-pick();
     callback photo-clear();
+    callback text-edited(string);
     callback generate();
     callback cancel();
 
-    spacing: 8px;
+    // 文案输入框的本地副本：用户第一次改它时绑定会被丢掉，所以打开时从
+    // 数据里播种，之后不覆盖正在编辑的那一份。
+    property <string> draft;
+    property <bool> typing;
+    changed data => {
+        if (!root.typing) {
+            root.draft = root.data.text;
+        }
+    }
+    init => {
+        root.draft = root.data.text;
+    }
 
+    spacing: 6px;
+
+    // 照片与文案：一块地方放完。
     DialogSection {
         first: true;
         ruled: false;
-        title: "照片";
+        title: "照片与配音";
 
         HorizontalLayout {
             spacing: 12px;
 
-            Rectangle {
-                width: 132px;
-                height: 168px;
-                border-radius: Theme.r;
-                background: Theme.well;
-                clip: true;
+            VerticalLayout {
+                spacing: 6px;
 
-                if root.data.has-photo: Image {
-                    width: parent.width;
-                    height: parent.height;
-                    source: root.photo;
-                    image-fit: cover;
-                }
+                Rectangle {
+                    width: 96px;
+                    height: 120px;
+                    border-radius: Theme.r;
+                    background: Theme.well;
+                    clip: true;
 
-                if !root.data.has-photo: VerticalLayout {
-                    alignment: center;
-                    Text {
+                    if root.data.has-photo: Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: root.photo;
+                        image-fit: cover;
+                    }
+
+                    if !root.data.has-photo: Text {
+                        width: parent.width;
+                        height: parent.height;
                         text: "还没有照片";
                         color: Theme.fg-dim;
                         font-size: Theme.fs-sm;
                         horizontal-alignment: center;
+                        vertical-alignment: center;
                     }
-                }
-            }
-
-            VerticalLayout {
-                spacing: 6px;
-
-                Text {
-                    text: root.data.has-photo
-                        ? root.data.photo-name + "（" + root.data.photo-size + "）"
-                        : "选一张 JPG/PNG 照片（≤10MB）";
-                    color: Theme.fg;
-                    font-size: Theme.fs;
-                }
-
-                Text {
-                    text: "照片会做成一段推近的片段，配上口播音轨；已标注「AI 生成」。";
-                    color: Theme.fg-dim;
-                    font-size: Theme.fs-sm;
-                    wrap: word-wrap;
                 }
 
                 HorizontalLayout {
-                    spacing: 8px;
+                    spacing: 6px;
 
                     Button {
-                        label: root.data.has-photo ? "换一张" : "选择照片";
+                        label: root.data.has-photo ? "换一张" : "选照片";
                         enabled: !root.data.busy;
                         clicked => { root.photo-pick(); }
                     }
@@ -479,22 +485,65 @@ component DigitalPage inherits VerticalLayout {
                         clicked => { root.photo-clear(); }
                     }
                 }
+            }
+
+            VerticalLayout {
+                spacing: 6px;
 
                 Text {
-                    text: "口播音频：" + (root.data.has-audio
-                        ? root.data.audio-name
-                        : "还没有，先去「配音」页生成一段");
-                    color: Theme.fg-muted;
-                    font-size: Theme.fs-sm;
+                    text: root.data.has-photo
+                        ? root.data.photo-name + "（" + root.data.photo-size + "）"
+                        : "选一张正脸 JPG/PNG 照片（≤10MB）";
+                    color: Theme.fg;
+                    font-size: Theme.fs;
                     overflow: elide;
+                }
+
+                Text {
+                    text: "正脸、五官清楚、光线均匀最好；侧脸、遮挡、多人合照会明显变差。";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+
+                box := ResizeBox {
+                    box-height: 72px;
+                    content-height: words.preferred-height;
+                    focused: words.has-focus;
+
+                    words := TextInput {
+                        x: box.pad-x;
+                        y: box.pad-y;
+                        width: parent.width - self.x - 2 * box.pad-x;
+                        height: Math.max(self.preferred-height, box.view-height);
+                        cursor-position-changed(at) => { box.reveal(at.y, self.font-size * 1.4); }
+                        text <=> root.draft;
+                        edited => { root.text-edited(self.text); }
+                        color: Theme.fg;
+                        font-size: Theme.fs;
+                        single-line: false;
+                        wrap: char-wrap;
+                        selection-background-color: Theme.accent;
+                        selection-foreground-color: Theme.on-accent;
+                        changed has-focus => { root.typing = self.has-focus; }
+                    }
+
+                    if root.draft == "" && !words.has-focus: Text {
+                        x: 0;
+                        y: box.pad-y;
+                        text: "输入要念的文案；留空就用最近一次生成的配音";
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs;
+                    }
                 }
             }
         }
     }
 
+    // 生成方式与动作。
     DialogSection {
         ruled: false;
-        title: "生成方式";
+        title: "生成";
         hint: root.data.digital-status;
 
         HorizontalLayout {
@@ -507,12 +556,31 @@ component DigitalPage inherits VerticalLayout {
             }
 
             Tag {
-                text: root.data.digital-ready ? "Wav2Lip 插件已装" : "Wav2Lip 插件未装（二期）";
+                text: root.data.digital-ready ? "Wav2Lip 已装" : "Wav2Lip 未装";
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Text {
+                text: root.data.effective == 1
+                    ? "约 1–2 分钟/条"
+                    : root.data.avatar-estimate;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                overflow: elide;
+                vertical-alignment: center;
             }
         }
 
         Text {
             text: root.data.digital-status;
+            color: Theme.fg-dim;
+            font-size: Theme.fs-sm;
+            overflow: elide;
+        }
+
+        Text {
+            text: root.data.avatar-limit;
             color: Theme.fg-dim;
             font-size: Theme.fs-sm;
             wrap: word-wrap;
@@ -522,11 +590,14 @@ component DigitalPage inherits VerticalLayout {
             spacing: 8px;
 
             Button {
-                label: "生成数字人片段";
+                label: root.data.effective == 1
+                    ? "云端生成数字人片段" : "本地生成数字人并插入";
                 primary: true;
-                enabled: !root.data.busy && !root.data.confirm-open
-                    && root.data.has-photo && root.data.has-audio
-                    && root.data.effective == 1 && root.data.signed-in;
+                enabled: !root.data.busy && !root.data.confirm-open && root.data.has-photo
+                    && (root.data.effective == 1
+                        ? root.data.signed-in && root.data.has-audio
+                        : root.data.digital-ready
+                            && (root.data.text != "" || root.data.has-audio));
                 clicked => { root.generate(); }
             }
 
@@ -535,13 +606,8 @@ component DigitalPage inherits VerticalLayout {
                 ghost: true;
                 clicked => { root.cancel(); }
             }
-        }
 
-        Text {
-            text: "说明：照片 + 口播音轨，推近镜头，未做口型同步；成片落在工程目录 ai_avatar/，可在时间轴上裁剪与调整。";
-            color: Theme.fg-dim;
-            font-size: Theme.fs-sm;
-            wrap: word-wrap;
+            Rectangle { horizontal-stretch: 1; }
         }
     }
 }
@@ -953,6 +1019,7 @@ export component AiDialog inherits Modal {
             photo: root.photo;
             photo-pick => { root.photo-pick(); }
             photo-clear => { root.photo-clear(); }
+            text-edited(text) => { root.text-edited(text); }
             generate => { root.generate(); }
             cancel => { root.cancel(); }
         }

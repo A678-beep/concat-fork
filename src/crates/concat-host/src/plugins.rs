@@ -30,9 +30,8 @@ pub const MANIFEST_URL: &str = "https://xinglaiai.com/ai-nav/api/ai-plugins/mani
 
 /// 官方插件包都在这里，清单取不到时用；清单里的 `url` 优先。
 ///
-/// `launched` 是「服务器上真的有这个包吗」的兜底：Wav2Lip 还没上线，清单里
-/// 也只是个占位（`size` 为 0），界面据此把它显示成「即将上线」，**不发起
-/// 下载请求**——0.2.12 里那个「下载失败 HTTP 404」就是从这里点出来的。
+/// `launched` 是「服务器上真的有这个包吗」的兜底：0.2.14 起 Wav2Lip 也
+/// 上线了（本地数字人），三项都可下载。
 pub const OFFICIAL: [Official; 3] = [
     Official {
         id: "piper",
@@ -44,9 +43,9 @@ pub const OFFICIAL: [Official; 3] = [
     Official {
         id: "wav2lip",
         url: "https://xinglaiai.com/ai-nav/api/ai-plugins/wav2lip.zip",
-        size: 0,
-        sha256: "",
-        launched: false,
+        size: WAV2LIP_SIZE,
+        sha256: WAV2LIP_SHA256,
+        launched: true,
     },
     Official {
         id: "voice-clone",
@@ -56,6 +55,14 @@ pub const OFFICIAL: [Official; 3] = [
         launched: true,
     },
 ];
+
+/// 本地数字人插件包（wav2lip.zip）的字节数。换包时只改这一处与
+/// [`WAV2LIP_SHA256`]，界面大小、下载校验都跟着走。
+pub const WAV2LIP_SIZE: u64 = 258_790_891;
+
+/// 本地数字人插件包的 sha256（十六进制小写）。
+pub const WAV2LIP_SHA256: &str =
+    "b642999698cd42e9d6425777f774ecf64e501891545d25858769acb72d7579a9";
 
 /// 一个官方插件包：地址、大小、校验和，以及它上线了没有。
 #[derive(Clone, Copy, Debug)]
@@ -296,7 +303,14 @@ impl Plugin {
     }
 
     /// 音色表：清单里的先，扫出来的补在后面，按 id 去重。
+    ///
+    /// 数字人插件（Wav2Lip）的 `*.onnx` 是模型不是音色，不往音色表里放。
     pub fn voices(&self) -> Vec<LocalVoice> {
+        if self.manifest.kind.trim().eq_ignore_ascii_case("avatar")
+            || self.engine() == "wav2lip"
+        {
+            return Vec::new();
+        }
         let mut voices: Vec<LocalVoice> = Vec::new();
         for entry in &self.manifest.voices {
             voices.push(LocalVoice {
@@ -764,7 +778,8 @@ pub fn download_size_hint(id: &str) -> u64 {
     match id {
         "piper" => 110 * 1024 * 1024,
         "voice-clone" => 177_134_608,
-        "wav2lip" => 220 * 1024 * 1024,
+        "wav2lip" if WAV2LIP_SIZE > 0 => WAV2LIP_SIZE,
+        "wav2lip" => 300 * 1024 * 1024,
         _ => 100 * 1024 * 1024,
     }
 }
@@ -884,16 +899,18 @@ mod tests {
         assert!(!coming_soon("not-official").online());
     }
 
-    /// 兜底表里 Wav2Lip 没上线，Piper 与语音克隆上线了。
+    /// 兜底表里三个包都上线了：Piper、语音克隆、本地数字人（Wav2Lip）。
     #[test]
     fn the_official_table_says_what_is_launched() {
         assert!(official("piper").unwrap().launched);
-        assert!(!official("wav2lip").unwrap().launched);
+        assert!(official("wav2lip").unwrap().launched);
         assert!(official("voice-clone").unwrap().launched);
         let fallback = package_status(None, "voice-clone");
         assert!(fallback.online());
         assert_eq!(fallback.size, 177_134_608);
-        assert!(!package_status(None, "wav2lip").online());
+        let avatar = package_status(None, "wav2lip");
+        assert!(avatar.online());
+        assert!(avatar.size > 0);
     }
 
     /// 404、超时、连不上都翻成人话。
