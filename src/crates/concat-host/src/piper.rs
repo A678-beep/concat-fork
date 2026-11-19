@@ -384,6 +384,45 @@ impl Drop for CpuTimer {
 mod tests {
     use super::*;
 
+    /// 真的用装好的 Piper 插件合成一段：要本机插件、要写盘，`--ignored` 点名跑。
+    ///
+    /// 这条走的就是面板「生成配音并插入」的同一个 [`Engine::speak`]。
+    #[test]
+    #[ignore = "needs the installed Piper plugin"]
+    fn live_piper_speaks() {
+        let dirs = crate::AppDirs::locate().expect("app dirs");
+        let plugins = crate::plugins::scan(&dirs);
+        let plugin = plugins
+            .iter()
+            .find(|plugin| plugin.engine() == "piper")
+            .expect("Piper plugin installed");
+        let engine = Engine::load(plugin).expect("piper engine");
+        let out = std::env::temp_dir().join(format!("xinglai-piper-{}.wav", std::process::id()));
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let spoken = engine
+            .speak(
+                0,
+                "大家好，欢迎来到星籁剪辑。这是完全离线的本地AI配音，不需要登录，也不会把文字上传到云端。",
+                1.0,
+                &out,
+                &cancel,
+            )
+            .expect("speak");
+        println!(
+            "LIVE_PIPER voice={} seconds={:.2} wall_ms={} cpu_ms={} rtf={:.1} cores={:.1} path={}",
+            spoken.voice_name,
+            spoken.seconds,
+            spoken.wall_ms,
+            spoken.cpu_ms,
+            spoken.real_time_factor(),
+            spoken.cores(),
+            spoken.path.display()
+        );
+        assert!(spoken.seconds > 5.0, "audio too short: {}", spoken.seconds);
+        assert!(spoken.path.is_file());
+        let _ = std::fs::remove_file(&spoken.path);
+    }
+
     /// 44 字节头的标准 WAV：44.1kHz 单声道 16 位，一秒钟。
     #[test]
     fn a_wav_states_its_length() {
