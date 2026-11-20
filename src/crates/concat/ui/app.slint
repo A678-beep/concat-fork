@@ -462,6 +462,9 @@ export component App inherits Window {
 
     callback settings-closed();
     callback settings-page-changed(index: int);
+    callback settings-ai-badge-changed(on: bool);
+    /// 打开 AGPL 许可证或源码页面。
+    callback settings-open-license(url: string);
     callback settings-show-log();
     callback settings-language-changed(index: int);
     callback settings-log-level-changed(index: int);
@@ -1123,6 +1126,8 @@ export component App inherits Window {
         focus-keys => { keys.focus(); }
         closed => { root.settings-closed(); }
         page-changed(index) => { root.settings-page-changed(index); }
+        ai-badge-changed(on) => { root.settings-ai-badge-changed(on); }
+        open-license(url) => { root.settings-open-license(url); }
         shortcut-capture(id) => { root.settings-shortcut-capture(id); }
         shortcut-reset(id) => { root.settings-shortcut-reset(id); }
         shortcut-reset-all => { root.settings-shortcut-reset-all(); }

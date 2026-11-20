@@ -1,0 +1,15 @@
+id = "xinglai.subtitle-yellow"
+name = "字幕 · 黄字黑边"
+language = "Chinese"
+order = 91
+offsetY = 0.34
+
+[style]
+content = "星籁剪辑"
+fontFamily = "Hanken Grotesk"
+fontWeight = 800
+fontSize = 0.06
+color = "#ffd400"
+strokeWidth = 0.014
+strokeColor = "#000000"
+shadow = false

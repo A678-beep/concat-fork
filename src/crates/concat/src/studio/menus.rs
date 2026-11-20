@@ -32,6 +32,134 @@ impl Studio {
         }
     }
 
+    /// 一键踩点：按选中音频（没选中就用播放头下的那段）的节拍，把时间轴上
+    /// 跨过每个节拍的画面/声音片段切开。节拍来自时间轴已经在解码的波形峰值，
+    /// 所以不需要重新分析文件；波形还没读完时提示等一秒再试。
+    pub fn beat_cut(&mut self) {
+        use concat_project::model::ClipKind;
+
+        let playhead = f64::from(self.playhead);
+        // 选中的那段先找；没有就用播放头下的一段。只认带媒体、没变速的片段。
+        let mut source: Option<(String, f64, f64, f64, f64)> = None;
+        for clip in &self.timeline().clips {
+            if matches!(clip.kind, ClipKind::Text | ClipKind::Shape) || clip.media_id.is_empty() {
+                continue;
+            }
+            let chosen = self.selection.contains(&clip.id) || self.selection.is_empty()
+                && clip.start <= playhead
+                && playhead < clip.start + clip.duration;
+            if chosen {
+                source = Some((
+                    clip.media_id.clone(),
+                    clip.start,
+                    clip.duration,
+                    clip.source_start,
+                    clip.speed,
+                ));
+                if self.selection.contains(&clip.id) {
+                    break;
+                }
+            }
+        }
+        let Some((media_id, clip_start, clip_duration, source_start, speed)) = source else {
+            self.notify("一键踩点：先选中一段有声音的音频（或把播放头放在它上面）", true);
+            return;
+        };
+        if (speed - 1.0).abs() > 0.001 {
+            self.notify("一键踩点：这段音频变速过，先把速度还原到 1× 再踩点", true);
+            return;
+        }
+        let Some(peaks) = self.peaks.get(&media_id).cloned() else {
+            self.notify("一键踩点：音频波形还在解码，等一两秒再试", true);
+            return;
+        };
+        let peaks = peaks.finest();
+        let rate = f64::from(peaks.buckets_per_second.max(1.0));
+        let count = peaks.max.len().min(peaks.min.len());
+        if count < 8 {
+            self.notify("一键踩点：这段音频太短，听不出节拍", true);
+            return;
+        }
+        // 能量包络：每个峰值桶里取绝对值大的一侧。
+        let mut energy = Vec::with_capacity(count);
+        for index in 0..count {
+            energy.push(f64::from(peaks.max[index].abs().max(peaks.min[index].abs())));
+        }
+        // 起音强度：当前能量减去 ~60ms 前的能量，负的不要。
+        let window = ((rate * 0.06).round() as usize).max(1);
+        let mut onset = vec![0.0_f64; count];
+        for index in window..count {
+            onset[index] = (energy[index] - energy[index - window]).max(0.0);
+        }
+        let mean = onset.iter().sum::<f64>() / onset.len() as f64;
+        let deviation = (onset
+            .iter()
+            .map(|value| (value - mean) * (value - mean))
+            .sum::<f64>()
+            / onset.len() as f64)
+            .sqrt();
+        let threshold = mean + deviation * 0.9;
+        let minimum_gap = ((rate * 0.28).round() as usize).max(1);
+        let mut last = 0usize;
+        let mut beats: Vec<f64> = Vec::new();
+        for index in 0..count {
+            if onset[index] < threshold || onset[index] < 0.02 {
+                continue;
+            }
+            let before = onset[index.saturating_sub(1)];
+            let after = onset.get(index + 1).copied().unwrap_or(0.0);
+            if onset[index] < before || onset[index] < after {
+                continue;
+            }
+            if !beats.is_empty() && index.saturating_sub(last) < minimum_gap {
+                continue;
+            }
+            last = index;
+            // 峰值桶 → 媒体时间 → 时间轴时间；只留片段自己的范围。
+            let media_time = index as f64 / rate;
+            let timeline_time = clip_start + (media_time - source_start);
+            if timeline_time <= clip_start + 0.06
+                || timeline_time >= clip_start + clip_duration - 0.06
+            {
+                continue;
+            }
+            beats.push(timeline_time);
+        }
+        if beats.is_empty() {
+            self.notify("一键踩点：这段音频里没听到明显的节拍", true);
+            return;
+        }
+        // 每个节拍把跨过它的画面/声音片段切开；文字与图形不动。
+        let mut cuts = 0;
+        for beat in beats {
+            let victims: Vec<String> = self
+                .timeline()
+                .clips
+                .iter()
+                .filter(|clip| {
+                    !matches!(clip.kind, ClipKind::Text | ClipKind::Shape)
+                        && clip.start + 0.02 < beat
+                        && beat < clip.start + clip.duration - 0.02
+                        && !self.locked(&clip.track_id)
+                })
+                .map(|clip| clip.id.clone())
+                .collect();
+            if victims.is_empty() {
+                continue;
+            }
+            self.apply(Command::SplitClips {
+                clip_ids: victims,
+                time: beat,
+            });
+            cuts += 1;
+        }
+        if cuts == 0 {
+            self.notify("一键踩点：找到了节拍，但时间轴上没有跨过这些点的片段可切", true);
+        } else {
+            self.notify(&format!("一键踩点：按节拍切了 {cuts} 处"), false);
+        }
+    }
+
     /// Delete Left / Delete Right, Q and W: the selected clips the
     /// playhead runs through lose everything before it, or everything
     /// after it, as one undo step. With nothing selected, the one clip

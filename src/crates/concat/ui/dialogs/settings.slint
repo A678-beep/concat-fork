@@ -77,6 +77,8 @@ export struct SettingsData {
     playhead-stops: bool,
     /// large files get a smaller copy for playback
     proxies: bool,
+    /// 导出视频带「AI 生成」角标。
+    ai-badge: bool,
     /// a launch opens with the panels and the window where the last
     /// session left them
     remember-layout: bool,
@@ -663,6 +665,8 @@ export component SettingsDialog inherits Sheet {
 
     callback page-changed(index: int);
     /// Opens the folder this run's log is being written into.
+    /// 打开许可证或源码页面（AGPL 要求的入口）。
+    callback open-license(url: string);
     callback show-log();
     callback language-changed(index: int);
     callback log-level-changed(index: int);
@@ -684,6 +688,7 @@ export component SettingsDialog inherits Sheet {
     callback scale-changed(index: int);
     callback playhead-stops-changed(on: bool);
     callback proxies-changed(on: bool);
+    callback ai-badge-changed(on: bool);
     callback remember-layout-changed(on: bool);
     callback gpu-changed(on: bool);
     /// 星籁 AI：运行方式（0 智能 / 1 仅本地 / 2 仅云端）与重新检测硬件。
@@ -753,6 +758,7 @@ export component SettingsDialog inherits Sheet {
         {label: I18n.t("common.transcriber"), glyph: Glyph.waveform, page: 2},
         {label: I18n.t("common.speech"), glyph: Glyph.music, page: 3},
         {label: I18n.t("settings.about"), glyph: Glyph.sparkle, page: 5},
+        {label: "开源许可", glyph: Glyph.info, page: 8},
     ] : [
         {label: I18n.t("settings.general"), glyph: Glyph.settings, page: 0},
         {label: I18n.t("settings.appearance"), glyph: Glyph.sun, page: 1},
@@ -763,6 +769,7 @@ export component SettingsDialog inherits Sheet {
         {label: I18n.t("settings.automation"), glyph: Glyph.lock, page: 4},
         {label: I18n.t("settings.version"), glyph: Glyph.tag, page: 6},
         {label: I18n.t("settings.about"), glyph: Glyph.sparkle, page: 5},
+        {label: "开源许可", glyph: Glyph.info, page: 8},
     ];
 
     /// The launch screen is up: no project, so no dispatch. The capture
@@ -1038,6 +1045,18 @@ export component SettingsDialog inherits Sheet {
                     on: root.data.proxies;
                     open: false;
                     switched(on) => { root.proxies-changed(on); }
+                }
+
+                // 导出的成片右下角是否叠一枚「AI 生成」角标：默认
+                // 打开，用来标识 AI 生成内容；关掉后导出不再叠加。
+                DialogSection {
+                    ruled: false;
+                    title: "导出时带「AI 生成」角标";
+                    hint: "默认打开：导出的视频右下角有一枚「AI 生成」小角标，用来标识 AI 生成内容；关掉后不再叠加。";
+                    switchable: true;
+                    on: root.data.ai-badge;
+                    open: false;
+                    switched(on) => { root.ai-badge-changed(on); }
                 }
 
                 // On, the next launch opens with the panels where this one
@@ -1707,12 +1726,32 @@ export component SettingsDialog inherits Sheet {
                         font-weight: Theme.weight-title;
                     }
 
-                    // AGPL 的义务写在明处：这一屏是谁、从哪来、源码在哪。
                     Text {
-                        text: "基于 Concat（AGPL-3.0-or-later）构建 · 源码：github.com/A678-beep/concat-fork";
+                        text: "星籁剪辑 · 星籁 AI 出品";
                         color: Theme.fg-muted;
                         font-size: Theme.fs-sm;
                         wrap: word-wrap;
+                    }
+
+                    // AGPL 的义务写在明处：许可证全文、版权声明与源码获取
+                    // 方式，都在「开源许可」子页里。
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: 8px;
+
+                        Button {
+                            label: "开源许可";
+                            glyph: Glyph.info;
+                            ghost: true;
+                            clicked => { root.page-changed(8); }
+                        }
+
+                        Button {
+                            label: "查看 AGPL-3.0 全文";
+                            glyph: Glyph.link;
+                            ghost: true;
+                            clicked => { root.open-license("https://www.gnu.org/licenses/agpl-3.0.txt"); }
+                        }
                     }
                 }
 
@@ -1832,6 +1871,83 @@ export component SettingsDialog inherits Sheet {
                         glyph: Glyph.reset;
                         ghost: true;
                         clicked => { root.shortcut-reset-all(); }
+                    }
+                }
+            }
+
+            if root.data.tab == 8: VerticalLayout {
+                padding-top: 10px;
+
+                DialogSection {
+                    ruled: false;
+                    first: true;
+                    title: "开源许可";
+
+                    Text {
+                        text: "星籁剪辑是一个以 AGPL-3.0-or-later 发布的桌面剪辑应用：它基于 Concat 构建，星籁剪辑对它的修改同样以 AGPL-3.0-or-later 授权。";
+                        color: Theme.fg;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+
+                    Text {
+                        text: "Concat 版权声明：Copyright (C) 2026 Jareer Abdullah and Concat contributors · 项目主页 github.com/jub0t/Concat";
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+                }
+
+                DialogSection {
+                    title: "源码获取";
+                    hint: "AGPL 要求：分发这个程序的人，必须把对应版本的完整源码免费提供给你。";
+
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            text: "① 本机安装目录里的 LICENSE 与 THIRD_PARTY_NOTICES.md：许可证全文与第三方组件声明；\n② 源码仓库 github.com/A678-beep/concat-fork 里与本机版本对应的分支或标签；\n③ 发邮件到 dev@xinglaiai.com 索取对应版本的完整源码（含构建说明），我们会免费提供。";
+                            color: Theme.fg-muted;
+                            font-size: Theme.fs-sm;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            alignment: start;
+                            spacing: 8px;
+
+                            Button {
+                                label: "打开源码仓库";
+                                glyph: Glyph.link;
+                                clicked => { root.open-license("https://github.com/A678-beep/concat-fork"); }
+                            }
+
+                            Button {
+                                label: "查看 AGPL-3.0 全文";
+                                glyph: Glyph.link;
+                                ghost: true;
+                                clicked => { root.open-license("https://www.gnu.org/licenses/agpl-3.0.txt"); }
+                            }
+
+                            Button {
+                                label: "邮件索取源码";
+                                glyph: Glyph.link;
+                                ghost: true;
+                                clicked => { root.open-license("mailto:dev@xinglaiai.com?subject=%E7%B4%A2%E5%8F%96%E6%BA%90%E7%A0%81"); }
+                            }
+                        }
+                    }
+                }
+
+                DialogSection {
+                    title: "第三方开源组件";
+                    hint: "完整版权与许可证文本见安装目录的 THIRD_PARTY_NOTICES.md。";
+
+                    Text {
+                        text: "Slint（界面，GPL-3.0/商业双许可）· wgpu（渲染，MIT/Apache-2.0）· FFmpeg（编解码，LGPL-2.1+）· ONNX Runtime（本地推理，MIT）· Rust 标准库与生态（MIT/Apache-2.0）· 本地模型与字体各有其许可。";
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
                     }
                 }
             }

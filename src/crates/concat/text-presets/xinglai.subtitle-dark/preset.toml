@@ -1,0 +1,17 @@
+id = "xinglai.subtitle-dark"
+name = "字幕 · 黑底白字"
+language = "Chinese"
+order = 90
+offsetY = 0.34
+
+[style]
+content = "星籁剪辑"
+fontFamily = "Hanken Grotesk"
+fontWeight = 700
+fontSize = 0.058
+color = "#ffffff"
+background = "#000000cc"
+backgroundRadius = 0.012
+backgroundPaddingX = 0.018
+backgroundPaddingY = 0.008
+shadow = false

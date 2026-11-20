@@ -57,6 +57,8 @@ pub enum SettingsMsg {
     PlayheadStopsChanged(bool),
     /// The proxies switch: whether large files get a smaller copy to play.
     ProxiesChanged(bool),
+    /// 导出视频带「AI 生成」角标。
+    AiBadge(bool),
     /// The remember-layout switch: whether a launch opens on the last
     /// session's panels and window size.
     RememberLayoutChanged(bool),
@@ -396,6 +398,11 @@ impl SettingsPane {
             SettingsMsg::ProxiesChanged(on) => {
                 log::info!("settings: Proxies {}", on_off(on));
                 studio.prefs.proxies = on;
+                studio.prefs.save(&studio.host.dirs);
+            }
+            SettingsMsg::AiBadge(on) => {
+                log::info!("settings: AI 生成角标 {}", on_off(on));
+                studio.prefs.ai_badge = Some(on);
                 studio.prefs.save(&studio.host.dirs);
                 // On, the media already in the project gets its proxies
                 // straight away (refresh_art's stamp holds the switch);
@@ -1044,6 +1051,7 @@ impl SettingsPane {
                 .unwrap_or(2) as i32,
             playhead_stops: self.playhead_stops,
             proxies: studio.prefs.proxies,
+            ai_badge: studio.prefs.ai_badge.unwrap_or(true),
             remember_layout: studio.prefs.remembers_layout(),
             layout_switchable: !crate::platform::phone(),
             gpu: !studio.prefs.draws_in_software(),

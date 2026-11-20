@@ -1656,7 +1656,7 @@ component BrandLockup inherits HorizontalLayout {
         }
 
         if !root.compact: Text {
-            text: "XINGLAI CUT · 基于 Concat（AGPL-3.0）";
+            text: "星籁剪辑 · 星籁 AI 出品";
             color: Theme.fg-dim;
             font-size: 9.5px;
             letter-spacing: 0.5px;
@@ -2100,8 +2100,9 @@ component WideHome inherits Rectangle {
                 alignment: start;
 
                 // ── 品牌 ─────────────────────────────────────────────
-                // 这一页是星籁剪辑的第一张脸：标记、名字、以及一句它是
-                // 从哪来的（Concat，AGPL-3.0）；右边是账号。
+                // 这一页是星籁剪辑的第一张脸：标记、名字与出品方；
+                // 开源来源与许可证在「设置 › 关于 › 开源许可」里，
+                // 按 AGPL-3.0 的要求写在明处。
                 HorizontalLayout {
                     spacing: 12px;
                     BrandLockup { horizontal-stretch: 1; }

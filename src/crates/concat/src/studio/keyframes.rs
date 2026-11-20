@@ -2730,6 +2730,13 @@ impl Studio {
                     &keymap::label(&self.prefs, "split"),
                     straddled,
                 ),
+                row(
+                    "beat-cut",
+                    "一键踩点（按音频节拍切开）".to_owned(),
+                    Glyph::Waveform,
+                    "",
+                    !self.timeline().clips.is_empty(),
+                ),
                 MenuItemData {
                     id: "delete".into(),
                     label: if selected > 1 {

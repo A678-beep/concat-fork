@@ -2589,6 +2589,15 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     app.on_model_choose_file(on_window!(|state, id: SharedString| {
         state.handle(Msg::Settings(SettingsMsg::ModelChooseFile(id.to_string())));
     }));
+    // AGPL 的入口：开源许可页里的许可证全文、源码仓库与邮件索取。
+    app.on_settings_open_license(move |url: SharedString| {
+        if let Err(error) = opener::open(url.as_str()) {
+            log::warn!("settings: could not open {url}: {error}");
+        }
+    });
+    app.on_settings_ai_badge_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Settings(SettingsMsg::AiBadge(on)));
+    }));
 
     // ── the tray's sound and word tools ──
     // The tray's panel buttons are toggles: a press opens the panel, or
@@ -2845,6 +2854,8 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                             let at = state.playhead;
                             state.split_at(at, true);
                         }
+                        // 一键踩点：按选中音频的节拍把时间轴切开。
+                        "beat-cut" => state.beat_cut(),
                         "save" => state.save(true),
                         // 工程云同步：菜单收起后（此处仍借着 Studio）只记下
                         // 要做哪一件，等 borrow 放掉再交给后台。

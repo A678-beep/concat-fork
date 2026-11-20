@@ -503,7 +503,12 @@ impl ExportPane {
         // chosen - and the window goes on answering: hundreds of captions
         // are seconds of painting on a phone, and Android closes an app
         // whose window does not answer a touch for five.
-        let project = session.project().clone();
+        let mut project = session.project().clone();
+        // 右下角的「AI 生成」角标：只写进导出的这份工程副本，
+        // 不碰用户的工程、也不进撤销栈。
+        if studio.prefs.ai_badge.unwrap_or(true) {
+            add_ai_badge(&mut project, f64::from(studio.duration()));
+        }
         let project_dir = std::path::PathBuf::from(session.path());
         let (width, height) = self.size(studio);
         let (num, den) = self.rate(studio);
@@ -743,6 +748,48 @@ fn file_name(typed: &str) -> Option<String> {
     }
     let refused = |c: char| c.is_control() || r#"/\:*?"<>|"#.contains(c);
     (!name.chars().any(refused)).then(|| name.to_owned())
+}
+
+/// 往导出的工程副本里放一枚只有文字的标题片段：右下角的
+/// 「AI 生成」角标。导出的副本不写回工程，也不进撤销栈。
+///
+/// 文字的定位和标题一样走 clip 的 offset：正的 y 往下、正的 x 往右，
+/// 单位是画面宽高的比例；字号是画面高度的比例。
+fn add_ai_badge(project: &mut concat_project::model::Project, duration: f64) {
+    use concat_project::model::{Clip, ClipKind, TextStyle, Track};
+
+    let track_id = "ai-badge-track".to_owned();
+    let timeline = project.active_mut();
+    timeline.tracks.push(Track {
+        id: track_id.clone(),
+        ..Track::default()
+    });
+    let style = TextStyle {
+        content: "AI 生成".to_owned(),
+        font_family: "Hanken Grotesk".to_owned(),
+        font_size: 0.026,
+        font_weight: 600.0,
+        color: "#ffffff".to_owned(),
+        opacity: 0.88,
+        background: "#00000066".to_owned(),
+        background_radius: 0.008,
+        background_padding_x: 0.012,
+        background_padding_y: 0.006,
+        shadow: true,
+        ..TextStyle::default()
+    };
+    let mut clip = Clip::blank(
+        "ai-badge-clip",
+        track_id,
+        ClipKind::Text,
+        "AI 生成",
+        0.0,
+        duration.max(1.0),
+    );
+    clip.text = Some(style.tidy());
+    clip.offset_x = 0.34;
+    clip.offset_y = 0.40;
+    timeline.clips.push(std::sync::Arc::new(clip));
 }
 
 #[cfg(test)]

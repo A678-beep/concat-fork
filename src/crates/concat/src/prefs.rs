@@ -92,6 +92,9 @@ pub struct Preferences {
     /// 本地数字人上次选的引擎：0 Wav2Lip（快）、1 SadTalker（慢但更自然）。
     #[serde(default)]
     pub ai_avatar_engine: Option<i32>,
+    /// 导出的视频是否叠一枚「AI 生成」角标；缺省（`None`）是带上。
+    #[serde(default)]
+    pub ai_badge: Option<bool>,
     /// The interface's locale code ("de", "pt-BR", ...); absent is English.
     pub locale: Option<String>,
     /// Package ids starred in the effect libraries, in no order. One list

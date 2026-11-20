@@ -1,0 +1,15 @@
+id = "xinglai.subtitle-white-stroke"
+name = "字幕 · 白字黑边"
+language = "Chinese"
+order = 92
+offsetY = 0.34
+
+[style]
+content = "星籁剪辑"
+fontFamily = "Hanken Grotesk"
+fontWeight = 700
+fontSize = 0.058
+color = "#ffffff"
+strokeWidth = 0.012
+strokeColor = "#000000"
+shadow = true
