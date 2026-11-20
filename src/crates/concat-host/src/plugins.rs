@@ -30,9 +30,9 @@ pub const MANIFEST_URL: &str = "https://xinglaiai.com/ai-nav/api/ai-plugins/mani
 
 /// 官方插件包都在这里，清单取不到时用；清单里的 `url` 优先。
 ///
-/// `launched` 是「服务器上真的有这个包吗」的兜底：0.2.14 起 Wav2Lip 也
-/// 上线了（本地数字人），三项都可下载。
-pub const OFFICIAL: [Official; 3] = [
+/// `launched` 是「服务器上真的有这个包吗」的兜底：0.2.14 起 Wav2Lip 与
+/// SadTalker 两个本地数字人都上线了，四项都可下载。
+pub const OFFICIAL: [Official; 4] = [
     Official {
         id: "piper",
         url: "https://xinglaiai.com/ai-nav/api/ai-plugins/piper.zip",
@@ -45,6 +45,13 @@ pub const OFFICIAL: [Official; 3] = [
         url: "https://xinglaiai.com/ai-nav/api/ai-plugins/wav2lip.zip",
         size: WAV2LIP_SIZE,
         sha256: WAV2LIP_SHA256,
+        launched: true,
+    },
+    Official {
+        id: "sadtalker",
+        url: "https://xinglaiai.com/ai-nav/api/ai-plugins/sadtalker.zip",
+        size: SADTALKER_SIZE,
+        sha256: SADTALKER_SHA256,
         launched: true,
     },
     Official {
@@ -63,6 +70,13 @@ pub const WAV2LIP_SIZE: u64 = 258_790_891;
 /// 本地数字人插件包的 sha256（十六进制小写）。
 pub const WAV2LIP_SHA256: &str =
     "b642999698cd42e9d6425777f774ecf64e501891545d25858769acb72d7579a9";
+
+/// SadTalker 数字人插件包（sadtalker.zip）的字节数。
+pub const SADTALKER_SIZE: u64 = 2_123_080_397;
+
+/// SadTalker 数字人插件包的 sha256（十六进制小写）。
+pub const SADTALKER_SHA256: &str =
+    "582c0bc11f38b442466c0bb174ac757bbb42f8a304bbeee596ac4060e5eaad19";
 
 /// 一个官方插件包：地址、大小、校验和，以及它上线了没有。
 #[derive(Clone, Copy, Debug)]
@@ -780,6 +794,8 @@ pub fn download_size_hint(id: &str) -> u64 {
         "voice-clone" => 177_134_608,
         "wav2lip" if WAV2LIP_SIZE > 0 => WAV2LIP_SIZE,
         "wav2lip" => 300 * 1024 * 1024,
+        "sadtalker" if SADTALKER_SIZE > 0 => SADTALKER_SIZE,
+        "sadtalker" => 2_300_000_000,
         _ => 100 * 1024 * 1024,
     }
 }
@@ -836,6 +852,7 @@ fn name_of(id: &str) -> String {
         "piper" => "本地配音插件".to_owned(),
         "voice-clone" => "本地语音克隆插件".to_owned(),
         "wav2lip" => "本地数字人插件".to_owned(),
+        "sadtalker" => "SadTalker 数字人插件".to_owned(),
         other => format!("插件「{other}」"),
     }
 }
@@ -899,11 +916,12 @@ mod tests {
         assert!(!coming_soon("not-official").online());
     }
 
-    /// 兜底表里三个包都上线了：Piper、语音克隆、本地数字人（Wav2Lip）。
+    /// 兜底表里四个包都上线了：Piper、语音克隆、Wav2Lip、SadTalker。
     #[test]
     fn the_official_table_says_what_is_launched() {
         assert!(official("piper").unwrap().launched);
         assert!(official("wav2lip").unwrap().launched);
+        assert!(official("sadtalker").unwrap().launched);
         assert!(official("voice-clone").unwrap().launched);
         let fallback = package_status(None, "voice-clone");
         assert!(fallback.online());
@@ -911,6 +929,9 @@ mod tests {
         let avatar = package_status(None, "wav2lip");
         assert!(avatar.online());
         assert!(avatar.size > 0);
+        let sad = package_status(None, "sadtalker");
+        assert!(sad.online());
+        assert!(sad.size > 0);
     }
 
     /// 404、超时、连不上都翻成人话。

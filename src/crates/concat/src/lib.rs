@@ -1057,6 +1057,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     app.on_ai_rate_changed(on_window!(|state, value: f32| {
         state.handle(Msg::Ai(AiMsg::Rate(value)));
     }));
+    app.on_ai_engine_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Ai(AiMsg::Engine(index)));
+    }));
     app.on_ai_generate(on_window!(|state| {
         state.handle(Msg::Ai(AiMsg::Generate));
     }));

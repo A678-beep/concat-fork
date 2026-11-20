@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use concat_host::hardware::{Hardware, Tier};
 use concat_host::media::{self, MediaSummary};
-use concat_host::{ai_models, cloud_ai, piper, plugins, wav2lip, zipvoice};
+use concat_host::{ai_models, cloud_ai, piper, plugins, sadtalker, wav2lip, zipvoice};
 use concat_project::Command;
 use concat_project::model::{MediaKind, MediaOrigin};
 
@@ -34,7 +34,7 @@ use crate::ui::{AiData, AiPluginItem, AiVoiceItem};
 const CLOUD_COST: &str = "云端：需登录星籁账号，按套餐额度扣费（配音约 ¥0.004/51 字，数字人按次扣）；素材会上传到云端，每次生成前都会确认。";
 
 /// 本地数字人的效果预期，界面上常驻。
-const AVATAR_LIMIT: &str = "只动嘴、不摇头：清晰度取决于照片；效果不如云端数字人（Hedra 级），但完全离线、不花钱、素材不出本机。";
+const AVATAR_LIMIT: &str = "Wav2Lip 只动嘴，SadTalker 会点头/眨眼但仍不是真人；清晰度都取决于照片，效果不如云端数字人（Hedra 级），但完全离线、不花钱、素材不出本机。";
 
 /// 配音文字上限，与界面一致。
 const MAX_TEXT: usize = 2000;
@@ -156,6 +156,8 @@ pub enum AiMsg {
     PhotoPick,
     /// 清掉照片。
     PhotoClear,
+    /// 换本地数字人引擎：0 Wav2Lip、1 SadTalker。
+    Engine(i32),
     /// 云端素材确认：继续。
     CloudConfirm,
     /// 云端素材确认：取消。
@@ -210,8 +212,14 @@ pub struct AiPane {
     pub clone: Option<zipvoice::Engine>,
     /// 装好的本地数字人引擎（Wav2Lip）。
     pub digital: Option<wav2lip::Engine>,
+    /// 装好的本地数字人引擎（SadTalker，效果好但只在 CPU 上跑，很慢）。
+    pub sadtalker: Option<sadtalker::Engine>,
     /// 数字人插件读不出来时的原因（装上了但缺文件/缺 ffmpeg）。
     digital_issue: String,
+    /// SadTalker 插件读不出来的原因。
+    sadtalker_issue: String,
+    /// 数字人页选中的本地引擎：0 Wav2Lip、1 SadTalker。
+    pub digital_engine: i32,
     /// 当前可选的音色（本地或云端，跟着运行方式走）。
     voices: Vec<VoiceRow>,
     /// 云端音色列表。
@@ -294,7 +302,10 @@ impl Default for AiPane {
             piper: None,
             clone: None,
             digital: None,
+            sadtalker: None,
             digital_issue: String::new(),
+            sadtalker_issue: String::new(),
+            digital_engine: 0,
             voices: Vec::new(),
             cloud_voices: None,
             voice: 0,
@@ -331,6 +342,7 @@ impl AiPane {
         let mut pane = AiPane {
             mode: AiMode::from_prefs(prefs.ai_mode.as_deref()),
             rate: prefs.ai_rate.unwrap_or(1.0).clamp(0.8, 1.3),
+            digital_engine: prefs.ai_avatar_engine.unwrap_or(0).clamp(0, 1),
             wizard_open: !prefs.ai_wizard_seen,
             ..AiPane::default()
         };
@@ -388,6 +400,8 @@ impl AiPane {
             });
         self.digital = None;
         self.digital_issue.clear();
+        self.sadtalker = None;
+        self.sadtalker_issue.clear();
         if let Some(plugin) = self
             .plugins
             .iter()
@@ -398,6 +412,19 @@ impl AiPane {
                 Err(error) => {
                     log::warn!("ai-plugins: 数字人引擎读不出来：{error}");
                     self.digital_issue = error;
+                }
+            }
+        }
+        if let Some(plugin) = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.engine() == "sadtalker")
+        {
+            match sadtalker::Engine::load(plugin) {
+                Ok(engine) => self.sadtalker = Some(engine),
+                Err(error) => {
+                    log::warn!("ai-plugins: SadTalker 引擎读不出来：{error}");
+                    self.sadtalker_issue = error;
                 }
             }
         }
@@ -575,11 +602,25 @@ impl AiPane {
         }
     }
 
-    /// 本地数字人的状态：插件装没装、能不能跑、下一步该做什么。
+    /// 本地数字人的状态：选中的引擎装没装、能不能跑、下一步该做什么。
     fn digital_status(&self) -> String {
-        if let Some(engine) = self.digital.as_ref() {
+        if self.digital_engine == 1 {
+            if let Some(engine) = self.sadtalker.as_ref() {
+                match engine.ready() {
+                    Ok(()) => "SadTalker 已就绪：照片 + 文案 → 会点头、眨眼的说话视频；只在 CPU 上跑，比较慢（本机 5 秒视频约二十多分钟），生成后自动插入时间轴。急用建议切 Wav2Lip（快）。".to_owned(),
+                    Err(error) => format!("SadTalker 插件装上了，但这条链路还缺东西：{error}"),
+                }
+            } else if !self.sadtalker_issue.trim().is_empty() {
+                format!(
+                    "SadTalker 插件已安装但读不出来：{}；请在「模型」页删掉再重下一次",
+                    self.sadtalker_issue.trim()
+                )
+            } else {
+                "还没有装 SadTalker 插件：到「模型」页下载「SadTalker 数字人」（约 2.3GB，纯 CPU、很慢）。也可以把上面的引擎切到 Wav2Lip（快）先用。".to_owned()
+            }
+        } else if let Some(engine) = self.digital.as_ref() {
             match engine.ready() {
-                Ok(()) => "本地数字人已就绪：照片 + 文案（用本地音色先配音）→ 对口型视频，全程离线、不上传。生成后自动插入时间轴。".to_owned(),
+                Ok(()) => "Wav2Lip 已就绪：照片 + 文案（用本地音色先配音）→ 对口型视频，全程离线、不上传。生成后自动插入时间轴。".to_owned(),
                 Err(error) => format!("数字人插件装上了，但这条链路还缺东西：{error}"),
             }
         } else if !self.digital_issue.trim().is_empty() {
@@ -588,23 +629,43 @@ impl AiPane {
                 self.digital_issue.trim()
             )
         } else {
-            "还没有装本地数字人插件：到「模型」页下载「Wav2Lip 口型同步」（约 300MB，一次装好、之后完全离线、不花钱）。".to_owned()
+            "还没有装本地数字人插件：到「模型」页下载「Wav2Lip 口型同步」（约 247MB，一次装好、之后完全离线、不花钱）。".to_owned()
         }
     }
 
-    /// 数字人插件装好且能跑。
-    fn digital_ready(&self) -> bool {
+    /// Wav2Lip 装好且能跑。
+    fn wav2lip_ready(&self) -> bool {
         self.digital
             .as_ref()
             .is_some_and(|engine| engine.ready().is_ok())
     }
 
-    /// 本机数字人预计耗时，一句话。
-    fn avatar_estimate(&self) -> String {
-        self.hardware
+    /// SadTalker 装好且能跑。
+    fn sadtalker_ready(&self) -> bool {
+        self.sadtalker
             .as_ref()
-            .map(Hardware::avatar_estimate)
-            .unwrap_or_else(|| "本机硬件还没有检测".to_owned())
+            .is_some_and(|engine| engine.ready().is_ok())
+    }
+
+    /// 选中的引擎装好且能跑。
+    fn digital_ready(&self) -> bool {
+        if self.digital_engine == 1 {
+            self.sadtalker_ready()
+        } else {
+            self.wav2lip_ready()
+        }
+    }
+
+    /// 本机数字人预计耗时，一句话（按选中的引擎说）。
+    fn avatar_estimate(&self) -> String {
+        let Some(hardware) = self.hardware.as_ref() else {
+            return "本机硬件还没有检测".to_owned();
+        };
+        if self.digital_engine == 1 {
+            hardware.sadtalker_estimate()
+        } else {
+            hardware.avatar_estimate()
+        }
     }
 
     /// 发布给 Slint 的数据。
@@ -696,6 +757,9 @@ impl AiPane {
                 .into(),
             has_photo: self.photo.is_some(),
             digital_ready: self.digital_ready(),
+            wav2lip_ready: self.wav2lip_ready(),
+            sadtalker_ready: self.sadtalker_ready(),
+            digital_engine: self.digital_engine,
             digital_status: self.digital_status().into(),
             avatar_estimate: self.avatar_estimate().into(),
             avatar_limit: AVATAR_LIMIT.into(),
@@ -975,6 +1039,14 @@ impl AiPane {
             AiMsg::PhotoClear => {
                 self.photo = None;
                 self.message = "照片已清掉".to_owned();
+            }
+            AiMsg::Engine(index) => {
+                self.digital_engine = index.clamp(0, 1);
+                studio.prefs.ai_avatar_engine = Some(self.digital_engine);
+                studio.prefs.save(&studio.host.dirs);
+                if !self.busy {
+                    self.message = self.digital_status();
+                }
             }
             AiMsg::PluginRefresh => {
                 let dirs = studio.host.dirs.clone();
@@ -1470,7 +1542,7 @@ impl AiPane {
     }
 
     /// 本地数字人：照片 + 文案（先用本地音色配音）或已有本地配音
-    /// → Wav2Lip 逐帧对口型 → mp4 → 插入时间轴。全程离线。
+    /// → 选中的引擎（Wav2Lip / SadTalker）出片 → mp4 → 插入时间轴。全程离线。
     fn digital_local(&mut self, studio: &mut Studio) {
         let Some(project) = project_dir(studio) else {
             self.message = "请先打开一个工程：数字人成片要放进工程目录".to_owned();
@@ -1480,7 +1552,12 @@ impl AiPane {
             self.message = "请先选择一张正脸照片（JPG/PNG，≤10MB）".to_owned();
             return;
         };
-        let Some(engine) = self.digital.clone() else {
+        let engine = if self.digital_engine == 1 {
+            self.sadtalker.clone().map(DigitalEngine::SadTalker)
+        } else {
+            self.digital.clone().map(DigitalEngine::Wav2Lip)
+        };
+        let Some(engine) = engine else {
             self.message = self.digital_status();
             self.tab = 2;
             return;
@@ -1490,6 +1567,7 @@ impl AiPane {
             self.tab = 2;
             return;
         }
+        let engine_label = engine.label();
         let text = self.text.trim().to_owned();
         // 有文案就先配音（用「配音」页选中的本地音色）；没文案就用最近
         // 一次生成的配音——两条路都只用本机，不上传。
@@ -1548,26 +1626,22 @@ impl AiPane {
                         let spoken = voice.speak(&text, rate, &audio_out, &cancel)?;
                         report(
                             0.15,
-                            &format!("配音好了（{}），开始对口型…", spoken.voice_name),
+                            &format!("配音好了（{}），开始生成视频…", spoken.voice_name),
                         );
                         audio_out
                     }
                     None => {
                         let existing =
                             existing.ok_or_else(|| "没有可用的配音：请先生成一段".to_owned())?;
-                        report(0.15, "用已有配音开始对口型…");
+                        report(0.15, "用已有配音开始生成视频…");
                         existing
                     }
                 };
                 let photo_path = write_temp_photo(&bytes, extension)?;
                 let rendered = engine.render(
-                    &wav2lip::Request {
-                        photo: photo_path.clone(),
-                        audio,
-                        output,
-                        fps: 25,
-                        max_side: wav2lip::MAX_SIDE,
-                    },
+                    photo_path.clone(),
+                    audio,
+                    output,
                     &mut |fraction, stage| report(0.15 + 0.85 * fraction, stage),
                     &cancel,
                 );
@@ -1577,7 +1651,7 @@ impl AiPane {
                 Ok(Done {
                     path: rendered.path.clone(),
                     summary,
-                    name: format!("照片数字人 · 本地（{voice_name}）"),
+                    name: format!("照片数字人 · 本地 {engine_label}（{voice_name}）"),
                     detail: rendered.summary(),
                     cloud_audio_url: None,
                 })
@@ -1856,6 +1930,66 @@ fn stamp() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |time| time.as_secs())
+}
+
+/// 本地数字人页选中的引擎：Wav2Lip（快）或 SadTalker（有头部动作，但很慢）。
+#[derive(Clone)]
+enum DigitalEngine {
+    /// Wav2Lip：只用 GPU/CPU 跑 256 的口型模型，快。
+    Wav2Lip(wav2lip::Engine),
+    /// SadTalker：PyTorch CPU，会点头眨眼，慢。
+    SadTalker(sadtalker::Engine),
+}
+
+impl DigitalEngine {
+    /// 界面上写进成片名字的引擎名。
+    fn label(&self) -> &'static str {
+        match self {
+            DigitalEngine::Wav2Lip(_) => "Wav2Lip",
+            DigitalEngine::SadTalker(_) => "SadTalker",
+        }
+    }
+
+    /// 引擎能不能跑。
+    fn ready(&self) -> Result<(), String> {
+        match self {
+            DigitalEngine::Wav2Lip(engine) => engine.ready(),
+            DigitalEngine::SadTalker(engine) => engine.ready(),
+        }
+    }
+
+    /// 生成一段视频。
+    fn render(
+        &self,
+        photo: PathBuf,
+        audio: PathBuf,
+        output: PathBuf,
+        progress: &mut dyn FnMut(f32, &str),
+        cancel: &AtomicBool,
+    ) -> Result<wav2lip::Rendered, String> {
+        match self {
+            DigitalEngine::Wav2Lip(engine) => engine.render(
+                &wav2lip::Request {
+                    photo,
+                    audio,
+                    output,
+                    fps: 25,
+                    max_side: wav2lip::MAX_SIDE,
+                },
+                progress,
+                cancel,
+            ),
+            DigitalEngine::SadTalker(engine) => engine.render(
+                &sadtalker::Request {
+                    photo,
+                    audio,
+                    output,
+                },
+                progress,
+                cancel,
+            ),
+        }
+    }
 }
 
 /// 本地数字人的配音方案：Piper 的固定音色或 ZipVoice 的克隆音色。

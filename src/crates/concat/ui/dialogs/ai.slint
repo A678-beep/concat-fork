@@ -118,11 +118,16 @@ export struct AiData {
     /// 照片大小。
     photo-size: string,
     has-photo: bool,
-    /// Wav2Lip 插件装好了。
+    /// Wav2Lip 插件装好且能跑。
     digital-ready: bool,
+    /// 两个本地数字人引擎各自装好没有。
+    wav2lip-ready: bool,
+    sadtalker-ready: bool,
+    /// 选中的本地数字人引擎：0 Wav2Lip、1 SadTalker。
+    digital-engine: int,
     /// 数字人这件事现在的状态说明。
     digital-status: string,
-    /// 本机数字人预计耗时（10 秒片段口径，实测）。
+    /// 本机数字人预计耗时（按选中的引擎，实测口径）。
     avatar-estimate: string,
     /// 数字人的效果预期与限制，如实说明。
     avatar-limit: string,
@@ -416,6 +421,7 @@ component DigitalPage inherits VerticalLayout {
     callback text-edited(string);
     callback generate();
     callback cancel();
+    callback engine-changed(int);
 
     // 文案输入框的本地副本：用户第一次改它时绑定会被丢掉，所以打开时从
     // 数据里播种，之后不覆盖正在编辑的那一份。
@@ -556,7 +562,9 @@ component DigitalPage inherits VerticalLayout {
             }
 
             Tag {
-                text: root.data.digital-ready ? "Wav2Lip 已装" : "Wav2Lip 未装";
+                text: root.data.digital-engine == 1
+                    ? (root.data.sadtalker-ready ? "SadTalker 已装" : "SadTalker 未装")
+                    : (root.data.wav2lip-ready ? "Wav2Lip 已装" : "Wav2Lip 未装");
             }
 
             Rectangle { horizontal-stretch: 1; }
@@ -589,6 +597,14 @@ component DigitalPage inherits VerticalLayout {
         HorizontalLayout {
             spacing: 8px;
 
+            Select {
+                width: 196px;
+                enabled: !root.data.busy && root.data.effective == 0;
+                options: ["Wav2Lip（快）", "SadTalker（头动+眨眼，慢）"];
+                current: root.data.digital-engine;
+                changed(index) => { root.engine-changed(index); }
+            }
+
             Button {
                 label: root.data.effective == 1
                     ? "云端生成数字人片段" : "本地生成数字人并插入";
@@ -596,7 +612,8 @@ component DigitalPage inherits VerticalLayout {
                 enabled: !root.data.busy && !root.data.confirm-open && root.data.has-photo
                     && (root.data.effective == 1
                         ? root.data.signed-in && root.data.has-audio
-                        : root.data.digital-ready
+                        : (root.data.digital-engine == 1
+                            ? root.data.sadtalker-ready : root.data.wav2lip-ready)
                             && (root.data.text != "" || root.data.has-audio));
                 clicked => { root.generate(); }
             }
@@ -939,6 +956,8 @@ export component AiDialog inherits Modal {
     callback photo-clear();
     callback confirm-yes();
     callback confirm-no();
+    /// 换本地数字人引擎：0 Wav2Lip、1 SadTalker。
+    callback engine-changed(int);
     /// 打开星籁账号登录（未登录时的「去登录」）。
     callback login();
 
@@ -1020,6 +1039,7 @@ export component AiDialog inherits Modal {
             photo-pick => { root.photo-pick(); }
             photo-clear => { root.photo-clear(); }
             text-edited(text) => { root.text-edited(text); }
+            engine-changed(index) => { root.engine-changed(index); }
             generate => { root.generate(); }
             cancel => { root.cancel(); }
         }

@@ -89,6 +89,9 @@ pub struct Preferences {
     /// 本地配音上次选的语速，0.8–1.3。
     #[serde(default)]
     pub ai_rate: Option<f32>,
+    /// 本地数字人上次选的引擎：0 Wav2Lip（快）、1 SadTalker（慢但更自然）。
+    #[serde(default)]
+    pub ai_avatar_engine: Option<i32>,
     /// The interface's locale code ("de", "pt-BR", ...); absent is English.
     pub locale: Option<String>,
     /// Package ids starred in the effect libraries, in no order. One list

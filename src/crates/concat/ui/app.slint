@@ -356,6 +356,7 @@ export component App inherits Window {
     callback ai-text-edited(text: string);
     callback ai-voice-changed(index: int);
     callback ai-rate-changed(value: float);
+    callback ai-engine-changed(engine: int);
     callback ai-generate();
     callback ai-preview();
     callback ai-cancel();
@@ -1297,6 +1298,7 @@ export component App inherits Window {
         text-edited(text) => { root.ai-text-edited(text); }
         voice-changed(index) => { root.ai-voice-changed(index); }
         rate-changed(value) => { root.ai-rate-changed(value); }
+        engine-changed(index) => { root.ai-engine-changed(index); }
         generate => { root.ai-generate(); }
         preview => { root.ai-preview(); }
         cancel => { root.ai-cancel(); }

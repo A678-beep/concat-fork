@@ -61,6 +61,8 @@ pub mod projects;
 pub mod proxy;
 pub mod record;
 pub mod reverse;
+/// 本地数字人（Wav2Lip / SadTalker）引擎：照片 + 配音 → 对口型视频。
+pub mod sadtalker;
 mod route;
 pub mod session;
 pub mod sounds;
@@ -69,7 +71,7 @@ pub mod templates;
 pub mod titles;
 pub mod updates;
 pub mod voices;
-/// 本地数字人引擎：Wav2Lip 插件的一次「照片 + 配音 → 对口型视频」。
+/// 本地数字人引擎（Wav2Lip 插件）：一次「照片 + 配音 → 对口型视频」。
 pub mod wav2lip;
 /// 本地语音克隆引擎：ZipVoice 插件的一次生成。
 pub mod zipvoice;
