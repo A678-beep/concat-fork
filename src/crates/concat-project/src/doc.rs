@@ -228,7 +228,7 @@ fn settle(mut project: Project) -> Option<Project> {
 /// One timeline settled: a name, a frame, every clip's numbers in range.
 fn settle_timeline(mut timeline: Timeline) -> Timeline {
     if timeline.name.trim().is_empty() {
-        timeline.name = "Timeline".to_owned();
+        timeline.name = "时间线".to_owned();
     }
     timeline.video = timeline.video.or(VideoSettings::default());
     timeline.clips = std::mem::take(&mut timeline.clips)

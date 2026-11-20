@@ -4,6 +4,77 @@
 
 use super::*;
 
+
+/// 内置音频修整的两个效果 id：人声降噪与去工频。它们也是音效链里的
+/// 普通链接，Effects 面板能看到、能删；音频面板只是给了它们一排开关。
+pub(crate) const DENOISE_ID: &str = "concat.voice-clean";
+pub(crate) const HUM_ID: &str = "concat.hum-remove";
+
+impl Studio {
+    /// 人声降噪 / 去电流声：把两个内置音频效果按开关、强度写进所选片段
+    /// 的音频链，一次编辑一步撤销。`strength` 小于 0 是关掉；`audition`
+    /// 0 不动播放，1 听原声（两个都旁通），2 听处理后（都打开），后两种
+    /// 先把播放头退三秒再放——前后听的正好是同一段。
+    pub fn clip_denoise(&mut self, strength: i32, hum: bool, audition: i32) {
+        use concat_project::commands::ClipPatch;
+        let audition = audition.clamp(0, 2);
+        let ids = self.edit_targets();
+        if ids.is_empty() {
+            return;
+        }
+        let enabled = audition != 1;
+        let mut commands = Vec::new();
+        for id in &ids {
+            let Some(clip) = self.clip(id) else {
+                continue;
+            };
+            let mut chain = clip.filters.clone();
+            chain.retain(|link| link.id != DENOISE_ID && link.id != HUM_ID);
+            if strength >= 0 && self.clip_has_sound(clip) {
+                let mut clean = AppliedFilter::new(DENOISE_ID);
+                clean
+                    .params
+                    .insert("strength".to_owned(), f64::from(strength.clamp(0, 2)));
+                clean.enabled = enabled;
+                chain.push(clean);
+                if hum {
+                    let mut notch = AppliedFilter::new(HUM_ID);
+                    notch.enabled = enabled;
+                    chain.push(notch);
+                }
+            }
+            commands.push(Command::UpdateClip {
+                clip_id: id.clone(),
+                patch: ClipPatch {
+                    filters: Some(chain),
+                    ..ClipPatch::default()
+                },
+            });
+        }
+        match commands.len() {
+            0 => return,
+            1 => self.apply(commands.remove(0)),
+            _ => self.apply(Command::Batch { commands }),
+        };
+        if audition != 0 {
+            // The three seconds before the playhead, played again: the same
+            // words with the treatment on and off.
+            let back = (self.playhead - 3.0).max(0.0);
+            self.seek(back);
+            if !self.playing {
+                self.play_toggle();
+            }
+        }
+        log::info!(
+            "audio: 人声降噪 {} · 强度 {} · 去工频 {} · audition {}",
+            if strength >= 0 { "on" } else { "off" },
+            strength,
+            hum,
+            audition
+        );
+    }
+}
+
 impl Studio {
     // ── the chains ──
     //

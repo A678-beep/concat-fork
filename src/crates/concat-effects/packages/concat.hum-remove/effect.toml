@@ -1,0 +1,12 @@
+format = 2
+
+[effect]
+id = "concat.hum-remove"
+name = "Hum Remove"
+kind = "audio"
+category = "Clean"
+order = 44
+description = "Notches the mains hum out: the 50 Hz fundamental and its 100 and 150 Hz harmonics, narrow enough that the voice around them is left alone."
+
+[ffmpeg]
+chain = "bandreject=f=50:width_type=q:w=10,bandreject=f=100:width_type=q:w=12,bandreject=f=150:width_type=q:w=14"

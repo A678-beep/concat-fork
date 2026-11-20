@@ -471,6 +471,39 @@ const X264_PRESETS: [&str; 10] = [
     "placebo",
 ];
 
+/// The GPU encoders' own quality word for an export preset: x264's
+/// ultrafast is the chips' speed, veryfast its balanced, anything slower
+/// their quality. A chip told "quality" for a preview ran the export
+/// slower than the picture was worth.
+fn chip_quality(preset: &str) -> &'static str {
+    match preset {
+        "ultrafast" | "superfast" => "speed",
+        "veryfast" | "faster" | "fast" => "balanced",
+        _ => "quality",
+    }
+}
+
+/// NVENC's preset for one of x264's names: p1 is its fastest, p7 its
+/// slowest, p5 the middle the export used to ask for.
+fn nvenc_preset(preset: &str) -> &'static str {
+    match preset {
+        "ultrafast" | "superfast" => "p1",
+        "veryfast" | "faster" | "fast" => "p4",
+        "medium" => "p5",
+        _ => "p7",
+    }
+}
+
+/// Intel Quick Sync's preset for one of x264's names.
+fn qsv_preset(preset: &str) -> &'static str {
+    match preset {
+        "ultrafast" | "superfast" => "veryfast",
+        "veryfast" | "faster" | "fast" => "fast",
+        "medium" => "medium",
+        _ => "slow",
+    }
+}
+
 /// SVT-AV1's preset for an x264 one: the same place on its own scale.
 fn svt_preset(preset: &str) -> u8 {
     const SVT: [u8; 10] = [12, 11, 10, 9, 8, 6, 4, 3, 2, 1];
@@ -1261,55 +1294,55 @@ fn open_video(
         // in VBR - NVENC's CQ, Quick Sync's ICQ and AMF's QP all run on
         // the same 0-51 scale as x264's CRF - and the target in CBR.
         _ if family == Family::Nvenc && cbr => ffmpeg::dict! {
-            "preset" => "p5",
+            "preset" => nvenc_preset(&options.preset),
             "rc" => "cbr",
             "b" => bitrate.as_str(),
             "maxrate" => bitrate.as_str(),
             "bufsize" => bufsize.as_str(),
         },
         _ if family == Family::Nvenc && average => ffmpeg::dict! {
-            "preset" => "p5",
+            "preset" => nvenc_preset(&options.preset),
             "rc" => "vbr",
             "b" => bitrate.as_str(),
             "maxrate" => peak.as_str(),
             "bufsize" => window.as_str(),
         },
         _ if family == Family::Nvenc => ffmpeg::dict! {
-            "preset" => "p5",
+            "preset" => nvenc_preset(&options.preset),
             "rc" => "vbr",
             "cq" => &options.crf.min(51).to_string(),
             // No ceiling but the quality's.
             "b" => "0",
         },
         _ if family == Family::Qsv && cbr => ffmpeg::dict! {
-            "preset" => "medium",
+            "preset" => qsv_preset(&options.preset),
             "b" => bitrate.as_str(),
             "maxrate" => bitrate.as_str(),
             "bufsize" => bufsize.as_str(),
         },
         _ if family == Family::Qsv && average => ffmpeg::dict! {
-            "preset" => "medium",
+            "preset" => qsv_preset(&options.preset),
             "b" => bitrate.as_str(),
             "maxrate" => peak.as_str(),
             "bufsize" => window.as_str(),
         },
         _ if family == Family::Qsv => ffmpeg::dict! {
-            "preset" => "medium",
+            "preset" => qsv_preset(&options.preset),
             "global_quality" => &options.crf.clamp(1, 51).to_string(),
         },
         _ if family == Family::Amf && cbr => ffmpeg::dict! {
-            "quality" => "quality",
+            "quality" => chip_quality(&options.preset),
             "rc" => "cbr",
             "b" => bitrate.as_str(),
         },
         _ if family == Family::Amf && average => ffmpeg::dict! {
-            "quality" => "quality",
+            "quality" => chip_quality(&options.preset),
             "rc" => "vbr_peak",
             "b" => bitrate.as_str(),
             "maxrate" => peak.as_str(),
         },
         _ if family == Family::Amf => ffmpeg::dict! {
-            "quality" => "quality",
+            "quality" => chip_quality(&options.preset),
             "rc" => "cqp",
             "qp_i" => &options.crf.min(51).to_string(),
             "qp_p" => &options.crf.min(51).to_string(),

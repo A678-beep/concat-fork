@@ -366,6 +366,30 @@ impl Studio {
                 ClipField::BackgroundPaddingY => {
                     text.background_padding_y = value.clamp(0.0, 0.5);
                 }
+                // The typewriter: on fills in a typewriter with the speed
+                // and cursor the title had, or the defaults; the two dials
+                // below only mean anything while it is on, and the panel
+                // only offers them then.
+                ClipField::Typewriter => {
+                    text.typewriter = (value != 0.0).then(|| {
+                        text.typewriter
+                            .unwrap_or_default()
+                            .tidy()
+                    });
+                }
+                ClipField::TypewriterSpeed => {
+                    if let Some(typewriter) = text.typewriter.as_mut() {
+                        typewriter.speed = value.clamp(
+                            model::Typewriter::QUICKEST,
+                            model::Typewriter::SLOWEST,
+                        );
+                    }
+                }
+                ClipField::TypewriterCursor => {
+                    if let Some(typewriter) = text.typewriter.as_mut() {
+                        typewriter.cursor = value != 0.0;
+                    }
+                }
                 ClipField::ShapeKind
                 | ClipField::ShapeWidth
                 | ClipField::ShapeHeight

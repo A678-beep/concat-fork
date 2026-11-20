@@ -1,0 +1,22 @@
+id = "xinglai.typewriter"
+name = "打字机 · 白字逐字"
+language = "Chinese"
+order = 93
+offsetY = 0.0
+
+# 一个会自己打出来的标题：白字、黑边、微影，
+# 字一个一个出现（20–80ms 一个），句尾留一根块状光标。
+# 光标与速度在文本检查器的「打字机」里调。
+[style]
+content = "星籁剪辑"
+fontFamily = "Noto Sans CJK SC"
+fontWeight = 700
+fontSize = 0.07
+color = "#ffffff"
+strokeWidth = 0.01
+strokeColor = "#000000"
+shadow = true
+
+[style.typewriter]
+speed = 45
+cursor = true

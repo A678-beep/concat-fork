@@ -120,6 +120,10 @@ export component Seat inherits Rectangle {
             captions-cancel => { Editor.captions-cancel(); }
             captions-import-srt => { Editor.captions-import-srt(); }
             captions-export-srt => { Editor.captions-export-srt(); }
+            captions-find-edited(text) => { Editor.captions-find-edited(text); }
+            captions-replace-edited(text) => { Editor.captions-replace-edited(text); }
+            captions-replace-scope-changed(index) => { Editor.captions-replace-scope-changed(index); }
+            captions-replace-pressed => { Editor.captions-replace-pressed(); }
 
             import-media => { Editor.import-media(); }
             filter-changed(filter) => { Editor.media-filter-changed(filter); }
@@ -323,6 +327,9 @@ export component Seat inherits Rectangle {
             transition-knobs: Editor.transition-knobs;
             transition-choices: Editor.transition-choices;
             clip-set(field, value) => { Editor.clip-set(field, value); }
+            clip-denoise(strength, hum, audition) => {
+                Editor.clip-denoise(strength, hum, audition);
+            }
             clip-set-text(field, value) => { Editor.clip-set-text(field, value); }
             clip-set-words(text, caret) => { Editor.clip-set-words(text, caret); }
             clip-select-words(anchor, cursor) => { Editor.clip-select-words(anchor, cursor); }

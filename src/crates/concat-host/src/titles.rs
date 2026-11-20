@@ -74,6 +74,45 @@ struct Art {
     /// The title's per-word reveal order, baked once here rather than on
     /// every clip build - see `concat_core::RevealMap`.
     reveal: Arc<RevealMap>,
+    /// The title's per-character order, for the typewriter: `Some` for a
+    /// title that types itself in, built exactly when the style says so,
+    /// with the cursor - if it has one - at level zero, waiting from the
+    /// first frame. None for a title that is there all at once.
+    typing: Option<Arc<RevealMap>>,
+    /// Every character's box on the canvas, in reading order: what the
+    /// typing map was built from, kept so a clip can count the characters
+    /// its typing has to cover.
+    chars: Vec<WordRect>,
+}
+
+impl Art {
+    /// What a painting left, as the maps a clip carries: the per-word
+    /// reveal every title has, and the per-character typing a typewriter
+    /// has - built here so both are baked once per style rather than per
+    /// clip build, and land on disk in the sidecar for the next session.
+    fn of(
+        painting: Painting<'_>,
+        block: (u32, u32),
+        offset: (i32, i32),
+        canvas: (u32, u32),
+        words: &[WordRect],
+        chars: &[WordRect],
+    ) -> Art {
+        let typewriter = match painting {
+            Painting::Title(text) => text.typewriter,
+            Painting::Shape(_) => None,
+        };
+        let typing = typewriter
+            .map(|typewriter| typing_of(chars, typewriter.cursor, canvas.0, canvas.1));
+        Art {
+            block,
+            offset,
+            canvas,
+            reveal: reveal_of(words, canvas.0, canvas.1),
+            typing,
+            chars: chars.to_vec(),
+        }
+    }
 }
 
 /// The title painter and its cache.
@@ -394,11 +433,17 @@ impl Titles {
                     media_height: Some(art.canvas.1),
                     overscan: overscan_of(art.canvas, width, height),
                     has_audio: Some(false),
-                    // A shape has no words to reveal one at a time.
+                    // A shape has no words to reveal one at a time. A
+                    // title that types itself in carries its characters'
+                    // order, and the clock that reveals them; a plain one
+                    // its words' - what a per-word reveal effect reads.
                     reveal_map: match painting {
-                        Painting::Title(_) => Some(Arc::clone(&art.reveal)),
+                        Painting::Title(_) => Some(Arc::clone(
+                            art.typing.as_ref().unwrap_or(&art.reveal),
+                        )),
                         Painting::Shape(_) => None,
                     },
+                    title_reveal: typing_reveal(painting, &art, clip.duration),
                     ..ExportClip::blank(ClipKind::Image, clip.start, clip.duration, index)
                 },
                 block: art.block,
@@ -458,12 +503,14 @@ impl Titles {
                     .map_err(|error| error.to_string())?
             }
         };
-        let art = Art {
-            block: (rendered.block_width, rendered.block_height),
-            offset: (rendered.block_dx, rendered.block_dy),
-            canvas: (rendered.width, rendered.height),
-            reveal: reveal_of(&rendered.words, rendered.width, rendered.height),
-        };
+        let art = Art::of(
+            painting,
+            (rendered.block_width, rendered.block_height),
+            (rendered.block_dx, rendered.block_dy),
+            (rendered.width, rendered.height),
+            &rendered.words,
+            &rendered.chars,
+        );
         let frame = Arc::new(
             Frame::from_rgba(rendered.width, rendered.height, rendered.rgba)
                 .ok_or_else(|| "the painter returned a frame of the wrong size".to_owned())?,
@@ -540,28 +587,44 @@ impl Titles {
         };
         std::fs::create_dir_all(&self.dir).map_err(|error| error.to_string())?;
         std::fs::write(&png, &rendered.png).map_err(|error| error.to_string())?;
-        let art = Art {
-            block: (rendered.block_width, rendered.block_height),
-            offset: (rendered.block_dx, rendered.block_dy),
-            canvas: (rendered.width, rendered.height),
-            reveal: reveal_of(&rendered.words, rendered.width, rendered.height),
-        };
+        let art = Art::of(
+            painting,
+            (rendered.block_width, rendered.block_height),
+            (rendered.block_dx, rendered.block_dy),
+            (rendered.width, rendered.height),
+            &rendered.words,
+            &rendered.chars,
+        );
         let words: Vec<String> = rendered
             .words
             .iter()
             .map(|w| format!("[{},{},{},{}]", w.x, w.y, w.width, w.height))
             .collect();
+        let chars: Vec<String> = rendered
+            .chars
+            .iter()
+            .map(|w| format!("[{},{},{},{}]", w.x, w.y, w.width, w.height))
+            .collect();
+        // The cursor is part of the words' content, so the boxes alone do
+        // not say it was there: the sidecar does.
+        let cursor = match painting {
+            Painting::Title(text) => text.typewriter.is_some_and(|typewriter| typewriter.cursor),
+            Painting::Shape(_) => false,
+        };
         let _ = std::fs::write(
             &side,
             format!(
-                "{{\"w\":{},\"h\":{},\"x\":{},\"y\":{},\"cw\":{},\"ch\":{},\"words\":[{}]}}",
+                "{{\"w\":{},\"h\":{},\"x\":{},\"y\":{},\"cw\":{},\"ch\":{},\"typing\":{},\"cursor\":{},\"words\":[{}],\"chars\":[{}]}}",
                 art.block.0,
                 art.block.1,
                 art.offset.0,
                 art.offset.1,
                 art.canvas.0,
                 art.canvas.1,
-                words.join(",")
+                art.typing.is_some(),
+                cursor,
+                words.join(","),
+                chars.join(",")
             ),
         );
         self.remember(key, art.clone());
@@ -726,8 +789,9 @@ fn key_of(project: &Project, painting: Painting<'_>, width: u32, height: u32) ->
     // 6: a canvas grows past the frame to hold ink that runs past it, and
     // the sidecar says how big it is. 7: shapes gained their own width and
     // height, corners, gradients, outline placement, dashes, line ends,
-    // shadows and trim.
-    bytes.extend_from_slice(&7u32.to_le_bytes());
+    // shadows and trim. 8: a title with a typewriter carries its characters'
+    // boxes and typing map in the sidecar, so a cold start types too.
+    bytes.extend_from_slice(&8u32.to_le_bytes());
     crate::media::fnv1a(&bytes)
 }
 
@@ -765,21 +829,25 @@ fn read_block(side: &Path, width: u32, height: u32) -> Option<Art> {
     let text = std::fs::read_to_string(side).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
     let offset = |name: &str| value.get(name).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-    let rects: Vec<(i32, i32, u32, u32)> = value
-        .get("words")
-        .and_then(|v| v.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|word| {
-            let word = word.as_array()?;
-            Some((
-                word.first()?.as_i64()? as i32,
-                word.get(1)?.as_i64()? as i32,
-                word.get(2)?.as_u64()? as u32,
-                word.get(3)?.as_u64()? as u32,
-            ))
-        })
-        .collect();
+    let boxes = |name: &str| -> Vec<WordRect> {
+        value
+            .get(name)
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|word| {
+                let word = word.as_array()?;
+                Some(WordRect {
+                    x: word.first()?.as_i64()? as i32,
+                    y: word.get(1)?.as_i64()? as i32,
+                    width: word.get(2)?.as_u64()? as u32,
+                    height: word.get(3)?.as_u64()? as u32,
+                })
+            })
+            .collect()
+    };
+    let words = boxes("words");
+    let chars = boxes("chars");
     // The canvas's size, which is the frame's unless it is said.
     let side_of = |name: &str, frame: u32| {
         value
@@ -788,6 +856,19 @@ fn read_block(side: &Path, width: u32, height: u32) -> Option<Art> {
             .map_or(frame, |v| v as u32)
     };
     let canvas = (side_of("cw", width), side_of("ch", height));
+    // A title that typed itself in has its character map rebuilt from the
+    // boxes; whether it has a cursor is in the words the boxes came from -
+    // the map's own last box was the cursor - so the sidecar says whether
+    // there was one.
+    let cursor = value
+        .get("cursor")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let typing = value
+        .get("typing")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        .then(|| typing_of(&chars, cursor, canvas.0, canvas.1));
     Some(Art {
         block: (
             value.get("w")?.as_u64()? as u32,
@@ -795,7 +876,12 @@ fn read_block(side: &Path, width: u32, height: u32) -> Option<Art> {
         ),
         offset: (offset("x"), offset("y")),
         canvas,
-        reveal: Arc::new(RevealMap::from_rects(canvas.0, canvas.1, &rects)),
+        reveal: Arc::new(RevealMap::from_rects(canvas.0, canvas.1, &words
+            .iter()
+            .map(|w| (w.x, w.y, w.width, w.height))
+            .collect::<Vec<_>>())),
+        typing,
+        chars,
     })
 }
 
@@ -807,6 +893,12 @@ fn overscan_of(canvas: (u32, u32), width: u32, height: u32) -> f64 {
         .max(1.0)
 }
 
+/// The glyph a typewriter's cursor is drawn as: a block cursor at the end
+/// of the words. It is painted as part of the title's content, so the
+/// layout gives it a box like any character's and the typing map can hold
+/// it at level zero - there from the first frame, while the words arrive.
+const TYPEWRITER_CURSOR: &str = "\u{258c}";
+
 /// A title's per-word reveal map, baked from the boxes its layout left
 /// behind - a byproduct `concat-text` already computed, not new work.
 fn reveal_of(words: &[WordRect], width: u32, height: u32) -> Arc<RevealMap> {
@@ -817,11 +909,67 @@ fn reveal_of(words: &[WordRect], width: u32, height: u32) -> Arc<RevealMap> {
     Arc::new(RevealMap::from_rects(width, height, &rects))
 }
 
+/// A title's typewriter map: each character is revealed when the typing
+/// reaches it, at an even share of the time, and the cursor - the last box
+/// when the style has one - is at zero, waiting from the first frame.
+/// Levels are assigned in reading order, which is the order the boxes come
+/// in, so a title written right to left types the way it is read.
+fn typing_of(chars: &[WordRect], cursor: bool, width: u32, height: u32) -> Arc<RevealMap> {
+    let typed = if cursor {
+        chars.len().saturating_sub(1)
+    } else {
+        chars.len()
+    }
+    .max(1);
+    let cursor_at = cursor.then(|| chars.len().saturating_sub(1));
+    let rects: Vec<(i32, i32, u32, u32, u8)> = chars
+        .iter()
+        .enumerate()
+        .map(|(index, ch)| {
+            // The cursor waits; each character lands at its own share of
+            // the typing, the last on the last frame of it.
+            let level = if cursor_at == Some(index) {
+                0
+            } else {
+                let share = ((index + 1) as f64 / typed as f64).clamp(0.0, 1.0);
+                (share * 255.0).round().clamp(1.0, 255.0) as u8
+            };
+            (ch.x, ch.y, ch.width, ch.height, level)
+        })
+        .collect();
+    Arc::new(RevealMap::from_levels(width, height, &rects))
+}
+
+/// How long a title's typing takes, as a share of its clip: one character
+/// per `speed` milliseconds, over the characters the layout found - the
+/// cursor does not take a turn, it is waiting already. None for a title
+/// that is there all at once.
+fn typing_reveal(
+    painting: Painting<'_>,
+    art: &Art,
+    duration: f64,
+) -> Option<concat_export::TitleReveal> {
+    let typewriter = match painting {
+        Painting::Title(text) => text.typewriter?,
+        Painting::Shape(_) => return None,
+    };
+    let typed = art.chars.len() - usize::from(typewriter.cursor);
+    let seconds = typed.max(1) as f64 * typewriter.speed.max(0.0) / 1000.0;
+    Some(concat_export::TitleReveal {
+        span: (seconds / duration.max(1e-6)).clamp(0.0, 1.0),
+    })
+}
+
 /// The document's style, field for field, in the painter's terms.
 fn title_style(style: &TextStyle) -> TitleStyle {
     // The words in their case, and the runs moved onto the characters
-    // their own became in it.
-    let (content, runs) = style.display();
+    // their own became in it. A typewriter's cursor is painted as the
+    // last character of the words: the layout gives it a box like any
+    // other, and the typing map keeps it there from the first frame.
+    let (mut content, runs) = style.display();
+    if style.typewriter.is_some_and(|typewriter| typewriter.cursor) {
+        content.push_str(TYPEWRITER_CURSOR);
+    }
     TitleStyle {
         content,
         font_family: style.font_family.clone(),
@@ -1311,13 +1459,115 @@ mod tests {
         let _ = std::fs::remove_dir_all(dirs.data.parent().unwrap());
     }
 
+    /// A typewriter's levels: every character revealed at its own share of
+    /// the typing, in reading order, and the cursor - the last box -
+    /// waiting from the first frame.
+    #[test]
+    fn typing_levels_run_in_reading_order_and_the_cursor_waits() {
+        let boxes = [
+            WordRect {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+            WordRect {
+                x: 10,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+            WordRect {
+                x: 20,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+        ];
+        let map = typing_of(&boxes, true, 40, 10);
+        assert_eq!(map.gray[0], 128, "the first character half way");
+        assert_eq!(map.gray[10], 255, "the second on the last frame");
+        assert_eq!(map.gray[20], 0, "the cursor is there from the start");
+        assert_eq!(map.gray[35], 0, "nothing is no character");
+        // Without a cursor every box is typed, the last still last.
+        let without = typing_of(&boxes, false, 40, 10);
+        assert_eq!(without.gray[20], 255);
+        assert_ne!(map.id, without.id);
+    }
+
+    /// A title switched to the typewriter carries the clock its frames are
+    /// read against - one character per speed - and the characters' order;
+    /// a cold read of the sidecar, and the live painter, say the same.
+    #[test]
+    fn a_typewriter_title_carries_its_clock_and_its_characters() {
+        let dirs = scratch("typewriter");
+        let mut editor = Editor::new();
+        let style = concat_project::model::TextStyle {
+            content: "abc".to_owned(),
+            typewriter: Some(concat_project::model::Typewriter {
+                speed: 50.0,
+                cursor: true,
+            }),
+            ..Default::default()
+        };
+        editor
+            .apply(Command::AddTextClip {
+                above: false,
+                track_id: None,
+                start: 0.0,
+                style: Some(style),
+                duration: Some(2.0),
+                offset_y: None,
+            })
+            .expect("a title is added");
+
+        let titles = Titles::new(&dirs);
+        let out = titles.clips(editor.project(), 640, 360);
+        let clip = &out[0].clip;
+        // Three characters typed at 50 ms each, over two seconds, and the
+        // cursor a box of its own that takes no turn.
+        let clock = clip.title_reveal.expect("a typewriter has a clock");
+        assert!(
+            (clock.span - 0.15 / 2.0).abs() < 1e-9,
+            "span {}",
+            clock.span
+        );
+        let map = clip.reveal_map.as_ref().expect("a title reveals");
+        assert_eq!((map.width, map.height), (640, 360));
+        // Four boxes in the map: three typed and the cursor at zero. The
+        // levels are somewhere in it, and the cursor's zero is too.
+        assert!(map.gray.iter().any(|&level| level != 0), "characters");
+        let levels: Vec<u8> = {
+            let mut levels: Vec<u8> = map.gray.iter().copied().filter(|&l| l != 0).collect();
+            levels.sort_unstable();
+            levels.dedup();
+            levels
+        };
+        assert_eq!(levels.len(), 3, "three characters, three steps: {levels:?}");
+
+        // The sidecar knows: a painter from cold types the same title.
+        let cold = Titles::new(&dirs).clips(editor.project(), 640, 360);
+        assert_eq!(cold[0].clip.title_reveal, clip.title_reveal);
+        assert_eq!(
+            cold[0].clip.reveal_map.as_ref().map(|r| &*r.gray),
+            Some(&*map.gray)
+        );
+        // And the live painter agrees with the kept one.
+        let live = titles.clips_live(editor.project(), 640, 360);
+        assert_eq!(live[0].clip.title_reveal, clip.title_reveal);
+        assert_eq!(
+            live[0].clip.reveal_map.as_ref().map(|r| &*r.gray),
+            Some(&*map.gray)
+        );
+        let _ = std::fs::remove_dir_all(dirs.data.parent().unwrap());
+    }
+
     /// More titles than the byte budget holds are all kept while the
     /// timeline shows them: a second live pass paints none of them again.
     /// Kept first in, first out, each was thrown out just before it was
     /// wanted, and every pass painted them all (#261).
     #[test]
-    fn a_timeline_of_titles_past_the_budget_is_painted_once() {
-        let dirs = scratch("live_many");
+    fn a_timeline_of_titles_past_the_budget_is_painted_once() {        let dirs = scratch("live_many");
         let mut editor = Editor::new();
         // Four megabytes a painting at 1024 square: 40 is more than the
         // 128 MB budget holds.
@@ -1364,6 +1614,8 @@ mod tests {
             offset: (0, 0),
             canvas: (4, 4),
             reveal: Arc::new(RevealMap::from_rects(1, 1, &[])),
+            typing: None,
+            chars: Vec::new(),
         };
         let frame = || Arc::new(Frame::transparent(4, 4));
         let size = frame().pixels().len();

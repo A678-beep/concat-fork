@@ -1,0 +1,24 @@
+format = 2
+
+[effect]
+id = "concat.voice-clean"
+name = "Voice Clean"
+kind = "audio"
+category = "Clean"
+order = 43
+intensity = "strength"
+description = "Takes the room out from under a voice: rumble below 70 Hz, hiss through a learned noise floor, the mains hum, sibilance and the harsh top end, then a gentle compressor and limiter so the level holds."
+
+[[param]]
+key = "strength"
+label = "Strength"
+type = "enum"
+values = [0, 1, 2]
+labels = ["Light", "Medium", "Strong"]
+default = 1
+min = 0
+max = 2
+step = 1
+
+[ffmpeg]
+chain = "highpass=f=70,afftdn=nf={fixed(0 - 38 - strength * 6, 1)}:nr={fixed(10 + strength * 8, 1)},deesser=i={fixed(0.2 + strength * 0.15, 2)},acompressor=threshold={fixed(-20 - strength * 2, 0)}dB:ratio={fixed(2 + strength * 0.5, 1)}:attack=20:release=150,treble=g={fixed(0 - 1 - strength, 1)}:f=8000,alimiter=limit=0.95"

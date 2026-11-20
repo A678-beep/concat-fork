@@ -1066,7 +1066,7 @@ impl Studio {
         let transition = clip.transition_in.as_ref().expect("held to one");
         let name = Catalogue::builtin()
             .get(&transition.id)
-            .map(|package| package.manifest.effect.name.clone())
+            .map(|package| crate::localize::name(&package.manifest.effect.name))
             .unwrap_or_else(|| label_of(&transition.id));
         crate::ui::SelectedTransitionData {
             present: true,
@@ -1120,7 +1120,7 @@ impl Studio {
                         .unwrap_or(0);
                     choices.push(crate::ui::TransitionChoiceData {
                         key: param.key.as_str().into(),
-                        label: param.label.as_str().into(),
+                        label: crate::localize::label(&param.label).into(),
                         options: ModelRc::new(VecModel::from(options)),
                         values: ModelRc::new(VecModel::from(
                             param.values.iter().map(|at| *at as f32).collect::<Vec<_>>(),
@@ -1139,7 +1139,7 @@ impl Studio {
                     knobs.push(AppliedParamData {
                         entry: 0,
                         key: param.key.as_str().into(),
-                        label: param.label.as_str().into(),
+                        label: crate::localize::label(&param.label).into(),
                         group: "".into(),
                         unit: param.unit.as_str().into(),
                         min: param.min as f32,
@@ -1242,7 +1242,7 @@ impl Studio {
                 .transition_in
                 .as_ref()
                 .and_then(|transition| Catalogue::builtin().get(&transition.id))
-                .map(|package| package.manifest.effect.name.clone())
+                .map(|package| crate::localize::name(&package.manifest.effect.name))
                 .unwrap_or_default()
                 .into(),
             transition_duration: clip
@@ -1381,6 +1381,30 @@ impl Studio {
             tracking: text.tracking as f32,
             text_width: text.max_width as f32,
             text_height: text.max_height as f32,
+            typewriter_on: text.typewriter.is_some(),
+            typewriter_speed: text
+                .typewriter
+                .map_or(model::Typewriter::DEFAULT_SPEED, |typewriter| {
+                    typewriter.speed
+                }) as f32,
+            typewriter_cursor: text
+                .typewriter
+                .is_some_and(|typewriter| typewriter.cursor),
+            denoise_on: clip
+                .filters
+                .iter()
+                .any(|link| link.id == super::chains::DENOISE_ID),
+            denoise_strength: clip
+                .filters
+                .iter()
+                .find(|link| link.id == super::chains::DENOISE_ID)
+                .and_then(|link| link.params.get("strength"))
+                .copied()
+                .unwrap_or(1.0) as i32,
+            denoise_hum: clip
+                .filters
+                .iter()
+                .any(|link| link.id == super::chains::HUM_ID),
             cutout: match &clip.cutout {
                 None => 0,
                 Some(cutout) if cutout.mode == model::CutoutMode::Auto => 1,
@@ -3044,7 +3068,7 @@ pub(crate) fn preset_card(preset: &TextPreset) -> TextPresetData {
     let plate = colour_of(&preset.style.background);
     TextPresetData {
         id: preset.id.as_str().into(),
-        name: preset.name.as_str().into(),
+        name: crate::localize::name(&preset.name).into(),
         language: preset.language.as_str().into(),
         sample: preset.sample.as_str().into(),
         family: preset.style.font_family.trim_matches('"').into(),

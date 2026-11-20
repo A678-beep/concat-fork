@@ -1115,11 +1115,11 @@ fn first_line(content: &str) -> String {
     let line = content
         .lines()
         .find(|candidate| !candidate.trim().is_empty())
-        .unwrap_or("Text")
+        .unwrap_or("文字")
         .trim();
     let label: String = line.chars().take(40).collect();
     if label.is_empty() {
-        "Text".to_owned()
+        "文字".to_owned()
     } else {
         label
     }

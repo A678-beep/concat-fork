@@ -92,9 +92,14 @@ pub struct Preferences {
     /// 本地数字人上次选的引擎：0 Wav2Lip（快）、1 SadTalker（慢但更自然）。
     #[serde(default)]
     pub ai_avatar_engine: Option<i32>,
-    /// 导出的视频是否叠一枚「AI 生成」角标；缺省（`None`）是带上。
+    /// 导出的视频是否叠一枚「AI 生成」角标；缺省（`None`）是不带，
+    /// 设置里开了才叠，导出面板在检测到 AI 素材时只做建议。
     #[serde(default)]
     pub ai_badge: Option<bool>,
+    /// 导出成片叠的那枚自定义水印；`None` 是从没设过。设过就记着，
+    /// 图在设置里点选后复制进 App 自己的目录，原文件删了也不影响。
+    #[serde(default)]
+    pub watermark: Option<WatermarkPrefs>,
     /// The interface's locale code ("de", "pt-BR", ...); absent is English.
     pub locale: Option<String>,
     /// Package ids starred in the effect libraries, in no order. One list
@@ -189,6 +194,54 @@ pub struct Preferences {
     /// by Settings › Shortcuts; resolved in [`crate::keymap`].
     #[serde(default)]
     pub keybinds: BTreeMap<String, String>,
+}
+
+/// 自定义水印：设置里点选的那张 PNG 怎么叠、叠在哪。图本身在点选时
+/// 复制进 App 自己的配置目录（`watermark.png`），所以路径记的是那份副本，
+/// 换机器或删掉原图都不影响已设好的水印。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct WatermarkPrefs {
+    /// 水印 PNG 的路径；空串是还没选图。一般就是配置目录里的那份副本。
+    pub path: String,
+    /// 导出时叠不叠。关掉留着设置，下次打开还是这张、这个位置。
+    pub enabled: bool,
+    /// 位置：0 左上、1 右上、2 左下、3 右下、4 居中。
+    pub position: u8,
+    /// 不透明度，10–90，百分比；低于一成看不见，高于九成像贴纸。
+    pub opacity: u8,
+    /// 图宽占画面宽度的百分比，5–30。
+    pub size: u8,
+}
+
+impl Default for WatermarkPrefs {
+    fn default() -> Self {
+        WatermarkPrefs {
+            path: String::new(),
+            enabled: false,
+            // 右下角是大多数平台角标的位置，也是「AI 生成」角标上的
+            // 位置；两枚叠在一起时各留各的边，互不遮住。
+            position: 3,
+            opacity: 60,
+            size: 12,
+        }
+    }
+}
+
+impl WatermarkPrefs {
+
+    /// 把数字收进各自的范围，手改过的设置文件也能用。
+    pub fn tidy(mut self) -> WatermarkPrefs {
+        self.position = self.position.min(4);
+        self.opacity = self.opacity.clamp(10, 90);
+        self.size = self.size.clamp(5, 30);
+        self
+    }
+
+    /// 设好了、并且要叠：有图、开关是开的。
+    pub fn is_on(&self) -> bool {
+        self.enabled && !self.path.trim().is_empty()
+    }
 }
 
 /// The voiceover panel's choices, kept from one take to the next and one

@@ -13,6 +13,7 @@
 //! pane reads and asks things of but never reaches into for its own
 //! fields.
 
+use concat_export::{ClipKind, ExportClip};
 use concat_host::export::{self, ExportSpec};
 use concat_media::ColorRange;
 
@@ -38,6 +39,11 @@ pub enum ExportMsg {
     TenBitChanged(bool),
     /// For an HDR timeline: written HDR (true), or tone-mapped to SDR.
     HdrChanged(bool),
+    /// 三档质量：0 快速（预览级）、1 标准、2 高质量。它只改编码器的
+    /// 速度/画质取舍，不改文件格式。
+    QualityChanged(i32),
+    /// 导出面板上「启用 AI 标识」的按钮：把设置打开，不默认。
+    EnableAiBadge,
     /// The target bitrate field, in Mbps: the bitrate becomes a custom one.
     BitrateChanged(f32),
     /// Back to the form after a finished or failed render.
@@ -73,6 +79,9 @@ pub struct ExportPane {
     pub folder: String,
     pub resolution: usize,
     pub rate: usize,
+    /// The quality tier picked: 0 quick (preview level), 1 standard,
+    /// 2 high.
+    pub quality: usize,
     /// The bitrate is the typed one, not the recommended one for the
     /// frame and the rate.
     pub custom: bool,
@@ -91,13 +100,18 @@ pub struct ExportPane {
     pub written: String,
     /// When the render started, for a real ETA.
     started_at: Option<std::time::Instant>,
+    /// How long the last export took of its own footage: wall seconds a
+    /// media second, so the next one can be estimated before it starts.
+    last_speed: Option<f64>,
+    /// The timeline's length when the render started, for that rate.
+    started_media: f64,
 }
 
 impl Default for ExportPane {
     fn default() -> Self {
         Self {
             open: false,
-            name: "Untitled".into(),
+            name: "未命名".into(),
             // An iPhone's sandbox has no Movies the app may make, as it has
             // no Desktop (#299); Documents is the folder Files shows, and a
             // finished export goes on to Photos from there.
@@ -108,6 +122,7 @@ impl Default for ExportPane {
             }),
             resolution: 2,
             rate: 0,
+            quality: 1,
             custom: false,
             codec: 0,
             ten_bit: false,
@@ -119,6 +134,8 @@ impl Default for ExportPane {
             message: String::new(),
             written: String::new(),
             started_at: None,
+            last_speed: None,
+            started_media: 0.0,
         }
     }
 }
@@ -155,6 +172,16 @@ impl ExportPane {
             }
             ExportMsg::TenBitChanged(on) => self.ten_bit = on,
             ExportMsg::HdrChanged(on) => self.sdr = !on,
+            ExportMsg::QualityChanged(index) => {
+                self.quality = (index.max(0) as usize).min(QUALITY_PRESETS.len() - 1);
+                log::info!("export: quality tier {}", self.quality);
+            }
+            ExportMsg::EnableAiBadge => {
+                log::info!("export: AI 标识 opened from the export sheet");
+                studio.prefs.ai_badge = Some(true);
+                studio.prefs.save(&studio.host.dirs);
+                studio.notify(&t("export.aiBadgeOn"), false);
+            }
             ExportMsg::BitrateChanged(mbps) => {
                 if mbps.is_finite() {
                     self.bitrate = ((mbps * 1000.0).round() as u32).clamp(500, 400_000);
@@ -207,6 +234,10 @@ impl ExportPane {
                 }
             }
             ExportMsg::Finished(Ok(written)) => {
+                if let Some(started) = self.started_at {
+                    let wall = started.elapsed().as_secs_f64().max(0.1);
+                    self.last_speed = Some(self.started_media.max(0.1) / wall);
+                }
                 self.phase = ExportPhase::Done;
                 self.progress = 1.0;
                 self.written = written.clone();
@@ -484,8 +515,8 @@ impl ExportPane {
             output: output.clone(),
             // Unused at an average bitrate; the quality the encoder falls
             // back on were it ever not given one.
-            crf: EXPORT_CRF,
-            preset: "veryfast".into(),
+            crf: QUALITY_CRF[self.quality],
+            preset: QUALITY_PRESETS[self.quality].into(),
             codec: self.codec(studio),
             ten_bit: self.deep(studio),
             rate_mode: concat_media::RateMode::Average,
@@ -506,9 +537,12 @@ impl ExportPane {
         let mut project = session.project().clone();
         // 右下角的「AI 生成」角标：只写进导出的这份工程副本，
         // 不碰用户的工程、也不进撤销栈。
-        if studio.prefs.ai_badge.unwrap_or(true) {
+        if studio.prefs.ai_badge.unwrap_or(false) {
             add_ai_badge(&mut project, f64::from(studio.duration()));
         }
+        // 自定义水印：同样的做派，只是一张图片片段。存在这里是因为
+        // 导出线程拿不到设置；它自己算好尺寸、位置和透明度。
+        let watermark = watermark_overlay(studio);
         let project_dir = std::path::PathBuf::from(session.path());
         let (width, height) = self.size(studio);
         let (num, den) = self.rate(studio);
@@ -516,6 +550,7 @@ impl ExportPane {
         let monitor = studio.host.monitor.clone();
 
         studio.pause();
+        self.started_media = f64::from(studio.duration()).max(0.1);
         self.phase = ExportPhase::Running;
         self.progress = 0.0;
         self.stage = t("export.preparing");
@@ -540,6 +575,18 @@ impl ExportPane {
                 request.height = height;
                 request.rate_num = num;
                 request.rate_den = den;
+                // 自定义水印叠在一切之上：它的轨道比现有最上面的轨道还高
+                // 一层，所以盖住字幕与「AI 生成」角标，位置由设置算好。
+                if let Some(mut watermark) = watermark {
+                    watermark.track = request
+                        .clips
+                        .iter()
+                        .map(|clip| clip.track)
+                        .max()
+                        .unwrap_or(0)
+                        + 1;
+                    request.clips.push(watermark);
+                }
                 // The monitor's readers that sit idle are closed now rather
                 // than ten seconds on by the sweep: on a phone up to three of
                 // them hold MediaCodec decoder sessions, which the chip has
@@ -631,7 +678,11 @@ impl ExportPane {
                     .iter()
                     .map(|rung| {
                         let (width, height) = Self::frame_for(studio, *rung);
-                        format!("{width} × {height}").into()
+                        format!(
+                            "{width} × {height}{}",
+                            platform_label(width, height)
+                        )
+                        .into()
                     })
                     .collect();
                 ModelRc::new(VecModel::from(sizes))
@@ -716,10 +767,123 @@ impl ExportPane {
                 slint::SharedString::new()
             },
             message: self.message.as_str().into(),
+            ai_hint: ai_hint(studio).into(),
+            quality: self.quality as i32,
+            quality_options: ModelRc::new(VecModel::from(
+                (0..QUALITY_PRESETS.len())
+                    .map(|tier| SharedString::from(quality_name(tier)))
+                    .collect::<Vec<_>>(),
+            )),
+            progress_detail: progress_detail(self, studio).into(),
+            estimate: estimate(self, studio).into(),
             done_size: bytes(self.size_bytes(studio)).into(),
             empty: clips == 0,
         }
     }
+}
+
+
+/// 三档质量的编码器 preset（x264 的名字，其它编码器按各自规则映射；见
+/// `concat_media` 的 AMF/NVENC/QSV 设置）与码率控制之外的 CRF。快速档
+/// 是预览级：芯片的 speed 档 + x264 ultrafast；标准档是平台常用；
+/// 高质量档给存档。
+const QUALITY_PRESETS: [&str; 3] = ["ultrafast", "veryfast", "medium"];
+const QUALITY_CRF: [u8; 3] = [26, EXPORT_CRF, 16];
+
+/// 三档质量的名字，走界面语言。
+fn quality_name(tier: usize) -> String {
+    match tier {
+        0 => t("export.qualityQuick"),
+        2 => t("export.qualityHigh"),
+        _ => t("export.qualityStandard"),
+    }
+}
+
+/// 工程里是否用了 AI 做的东西：数字人的成片、AI 配音、AI 生成的图。
+/// 这些功能的产物都落在工程目录的 `ai_avatar/`、`ai_voice/`、
+/// `ai_image/` 下，导入素材的名字也带着这些词；只看路径与文件名，不
+/// 打开任何文件。导出面板据此建议打开 AI 标识，而不是替人打开。
+fn ai_material(studio: &Studio) -> bool {
+    let root = studio
+        .session
+        .as_ref()
+        .map(|session| session.path().replace('\\', "/"))
+        .unwrap_or_default();
+    studio.project().media.iter().any(|item| {
+        let path = item.path.replace('\\', "/");
+        let name = item.name.to_lowercase();
+        ["ai_avatar", "ai_voice", "ai_image", "ai-background", "aigen"]
+            .iter()
+            .any(|folder| path.contains(&format!("/{folder}/")))
+            || (root.is_empty() || path.starts_with(&root))
+                && [
+                    "local-avatar",
+                    "avatar-voice",
+                    "ai-avatar",
+                    "ai_image",
+                    "ai-image",
+                ]
+                .iter()
+                .any(|word| name.contains(word))
+    })
+}
+
+/// 导出面板上的一行建议：工程有 AI 素材、而 AI 标识没开时说一句，
+/// 已经开了或没有 AI 素材就什么都不说。
+fn ai_hint(studio: &Studio) -> String {
+    if studio.prefs.ai_badge.unwrap_or(false) || !ai_material(studio) {
+        return String::new();
+    }
+    t("export.aiHint")
+}
+
+/// 导出时那一行细节：编到第几帧、实际帧率、还剩几秒；空闲时是空串。
+fn progress_detail(pane: &ExportPane, studio: &Studio) -> String {
+    if pane.phase != ExportPhase::Running || pane.progress <= 0.0 {
+        return String::new();
+    }
+    let (num, den) = pane.rate(studio);
+    let fps = num as f64 / den.max(1) as f64;
+    let total = (f64::from(studio.duration()).max(0.0) * fps).round().max(1.0);
+    let elapsed = pane
+        .started_at
+        .map_or(0.0, |started| started.elapsed().as_secs_f64());
+    let done = f64::from(pane.progress) * total;
+    let speed = if elapsed > 0.0 { done / elapsed } else { 0.0 };
+    let left = if speed > 0.0 {
+        (total - done).max(0.0) / speed
+    } else {
+        0.0
+    };
+    tf(
+        "export.progressDetail",
+        &[
+            &format!("{}", done.round() as i64),
+            &format!("{}", total as i64),
+            &format!("{speed:.0}"),
+            &format!("{left:.0}"),
+        ],
+    )
+}
+
+/// 开工前的预计耗时：上一回每秒成片花了多少墙钟秒，乘这次的时长。
+/// 本机还没导出过就按 1080p 硬编的常见速度先估一个，写着「预计」，
+/// 真开始后有实测帧率与剩余时间。
+fn estimate(pane: &ExportPane, studio: &Studio) -> String {
+    if pane.phase != ExportPhase::Idle {
+        return String::new();
+    }
+    let length = f64::from(studio.duration());
+    if length <= 0.0 {
+        return String::new();
+    }
+    // 墙钟秒 / 成片秒：本机 RX 6600 的 AMF 与 x264 veryfast 都落在
+    // 0.3–0.6 之间，首次估 0.45。
+    let speed = pane.last_speed.unwrap_or(0.45).clamp(0.05, 20.0);
+    tf(
+        "export.estimateTime",
+        &[&format!("{:.0}", (length * speed).max(1.0))],
+    )
 }
 
 /// Whether `codec` can be written here, as far as is known without
@@ -792,9 +956,174 @@ fn add_ai_badge(project: &mut concat_project::model::Project, duration: f64) {
     timeline.clips.push(std::sync::Arc::new(clip));
 }
 
+/// 导出面板的尺寸后来一截平台标注：这段画幅主要发给谁看。和新建工程
+/// 的尺寸下拉是同一套说法，选导出尺寸时就知道成片给哪个平台。
+fn platform_label(width: u32, height: u32) -> &'static str {
+    if height == 0 {
+        return "";
+    }
+    let aspect = f64::from(width) / f64::from(height);
+    let near = |target: f64| (aspect - target).abs() < target * 0.02;
+    if near(16.0 / 9.0) {
+        " · B 站/YouTube 横屏"
+    } else if near(9.0 / 16.0) {
+        " · 抖音/视频号/快手"
+    } else if near(4.0 / 5.0) {
+        " · 小红书"
+    } else if near(1.0) {
+        " · 朋友圈"
+    } else if near(4.0 / 3.0) {
+        " · 课件/PPT"
+    } else if near(21.0 / 9.0) {
+        " · 带鱼屏"
+    } else {
+        ""
+    }
+}
+
+/// 自定义水印：把设置里那张 PNG 作为一条图片片段算进导出清单。位置按
+/// 画面比例算，所以同一份设置在 1080p 与 4K 成片上落在同样的地方；尺寸
+/// 是「图宽占画面宽度的百分比」，含等比缩放，长图短图都不会变形。
+fn watermark_overlay(studio: &Studio) -> Option<ExportClip> {
+    let watermark = studio.prefs.watermark.clone()?.tidy();
+    if !watermark.is_on() {
+        return None;
+    }
+    let bytes = std::fs::read(&watermark.path).ok()?;
+    let (image_w, image_h) = png_size(&bytes)?;
+    let (frame_w, frame_h) = studio.output_size();
+    let (scale, offset_x, offset_y) = watermark_geometry(
+        (image_w, image_h),
+        (frame_w, frame_h),
+        watermark.size,
+        watermark.position,
+    );
+    let mut clip = ExportClip::blank(
+        ClipKind::Image,
+        0.0,
+        f64::from(studio.duration()).max(0.1),
+        0,
+    );
+    clip.path = watermark.path.clone();
+    // 画面尺寸给了引擎，等比缩放的底子才准。
+    clip.media_width = Some(u32::from(image_w.max(1)));
+    clip.media_height = Some(u32::from(image_h.max(1)));
+    clip.scale = scale;
+    clip.offset_x = offset_x;
+    clip.offset_y = offset_y;
+    clip.opacity = f64::from(watermark.opacity) / 100.0;
+    clip.muted = true;
+    clip.volume = 0.0;
+    clip.has_audio = Some(false);
+    log::info!(
+        "export: watermark {} · position {} · {:.0}% · {:.2}x",
+        crate::studio::file_name_of(&watermark.path),
+        watermark.position,
+        watermark.opacity,
+        scale
+    );
+    Some(clip)
+}
+
+/// 水印在一帧画面里的几何：缩放倍数，以及中心相对画面中心的偏移（画面
+/// 宽、高的比例）。尺寸是图宽占画面宽度的百分比，等比缩放；位置留 2%
+/// 的边，四角贴边不压线。都是纯数，所以能单测。
+fn watermark_geometry(
+    image: (u32, u32),
+    frame: (u32, u32),
+    size: u8,
+    position: u8,
+) -> (f64, f64, f64) {
+    const MARGIN: f64 = 0.02;
+    let (frame_w, frame_h) = (f64::from(frame.0.max(1)), f64::from(frame.1.max(1)));
+    let image_aspect = f64::from(image.0.max(1)) / f64::from(image.1.max(1));
+    let frame_aspect = frame_w / frame_h;
+    // 等比缩进画面（contain）：与引擎的 fit 同一套算法，算出来的尺
+    // 寸才和实际画上去的一致。
+    let (fit_w, fit_h) = if image_aspect >= frame_aspect {
+        (frame_w, frame_w / image_aspect)
+    } else {
+        (frame_h * image_aspect, frame_h)
+    };
+    let scale = (f64::from(size.clamp(5, 30)) / 100.0 * frame_w) / fit_w;
+    let shown_w = fit_w * scale / frame_w;
+    let shown_h = fit_h * scale / frame_h;
+    let (offset_x, offset_y) = match position {
+        0 => (
+            -0.5 + shown_w / 2.0 + MARGIN,
+            -0.5 + shown_h / 2.0 + MARGIN,
+        ),
+        1 => (
+            0.5 - shown_w / 2.0 - MARGIN,
+            -0.5 + shown_h / 2.0 + MARGIN,
+        ),
+        2 => (
+            -0.5 + shown_w / 2.0 + MARGIN,
+            0.5 - shown_h / 2.0 - MARGIN,
+        ),
+        4 => (0.0, 0.0),
+        _ => (
+            0.5 - shown_w / 2.0 - MARGIN,
+            0.5 - shown_h / 2.0 - MARGIN,
+        ),
+    };
+    (scale, offset_x, offset_y)
+}
+
+/// 一张 PNG 的宽高与高，从文件头的 IHDR 里读：不解码整张图，导出前
+/// 就知道它多大；不是 PNG 就是 None（水印在设置里只收 PNG）。
+fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
+    if !bytes.starts_with(PNG) || bytes.len() < 24 || &bytes[12..16] != b"IHDR" {
+        return None;
+    }
+    let wide = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+    let high = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+    (wide > 0 && high > 0).then_some((wide, high))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A PNG's size from the IHDR in its header; None when it is not a PNG.
+    #[test]
+    fn a_pngs_size_comes_out_of_its_header() {
+        // The smallest thing with a PNG signature and an IHDR chunk: the
+        // rest may be anything for a size read.
+        let mut bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR".to_vec();
+        bytes.extend_from_slice(&1280u32.to_be_bytes());
+        bytes.extend_from_slice(&720u32.to_be_bytes());
+        bytes.extend_from_slice(&[8, 6, 0, 0, 0]);
+        assert_eq!(png_size(&bytes), Some((1280, 720)));
+        assert_eq!(png_size(b"not a png"), None);
+        assert_eq!(png_size(b""), None);
+    }
+
+    /// The watermark's geometry: a tenth of the frame wide, a corner keeps
+    /// a margin, and a portrait picture scaled to the same width lands
+    /// with the same width - contain, not stretch.
+    #[test]
+    fn the_watermark_keeps_its_aspect_and_its_corner() {
+        let frame = (1920, 1080);
+        let (scale, x, y) = watermark_geometry((100, 100), frame, 10, 0);
+        // Fit by height, so the scale is a tenth of 1080 over the fitted
+        // square: the picture is 108px wide, 10% of the frame's height and
+        // 5.6% of its width.
+        assert!((scale - 0.1).abs() < 1e-9, "scale {scale}");
+        assert!((x - (-0.5 + 0.0281 + 0.02)).abs() < 1e-3, "x {x}");
+        assert!((y - (-0.5 + 0.05 + 0.02)).abs() < 1e-3, "y {y}");
+        // A wide logo fitted by width: a tenth of the width, its own height.
+        let (_, wide_x, wide_y) = watermark_geometry((400, 100), frame, 10, 3);
+        assert!((wide_x - (0.5 - 0.05 - 0.02)).abs() < 1e-9, "x {wide_x}");
+        assert!(
+            (wide_y - (0.5 - (1.0 / 4.0 * 108.0 / 1080.0) / 2.0 - 0.02)).abs() < 1e-6,
+            "y {wide_y}"
+        );
+        // Centre is the centre, whatever the size.
+        let (_, x, y) = watermark_geometry((400, 100), frame, 25, 4);
+        assert_eq!((x, y), (0.0, 0.0));
+    }
 
     /// A name is a file's or the export does not start: trimmed, never
     /// empty, never a path, and none of the characters Windows refuses.

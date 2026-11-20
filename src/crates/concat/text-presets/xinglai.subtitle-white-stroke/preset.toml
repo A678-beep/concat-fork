@@ -6,7 +6,7 @@ offsetY = 0.34
 
 [style]
 content = "星籁剪辑"
-fontFamily = "Hanken Grotesk"
+fontFamily = "Noto Sans CJK SC"
 fontWeight = 700
 fontSize = 0.058
 color = "#ffffff"

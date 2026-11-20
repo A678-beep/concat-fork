@@ -637,6 +637,44 @@ mod tests {
         assert_eq!(resolve(&prefs, "shift+q"), None);
     }
 
+    /// The shipped table is a table of one action a chord: no two actions
+    /// ship the same key, and no action ships its own id twice. A doubled
+    /// default would make one of the two unreachable from the day it
+    /// shipped, and only the loser's row would ever show it.
+    #[test]
+    fn no_two_actions_ship_the_same_chord() {
+        let mut chords: BTreeMap<&str, &str> = BTreeMap::new();
+        let mut ids: BTreeMap<&str, ()> = BTreeMap::new();
+        for action in ACTIONS {
+            assert!(
+                ids.insert(action.id, ()).is_none(),
+                "{} is listed twice",
+                action.id
+            );
+            assert!(
+                !action.defaults.is_empty(),
+                "{} ships with no key at all",
+                action.id
+            );
+            for chord in action.defaults {
+                if let Some(other) = chords.insert(chord, action.id) {
+                    panic!("`{chord}` ships on both `{other}` and `{}`", action.id);
+                }
+            }
+        }
+        // The two chords resolve() synthesises are nobody's default either:
+        // Shift with a step key, and Ctrl+Y where redo is still shipped.
+        assert!(!chords.contains_key("shift+left"), "shift+left is a rule");
+        assert!(!chords.contains_key("shift+right"), "shift+right is a rule");
+        if cfg!(not(target_os = "macos")) {
+            assert!(!chords.contains_key("ctrl+y"), "ctrl+y redoes by rule");
+        }
+        // And the reserved ones the window owns are not handed out.
+        for chord in chords.keys() {
+            assert!(!reserved(chord), "`{chord}` is the window's own");
+        }
+    }
+
     #[test]
     fn shift_steps_ten_frames_with_whatever_key_steps() {
         let prefs = Preferences::default();

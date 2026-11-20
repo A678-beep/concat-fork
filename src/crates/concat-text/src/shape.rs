@@ -188,6 +188,7 @@ pub fn render_shape(style: &ShapeStyle, width: u32, height: u32) -> Result<Rende
         block_dx: 0,
         block_dy: 0,
         words: Vec::new(),
+        chars: Vec::new(),
     })
 }
 
@@ -209,6 +210,7 @@ pub fn render_shape_frame(
         block_dx: 0,
         block_dy: 0,
         words: Vec::new(),
+        chars: Vec::new(),
     })
 }
 

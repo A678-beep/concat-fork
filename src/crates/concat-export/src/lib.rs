@@ -327,6 +327,13 @@ pub struct ExportClip {
     /// it back through `reveal_order()`.
     #[serde(skip)]
     pub reveal_map: Option<Arc<RevealMap>>,
+    /// A title's typewriter, baked at rasterize time and set by the host:
+    /// how long the typing takes, so every frame can work out how far
+    /// through it is and mask the characters not yet typed. The map above
+    /// is the characters' order; this is the clock. Absent for a title
+    /// that is there all at once.
+    #[serde(skip)]
+    pub title_reveal: Option<TitleReveal>,
     /// What fills the frame behind the picture where it does not reach, as
     /// the flattener resolved it - the clip's own background or its
     /// timeline's, for a picture on the lowest picture lane; absent for
@@ -441,9 +448,23 @@ impl ExportClip {
             voice: None,
             highlighted: false,
             reveal_map: None,
+            title_reveal: None,
             backdrop: None,
         }
     }
+}
+
+/// A title's typewriter, baked by the host: the share of the clip's length
+/// the typing takes, `0..=1`. The text lands character by character over
+/// that span, from the first frame to the last; the characters' order and
+/// the cursor ride the title's [`RevealMap`], which is what the shader
+/// reads. Past the span the title is whole. See
+/// `concat_effects::typewriter_pass`.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct TitleReveal {
+    /// The typing's length as a share of the clip's own: 0 is instant, 1
+    /// takes the whole clip.
+    pub span: f64,
 }
 
 /// One animation key, as the flattener hands it over.
@@ -1195,8 +1216,26 @@ pub fn render_on(
     // that failed - the disk full, a read error - left a truncated file
     // where the previous export had been (audit 2026-10-09, finding 4).
     let result = (|| -> Result<(), String> {
+        // The sound is mixed while the picture is drawn, on a thread of its
+        // own: the two run on different machinery - input decoders and CPU
+        // filters on one side, the GPU compositor on the other - and one
+        // after the other, the mix was a fifth of a 30 s cut's wall time
+        // spent waiting after the last frame had been drawn.
+        let mixing = if sound.is_empty() {
+            None
+        } else {
+            let mix: Vec<AudioClip> = sound.iter().flat_map(|clip| audio_pieces(clip)).collect();
+            let buses = audio_buses(&resolved);
+            let end = timeline_end.as_f64();
+            let into = mixed.clone();
+            let worker = std::thread::Builder::new()
+                .name("concat-export-mix".to_owned())
+                .spawn(move || audio::mix_to_file_with(&mix, &buses, end, &into))
+                .map_err(|error| format!("could not start mixing the sound: {error}"))?;
+            Some(worker)
+        };
         op.step("render");
-        render_picture(
+        let picture = render_picture(
             request,
             compositor,
             rate,
@@ -1206,19 +1245,22 @@ pub fn render_on(
             &silent,
             &mut reporter,
             &mut spent,
-        )?;
+        );
+        // Joined even when the picture failed: a cancelled export must not
+        // leave a thread writing into a scratch file the cleanup deletes.
+        if let Some(worker) = mixing {
+            let sound_result = worker
+                .join()
+                .map_err(|_| "mixing the sound stopped".to_owned())?;
+            picture?;
+            sound_result.map_err(|error| error.to_string())?;
+        } else {
+            picture?;
+        }
 
         let finished = if sound.is_empty() {
             &silent
         } else {
-            reporter.cancelled()?;
-            reporter.emit(0, total_frames, "mixing audio");
-            op.step("mix audio");
-            let mix: Vec<AudioClip> = sound.iter().flat_map(|clip| audio_pieces(clip)).collect();
-            let buses = audio_buses(&resolved);
-            audio::mix_to_file_with(&mix, &buses, timeline_end.as_f64(), &mixed)
-                .map_err(|error| error.to_string())?;
-
             reporter.cancelled()?;
             reporter.emit(total_frames, total_frames, "muxing");
             op.step("mux");
@@ -1793,6 +1835,7 @@ fn render_picture(
         ranges,
         chains,
         reveal_maps,
+        title_reveals,
         cutouts,
         stabilized,
         highlight: _,
@@ -1972,7 +2015,7 @@ fn render_picture(
                         layer,
                         frame,
                         tracks.get(&layer.clip).copied().unwrap_or(0),
-                        passes_at(&chains, &reveal_maps, &timeline, layer.clip, time),
+                        passes_at(&chains, &title_reveals, &reveal_maps, &timeline, layer.clip, time),
                         geometry.get(&layer.clip),
                         shapes_at(&shapes, layer, time, rate),
                         stabilized.get(&layer.clip),
@@ -1999,7 +2042,7 @@ fn render_picture(
                         layer,
                         std::sync::Arc::new(frame),
                         tracks.get(&layer.clip).copied().unwrap_or(0),
-                        passes_at(&chains, &reveal_maps, &timeline, layer.clip, time),
+                        passes_at(&chains, &title_reveals, &reveal_maps, &timeline, layer.clip, time),
                         geometry.get(&layer.clip),
                         shapes_at(&shapes, layer, time, rate),
                         stabilized.get(&layer.clip),
@@ -2529,21 +2572,35 @@ fn progress_due(index: i64, since: std::time::Duration) -> bool {
 /// value there, the rest at their settings, laid out as the uniforms the
 /// shaders read. `reveal_maps` carries a title's baked per-word order
 /// alongside its chain - unlike an effect's knobs, it is fixed for the
-/// clip's whole life, so it is looked up rather than resolved.
+/// clip's whole life, so it is looked up rather than resolved. A title
+/// with a typewriter gets one more pass, the host's own, whose whole
+/// input is how far the typing has got.
 fn passes_at(
     chains: &HashMap<ClipId, Vec<AppliedFilter>>,
+    title_reveals: &HashMap<ClipId, crate::TitleReveal>,
     reveal_maps: &HashMap<ClipId, Arc<RevealMap>>,
     timeline: &Timeline,
     clip: ClipId,
     time: Rational,
 ) -> Vec<ShaderPass> {
-    let Some(effects) = chains.get(&clip) else {
-        return Vec::new();
-    };
     let at = timeline
         .clip(clip)
         .map_or(0.0, |engine_clip| engine_clip.fraction_at(time));
-    Catalogue::builtin().shader_passes_at(effects, at, reveal_maps.get(&clip).cloned())
+    let map = reveal_maps.get(&clip).cloned();
+    let mut passes = chains.get(&clip).map_or_else(Vec::new, |effects| {
+        Catalogue::builtin().shader_passes_at(effects, at, map.clone())
+    });
+    if let Some(reveal) = title_reveals.get(&clip) {
+        // The typing runs over `span` of the clip: a frame before it shows
+        // the characters whose turn has come, one past it the whole title.
+        let progress = if reveal.span > 0.0 {
+            (at / reveal.span).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        passes.extend(concat_effects::typewriter_pass(progress, map));
+    }
+    passes
 }
 
 /// Only the shader clock moves. Planning, source decoding, animated effect
@@ -3121,6 +3178,7 @@ pub fn preview_sources_of(
         ranges: _,
         chains,
         reveal_maps,
+        title_reveals,
         cutouts,
         stabilized,
         highlight,
@@ -3172,7 +3230,7 @@ pub fn preview_sources_of(
                     layer,
                     frame,
                     tracks.get(&layer.clip).copied().unwrap_or(0),
-                    passes_at(chains, reveal_maps, timeline, layer.clip, time),
+                    passes_at(chains, title_reveals, reveal_maps, timeline, layer.clip, time),
                     geometry.get(&layer.clip),
                     shapes_at(shapes, layer, time, rate),
                     stabilized.get(&layer.clip),

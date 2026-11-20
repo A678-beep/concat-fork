@@ -421,8 +421,54 @@ impl Package {
         &self.manifest.effect.category
     }
 
+/// The effect library's category words, read back from Chinese: the
+/// interface shows the shelves translated, and a pill that is pressed hands
+/// the Chinese word back, while a package files itself under the English one
+/// its manifest wrote. A word this table does not know is passed through.
+fn english_category(category: &str) -> &str {
+    match category.trim() {
+        "\u{7cbe}\u{9009}" => "Featured",
+        "\u{590d}\u{53e4}\u{4e0e}\u{80f6}\u{7247}" => "Retro & Film",
+        "\u{5149}\u{5b66}\u{4e0e}\u{955c}\u{5934}" => "Optical & Lens",
+        "\u{53d8}\u{5f62}\u{4e0e}\u{6545}\u{969c}" => "Distortion & Glitch",
+        "\u{9707}\u{52a8}\u{4e0e}\u{8fd0}\u{52a8}" => "Shake & Motion",
+        "\u{6d3e}\u{5bf9}\u{4e0e}\u{591c}\u{5e97}" => "Party & Club",
+        "\u{5149}\u{5f71}" => "Light & Shadow",
+        "\u{5168}\u{90e8}" => "All",
+        "\u{8c03}\u{6574}" => "Adjust",
+        "\u{57fa}\u{7840}" => "Basic",
+        "\u{9ed1}\u{767d}" => "Black & White",
+        "\u{6a21}\u{7cca}" => "Blur",
+        "\u{7535}\u{5f71}\u{611f}" => "Cinematic",
+        "\u{4fee}\u{590d}" => "Clean",
+        "\u{8272}\u{5f69}" => "Color",
+        "\u{62a0}\u{50cf}" => "Cutout",
+        "\u{6eb6}\u{89e3}" => "Dissolve",
+        "\u{53d8}\u{5f62}" => "Distort",
+        "\u{65e5}\u{5e38}" => "Everyday",
+        "\u{80f6}\u{7247}" => "Film",
+        "\u{7f8e}\u{98df}" => "Food",
+        "\u{6545}\u{969c}" => "Glitch",
+        "\u{4eba}\u{50cf}" => "Portrait",
+        "\u{590d}\u{53e4}" => "Retro",
+        "\u{98ce}\u{5149}" => "Scenery",
+        "\u{9707}\u{52a8}" => "Shake",
+        "\u{6ed1}\u{52a8}" => "Slide",
+        "\u{7a7a}\u{95f4}" => "Space",
+        "\u{65cb}\u{8f6c}" => "Spin",
+        "\u{98ce}\u{683c}\u{5316}" => "Stylized",
+        "\u{5f71}\u{8c03}" => "Tone",
+        "\u{6c1b}\u{56f4}" => "Vibe",
+        "\u{4eba}\u{58f0}" => "Voice",
+        "\u{64e6}\u{9664}" => "Wipe",
+        "\u{53d8}\u{7126}" => "Zoom",
+        other => other,
+    }
+}
+
     /// Whether this package belongs to or matches a category filter.
     pub fn matches_category(&self, category: &str) -> bool {
+        let category = Self::english_category(category);
         if category.is_empty() || category.eq_ignore_ascii_case("All") {
             return true;
         }
@@ -1297,10 +1343,64 @@ impl Catalogue {
     }
 }
 
+/// The typewriter's pass: a title's characters shown one at a time, in the
+/// order a reader meets them. `progress` is how much of the typing has
+/// happened, `0..=1`; `reveal_map` is the title's baked per-character
+/// order (see `concat_core::shader::RevealMap`), where the cursor - if the
+/// title has one - is at 0, waiting from the first frame.
+///
+/// It is not a catalogue package: the window's Text inspector owns it and
+/// builds its keys, so it never appears in the effects library, cannot be
+/// added to a clip by hand, and needs no licence to be vetted as a
+/// package. The shader, its manifest and its layout are still the host's
+/// own, so what reaches the compositor is a pass like any other and the
+/// renderer knows nothing new.
+pub fn typewriter_pass(progress: f64, reveal_map: Option<Arc<RevealMap>>) -> Option<ShaderPass> {
+    static PACKAGE: std::sync::OnceLock<Package> = std::sync::OnceLock::new();
+    let package = PACKAGE.get_or_init(|| {
+        Package::from_sources(
+            include_str!("typewriter/effect.toml"),
+            None,
+            Some(include_str!("typewriter/effect.wgsl")),
+        )
+        .expect("the typewriter package is a build-time constant")
+    });
+    let mut set = BTreeMap::new();
+    set.insert(
+        "progress".to_owned(),
+        progress.clamp(0.0, 1.0) * 100.0,
+    );
+    package.pass(&set, reveal_map)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use concat_project::model::KeyEase;
+
+    /// The typewriter is one pipeline at every instant: the progress rides
+    /// the uniform buffer, not the key, so a title typed in is not a new
+    /// shader compile every frame - and the pass reads the character map
+    /// the host baked rather than anything the clip could set by hand.
+    #[test]
+    fn the_typewriter_pass_keeps_its_pipeline_and_reads_the_map() {
+        let map = Arc::new(RevealMap::from_levels(
+            4,
+            4,
+            &[(0, 0, 1, 1, 0), (1, 0, 1, 1, 255)],
+        ));
+        let first = crate::typewriter_pass(0.0, Some(Arc::clone(&map))).expect("a pass");
+        let later = crate::typewriter_pass(1.0, Some(Arc::clone(&map))).expect("a pass");
+        assert_eq!(first.key, later.key, "one pipeline, whatever the progress");
+        assert_ne!(first.params, later.params, "the progress rides the uniform");
+        assert_eq!(later.params[0..4], 100.0f32.to_le_bytes());
+        assert!(first.reveal_map.is_some(), "the character map is bound");
+        assert!(first.source.contains("reveal_order"));
+        assert_eq!(later.reveal_map.as_ref().map(|map| map.id), Some(map.id));
+        // The library never offers it: it is the Text inspector's, not a
+        // card somebody could lay on a video clip.
+        assert!(Catalogue::builtin().get("concat.typewriter").is_none());
+    }
 
     /// A link to a retired key or blur opens as its stand-in, its knobs
     /// carried over as the `[[replaces]]` table says - the screen's colour,

@@ -159,10 +159,12 @@ pub struct TitleRun {
     pub stroke_color: Option<String>,
 }
 
-/// One word's box in canvas pixels, top-left origin, in reading order
-/// (line by line, left to right within a line). A pixel-reveal effect
-/// keys off this order rather than the word itself, which is why it is
-/// exposed as rects and not text.
+/// One word's or character's box in canvas pixels, top-left origin, in
+/// reading order (line by line, left to right within a line, right to left
+/// in a line written that way). A pixel-reveal effect - a per-word reveal,
+/// a typewriter typing a title in one character at a time - keys off this
+/// order rather than the word itself, which is why it is exposed as rects
+/// and not text.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct WordRect {
     /// The box's left edge.
@@ -197,6 +199,8 @@ pub struct RenderedFrame {
     pub block_dy: i32,
     /// See [`Rendered::words`].
     pub words: Vec<WordRect>,
+    /// See [`Rendered::chars`].
+    pub chars: Vec<WordRect>,
 }
 
 /// The finished title.
@@ -233,6 +237,11 @@ pub struct Rendered {
     /// layout this crate already does, kept for a caller that wants to
     /// reveal a title one word at a time without knowing what a word is.
     pub words: Vec<WordRect>,
+    /// Every character's box on the canvas, in reading order, on the same
+    /// terms as [`Rendered::words`] - a word's boxes split at its glyphs'
+    /// clusters, so a caller can type a title in one character at a time.
+    /// A combining mark shares its base's box; a space has none.
+    pub chars: Vec<WordRect>,
 }
 
 /// What can go wrong. Fonts fall back rather than fail, so this is short.
@@ -979,6 +988,11 @@ struct Line {
     marks: Vec<Mark>,
     width: f32,
     words: Vec<(f32, f32)>,
+    /// Each character's `(start_x, end_x)` in the pens space, in reading
+    /// order: left to right in a line written that way, right to left in
+    /// one written the other. A glyph cluster is one character; the
+    /// tracking after a glyph is not part of its box.
+    chars: Vec<(f32, f32)>,
     /// The stretches set in one look, `(look, start_x, end_x)` left to
     /// right: where a look's underline and strike are ruled.
     stretches: Vec<(usize, f32, f32)>,
@@ -1156,6 +1170,7 @@ impl Setter<'_> {
                 marks: Vec::new(),
                 width: 0.0,
                 words: Vec::new(),
+                chars: Vec::new(),
                 stretches: Vec::new(),
                 ascent,
                 descent,
@@ -1254,6 +1269,27 @@ impl Setter<'_> {
         } else {
             (pen - self.tracking).max(0.0)
         };
+        // Each character's box: a glyph cluster is one character, and a
+        // base with its combining marks is one cluster. The spans were
+        // pushed in reading order - a line written right to left starts
+        // with the rightmost character.
+        let mut clusters: Vec<(usize, f32, f32)> = Vec::new();
+        for &(cluster, left, right, _) in &spans {
+            match clusters.last_mut() {
+                Some((held, _, end)) if *held == cluster => *end = end.max(right),
+                _ => clusters.push((cluster, left, right)),
+            }
+        }
+        let chars: Vec<(f32, f32)> = clusters
+            .into_iter()
+            .map(|(_, left, right)| (left, right))
+            .collect();
+        // A line written right to left is read the other way round, and the
+        // boxes say so: a typewriter types it the way it is read.
+        let mut chars = chars;
+        if levels.get(range.start).is_some_and(|level| level.is_rtl()) {
+            chars.reverse();
+        }
         let (words, stretches) = if outline {
             let words = words(para.text, range)
                 .into_iter()
@@ -1286,6 +1322,7 @@ impl Setter<'_> {
             marks,
             width,
             words,
+            chars,
             stretches,
             ascent,
             descent,
@@ -1427,7 +1464,7 @@ pub fn render(
     width: u32,
     height: u32,
 ) -> Result<Rendered, Error> {
-    let (canvas, block, words) = paint(fonts, style, width, height)?;
+    let (canvas, block, words, chars) = paint(fonts, style, width, height)?;
     let png = encode_png(&canvas)?;
     Ok(Rendered {
         png,
@@ -1439,6 +1476,7 @@ pub fn render(
         block_dx: block.2,
         block_dy: block.3,
         words,
+        chars,
     })
 }
 
@@ -1452,7 +1490,7 @@ pub fn render_frame(
     width: u32,
     height: u32,
 ) -> Result<RenderedFrame, Error> {
-    let (canvas, block, words) = paint(fonts, style, width, height)?;
+    let (canvas, block, words, chars) = paint(fonts, style, width, height)?;
     Ok(RenderedFrame {
         rgba: straight_rgba(&canvas),
         width: canvas.width(),
@@ -1463,6 +1501,7 @@ pub fn render_frame(
         block_dx: block.2,
         block_dy: block.3,
         words,
+        chars,
     })
 }
 
@@ -1525,14 +1564,14 @@ impl Ink {
     }
 }
 
-/// The canvas with the title on it, the block, and every word's box on the
-/// canvas in reading order.
+/// The canvas with the title on it, the block, every word's box on the
+/// canvas in reading order, and every character's.
 fn paint(
     fonts: &Fonts,
     style: &TitleStyle,
     width: u32,
     height: u32,
-) -> Result<(Pixmap, Block, Vec<WordRect>), Error> {
+) -> Result<(Pixmap, Block, Vec<WordRect>, Vec<WordRect>), Error> {
     // The frame's canvas, for a title with nothing to paint; one with ink
     // gets a canvas as big as its ink needs, below.
     let empty = Pixmap::new(width, height).ok_or(Error::Canvas(width, height))?;
@@ -1647,7 +1686,7 @@ fn paint(
     let words_w = lines.iter().map(|line| line.width).fold(0.0, f32::max);
     if words_w <= 0.0 || lines.is_empty() {
         // Nothing to paint: an empty, valid canvas.
-        return Ok((empty, (0, 0, 0, 0), Vec::new()));
+        return Ok((empty, (0, 0, 0, 0), Vec::new(), Vec::new()));
     }
     // Each baseline below the first by the pitch of the bigger of the two
     // lines it sits between, so a line with a big word in it pushes its
@@ -1737,6 +1776,7 @@ fn paint(
         })
         .collect();
     let mut word_rects = Vec::new();
+    let mut char_rects = Vec::new();
     for (row, line) in lines.iter().enumerate() {
         let indent = indent_of(line);
         let baseline = baseline_of(row);
@@ -1767,6 +1807,14 @@ fn paint(
         let line_top = baseline - line.ascent;
         for &(start_x, end_x) in &line.words {
             word_rects.push(WordRect {
+                x: (left + indent + start_x).round() as i32,
+                y: line_top.round() as i32,
+                width: (end_x - start_x).max(0.0).round() as u32,
+                height: (line.ascent + line.descent).round() as u32,
+            });
+        }
+        for &(start_x, end_x) in &line.chars {
+            char_rects.push(WordRect {
                 x: (left + indent + start_x).round() as i32,
                 y: line_top.round() as i32,
                 width: (end_x - start_x).max(0.0).round() as u32,
@@ -1971,6 +2019,7 @@ fn paint(
         canvas,
         (outer_w.round() as u32, outer_h.round() as u32, block_dx, 0),
         word_rects,
+        char_rects,
     ))
 }
 
@@ -3041,6 +3090,31 @@ mod tests {
         let wrapped = render(&fonts, &narrow, 640, 360).expect("renders");
         assert!(wrapped.block_height > one.block_height, "it wrapped");
         assert_eq!(wrapped.words.len(), content.chars().count());
+    }
+
+    /// Every character has a box of its own, in reading order, so a title
+    /// can be typed in one character at a time: Latin runs left to right,
+    /// a line written right to left runs the other way, and a base with
+    /// the mark it carries is one character.
+    #[test]
+    fn every_character_has_its_box_in_reading_order() {
+        let fonts = Fonts::new();
+        let out = render(&fonts, &style("abc"), 640, 360).expect("renders");
+        assert_eq!(out.chars.len(), 3, "{:?}", out.chars);
+        assert!(
+            out.chars[0].x < out.chars[1].x && out.chars[1].x < out.chars[2].x,
+            "left to right: {:?}",
+            out.chars
+        );
+        let right_to_left = render(&fonts, &style("\u{5e9}\u{5dc}\u{5d5}\u{5dd}"), 640, 360).expect("renders");
+        assert_eq!(right_to_left.chars.len(), 4, "{:?}", right_to_left.chars);
+        assert!(
+            right_to_left.chars[0].x > right_to_left.chars[3].x,
+            "the first read is on the right: {:?}",
+            right_to_left.chars
+        );
+        let marked = render(&fonts, &style("e\u{301}t"), 640, 360).expect("renders");
+        assert_eq!(marked.chars.len(), 2, "{:?}", marked.chars);
     }
 
     /// A line separator inside a paragraph breaks the line.

@@ -1576,6 +1576,9 @@ export component PhoneEditor inherits Rectangle {
                 audio-tracks: Editor.audio-tracks;
                 set(field, value) => { Editor.clip-set(field, value); }
                 commit => { Editor.clip-commit(); }
+denoise(strength, hum, audition) => {
+    Editor.clip-denoise(strength, hum, audition);
+}
             }
             if !Editor.selected-clip.batch-volume: ProcessorRows {
                 applied: Editor.applied-audio;

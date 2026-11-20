@@ -59,6 +59,14 @@ pub enum SettingsMsg {
     ProxiesChanged(bool),
     /// 导出视频带「AI 生成」角标。
     AiBadge(bool),
+    /// 自定义水印：开关、选图、清掉，以及位置/透明度/大小三行。
+    WatermarkChanged(bool),
+    WatermarkPick,
+    WatermarkChosen(std::path::PathBuf),
+    WatermarkRemove,
+    WatermarkPosition(i32),
+    WatermarkOpacity(f32),
+    WatermarkSize(f32),
     /// The remember-layout switch: whether a launch opens on the last
     /// session's panels and window size.
     RememberLayoutChanged(bool),
@@ -407,6 +415,60 @@ impl SettingsPane {
                 // On, the media already in the project gets its proxies
                 // straight away (refresh_art's stamp holds the switch);
                 // off, playback reads the files from the next frame.
+            }
+            SettingsMsg::WatermarkChanged(on) => {
+                log::info!("settings: 自定义水印 {}", on_off(on));
+                let mut watermark = self.watermark(studio);
+                watermark.enabled = on;
+                studio.prefs.watermark = Some(watermark);
+                studio.prefs.save(&studio.host.dirs);
+                // 打开而还没有图：直接弹选图，少点一下。
+                if on && self.watermark(studio).path.trim().is_empty() {
+                    self.pick_watermark();
+                }
+            }
+            SettingsMsg::WatermarkPick => self.pick_watermark(),
+            SettingsMsg::WatermarkChosen(path) => match install_watermark(&studio.host.dirs, &path) {
+                Ok(copied) => {
+                    log::info!("settings: 水印图已存为 {copied}");
+                    let mut watermark = self.watermark(studio);
+                    watermark.path = copied;
+                    watermark.enabled = true;
+                    studio.prefs.watermark = Some(watermark);
+                    studio.prefs.save(&studio.host.dirs);
+                    studio.notify(&t("settings.watermarkAdded"), false);
+                }
+                Err(why) => {
+                    log::warn!("settings: 水印图不能用：{why}");
+                    studio.notify(&why, true);
+                }
+            },
+            SettingsMsg::WatermarkRemove => {
+                log::info!("settings: 水印清掉");
+                let mut watermark = self.watermark(studio);
+                watermark.path.clear();
+                watermark.enabled = false;
+                studio.prefs.watermark = Some(watermark);
+                studio.prefs.save(&studio.host.dirs);
+                let _ = std::fs::remove_file(studio.host.dirs.config.join(WATERMARK_FILE));
+            }
+            SettingsMsg::WatermarkPosition(index) => {
+                let mut watermark = self.watermark(studio);
+                watermark.position = index.clamp(0, 4) as u8;
+                studio.prefs.watermark = Some(watermark.tidy());
+                studio.prefs.save(&studio.host.dirs);
+            }
+            SettingsMsg::WatermarkOpacity(value) => {
+                let mut watermark = self.watermark(studio);
+                watermark.opacity = value.round().clamp(10.0, 90.0) as u8;
+                studio.prefs.watermark = Some(watermark.tidy());
+                studio.prefs.save(&studio.host.dirs);
+            }
+            SettingsMsg::WatermarkSize(value) => {
+                let mut watermark = self.watermark(studio);
+                watermark.size = value.round().clamp(5.0, 30.0) as u8;
+                studio.prefs.watermark = Some(watermark.tidy());
+                studio.prefs.save(&studio.host.dirs);
             }
             SettingsMsg::RememberLayoutChanged(on) => {
                 log::info!("settings: Remember layout {}", on_off(on));
@@ -859,8 +921,7 @@ impl SettingsPane {
     }
 
     /// What the Automation page says under the switch.
-    fn server_status(&self, studio: &Studio) -> String {
-        match &studio.host.server {
+    fn server_status(&self, studio: &Studio) -> String {        match &studio.host.server {
             Some(server) => {
                 let address = server
                     .json_addr()
@@ -1051,7 +1112,36 @@ impl SettingsPane {
                 .unwrap_or(2) as i32,
             playhead_stops: self.playhead_stops,
             proxies: studio.prefs.proxies,
-            ai_badge: studio.prefs.ai_badge.unwrap_or(true),
+            ai_badge: studio.prefs.ai_badge.unwrap_or(false),
+            // 自定义水印：开关、图上显示的文件名与大小，以及三行设置。
+            watermark_on: studio
+                .prefs
+                .watermark
+                .as_ref()
+                .is_some_and(prefs::WatermarkPrefs::is_on),
+            watermark_file: {
+                let watermark = self.watermark(studio);
+                if watermark.path.trim().is_empty() {
+                    t("settings.noWatermark").to_owned()
+                } else {
+                    let path = std::path::Path::new(&watermark.path);
+                    let name = path.file_name().map_or_else(
+                        || watermark.path.clone(),
+                        |name| name.to_string_lossy().into_owned(),
+                    );
+                    let bytes = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+                    format!("{name} · {}", crate::format::bytes(bytes as f32))
+                }
+            }
+            .into(),
+            watermark_position: self.watermark(studio).position as i32,
+            watermark_opacity: self.watermark(studio).opacity as f32,
+            watermark_size: self.watermark(studio).size as f32,
+            watermark_chosen: studio
+                .prefs
+                .watermark
+                .as_ref()
+                .is_some_and(|watermark| !watermark.path.trim().is_empty()),
             remember_layout: studio.prefs.remembers_layout(),
             layout_switchable: !crate::platform::phone(),
             gpu: !studio.prefs.draws_in_software(),
@@ -1223,6 +1313,68 @@ pub fn new_token() -> String {
         hasher.finish()
     };
     format!("{:016x}{:016x}", word(1), word(2))
+}
+
+/// 水印图存进配置目录时用的名字。
+const WATERMARK_FILE: &str = "watermark.png";
+/// 水印图最大多少字节：2MB。再大的图印在成片上也就指甲盖大，
+/// 而安装包和工程都不想为它变重。
+const WATERMARK_LIMIT: usize = 2 * 1024 * 1024;
+
+impl SettingsPane {
+    /// 设置里的水印，收进范围、没设过就是默认值。
+    fn watermark(&self, studio: &Studio) -> prefs::WatermarkPrefs {
+        studio
+            .prefs
+            .watermark
+            .clone()
+            .unwrap_or_default()
+            .tidy()
+    }
+
+    /// 选一张 PNG 当水印。
+    fn pick_watermark(&mut self) {
+        crate::host::pick_files_then(
+            t("settings.chooseWatermark"),
+            Some((t("settings.pngImage"), &["png"])),
+            move |studio, _, _, paths| {
+                if let Some(path) = paths.into_iter().next() {
+                    studio.handle(Msg::Settings(SettingsMsg::WatermarkChosen(path)));
+                }
+            },
+        );
+    }
+}
+
+/// 这张图能不能当水印：PNG，且不超过 2MB。不能就说清为什么。
+fn watermark_problem(bytes: &[u8]) -> Result<(), String> {
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
+    if !bytes.starts_with(PNG) {
+        return Err(t("settings.watermarkNotPng"));
+    }
+    if bytes.len() > WATERMARK_LIMIT {
+        return Err(t("settings.watermarkTooBig"));
+    }
+    Ok(())
+}
+
+/// 点选的水印图复制进 App 自己的配置目录（`watermark.png`），记下的路径
+/// 是那份副本：原图挪走、改名、删掉，设好的水印都还在。
+fn install_watermark(dirs: &concat_host::AppDirs, path: &std::path::Path) -> Result<String, String> {
+    let bytes = std::fs::read(path).map_err(|error| {
+        let name = path
+            .file_name()
+            .map_or_else(|| path.to_string_lossy().into_owned(), |name| name.to_string_lossy().into_owned());
+        tf("settings.watermarkUnreadable", &[&name, &error.to_string()])
+    })?;
+    watermark_problem(&bytes)?;
+    std::fs::create_dir_all(&dirs.config)
+        .map_err(|error| tf("settings.watermarkUnreadable", &[&"配置目录", &error.to_string()]))?;
+    let copy = dirs.config.join(WATERMARK_FILE);
+    std::fs::write(&copy, &bytes).map_err(|error| {
+        tf("settings.watermarkUnreadable", &[&WATERMARK_FILE, &error.to_string()])
+    })?;
+    Ok(copy.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]

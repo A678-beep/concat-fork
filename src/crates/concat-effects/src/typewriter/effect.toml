@@ -1,0 +1,28 @@
+format = 2
+
+# The typewriter: a title's characters shown one at a time, in the order a
+# reader meets them, by masking each pixel against the order a title's
+# layout baked for it (see concat_core::shader::RevealMap). Not offered in
+# the effects library - the Text inspector's typewriter builds it, with the
+# keys that make it run - so it is loaded from this folder rather than
+# packages/, and never by the built-in catalogue.
+
+[effect]
+id = "concat.typewriter"
+name = "Typewriter"
+kind = "effect"
+category = "Text"
+order = 900
+description = "A title typed in one character at a time, with a cursor."
+
+[[param]]
+key = "progress"
+label = "Progress"
+min = 0
+max = 100
+default = 100
+step = 1
+animate = true
+
+[wgsl]
+entry = "effect.wgsl"

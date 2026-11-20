@@ -5,7 +5,7 @@ import { ResizeBox } from "../primitives/resize-box.slint";
 import { I18n } from "../i18n.slint";
 import { Theme } from "../theme/theme.slint";
 import { Glyph, Icon } from "../icons.slint";
-import { Button, CopyChip, DialogRow, DialogSection, Modal, Progress } from "../primitives/modal.slint";
+import { Button, CopyChip, DialogRow, DialogSection, Field, Modal, Progress } from "../primitives/modal.slint";
 import { SegmentedControl } from "../primitives/segmented-control.slint";
 import { Select } from "../primitives/select.slint";
 import { StylePicker, TextPresetData } from "../inspector/style-picker.slint";
@@ -82,6 +82,15 @@ export struct CaptionsSheetData {
     ready: bool,
     /// Why the last run failed, when it did.
     message: string,
+    /// 查找与替换: what is looked for, what it becomes, 0 for every
+    /// subtitle and 1 for the selected one, and one line saying how many
+    /// places match or were just replaced.
+    find: string,
+    replace-with: string,
+    replace-scope: int,
+    replace-status: string,
+    /// The Replace button is live: something matches.
+    replace-enabled: bool,
 }
 
 /// The sheet's body on its own: the Library's Text page shows it in place
@@ -106,6 +115,12 @@ export component CaptionsForm inherits VerticalLayout {
     callback cancel();
     callback import-srt();
     callback export-srt();
+    // 查找与替换: a box each for what to look for and what it becomes, the
+    // scope, and the press that writes it.
+    callback find-edited(text: string);
+    callback replace-edited(text: string);
+    callback replace-scope-changed(index: int);
+    callback replace-pressed();
 
     property <bool> from-voice: root.data.from-voice;
 
@@ -267,6 +282,59 @@ export component CaptionsForm inherits VerticalLayout {
             }
         }
 
+        // 查找与替换：把一条字幕里写错的词，一次改到全部字幕里（或只改
+        // 当前这条）。替换是一次批量编辑，算一步，Ctrl+Z 就全回去。
+        if !root.data.running: DialogSection {
+            title: I18n.t("captions.findReplace");
+
+            DialogRow {
+                label: I18n.t("captions.find");
+                Field {
+                    placeholder: I18n.t("captions.findWhat");
+                    value: root.data.find;
+                    edited(text) => { root.find-edited(text); }
+                }
+            }
+
+            DialogRow {
+                label: I18n.t("captions.replaceWith");
+                Field {
+                    placeholder: I18n.t("captions.replaceWithWhat");
+                    value: root.data.replace-with;
+                    edited(text) => { root.replace-edited(text); }
+                }
+            }
+
+            DialogRow {
+                label: I18n.t("captions.findScope");
+                SegmentedControl {
+                    options: [I18n.t("captions.allCaptions"), I18n.t("captions.selectedCaption")];
+                    current: root.data.replace-scope;
+                    changed(index) => { root.replace-scope-changed(index); }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.data.replace-status;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                }
+
+                Button {
+                    label: I18n.t("captions.replace");
+                    glyph: Glyph.text-mark;
+                    enabled: root.data.replace-enabled;
+                    clicked => { root.replace-pressed(); }
+                }
+            }
+        }
+
         Rectangle {
             height: 1px;
             background: Theme.line;
@@ -410,6 +478,12 @@ export component CaptionsDialog inherits Modal {
     callback cancel();
     callback import-srt();
     callback export-srt();
+    // 查找与替换: a box each for what to look for and what it becomes, the
+    // scope, and the press that writes it.
+    callback find-edited(text: string);
+    callback replace-edited(text: string);
+    callback replace-scope-changed(index: int);
+    callback replace-pressed();
 
     open: root.data.open;
     title: I18n.t("captions.captions");
@@ -432,5 +506,9 @@ export component CaptionsDialog inherits Modal {
         cancel => { root.cancel(); }
         import-srt => { root.import-srt(); }
         export-srt => { root.export-srt(); }
+        find-edited(text) => { root.find-edited(text); }
+        replace-edited(text) => { root.replace-edited(text); }
+        replace-scope-changed(index) => { root.replace-scope-changed(index); }
+        replace-pressed => { root.replace-pressed(); }
     }
 }

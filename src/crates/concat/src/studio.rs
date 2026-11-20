@@ -1571,14 +1571,15 @@ fn shelves(
         let group = match groups.iter().position(|held| *held == category) {
             Some(index) => index,
             None => {
-                groups.push(category.clone());
+                groups.push(crate::localize::category(&category));
                 groups.len() - 1
             }
         };
         // The shelves are built from every package and only the entries are
         // narrowed: a strip that lost a segment because a search matched
         // nothing on it would move under the pointer as you typed.
-        let name = meta.name.clone();
+        let english_name = meta.name.clone();
+        let name = crate::localize::name(&english_name);
         let description = meta.description.clone();
         let starred = favourites.iter().any(|held| held == &meta.id);
         let shown = if view.favourites {
@@ -1587,7 +1588,9 @@ fn shelves(
             // Across every shelf while a query is live. Someone typing
             // "echo" wants the echo, not the echo that happens to be filed
             // where they were already looking.
-            name.to_lowercase().contains(&query) || description.to_lowercase().contains(&query)
+            name.to_lowercase().contains(&query)
+                || english_name.to_lowercase().contains(&query)
+                || description.to_lowercase().contains(&query)
         } else if !view.category.is_empty() {
             package.matches_category(&view.category)
         } else if view.group >= 0 {
@@ -1602,7 +1605,7 @@ fn shelves(
         entries.push(CatalogueEntryData {
             id: meta.id.as_str().into(),
             name: name.into(),
-            category: category.as_str().into(),
+            category: crate::localize::category(&category).into(),
             group: group as i32,
             description: description.into(),
             favourite: starred,
@@ -2395,8 +2398,8 @@ fn adjust_rows(chain: &[AppliedFilter], at: Option<f64>) -> Vec<AppliedParamData
             AppliedParamData {
                 entry: -1,
                 key: param.key.as_str().into(),
-                label: param.label.as_str().into(),
-                group: param.group.as_str().into(),
+                label: crate::localize::label(&param.label).into(),
+                group: crate::localize::label(&param.group).into(),
                 unit: param.unit.as_str().into(),
                 min: param.min as f32,
                 max: param.max as f32,
@@ -2468,7 +2471,7 @@ fn chain_colours(
                     ColourKnobData {
                         entry: index as i32,
                         key: param.key.as_str().into(),
-                        label: param.label.as_str().into(),
+                        label: crate::localize::label(&param.label).into(),
                         value: unpacked(value),
                         automatic: can_automatic && unpacked(value).alpha() == 0,
                         can_automatic,
@@ -2506,18 +2509,18 @@ fn chain_choices(chain: &[AppliedFilter]) -> Vec<ChainChoiceData> {
                 .iter()
                 .enumerate()
                 .map(|(at, number)| {
-                    param
+                    let label = param
                         .labels
                         .get(at)
                         .cloned()
-                        .unwrap_or_else(|| format!("{number}"))
-                        .into()
+                        .unwrap_or_else(|| format!("{number}"));
+                    crate::localize::label(&label).into()
                 })
                 .collect();
             choices.push(ChainChoiceData {
                 entry: index as i32,
                 key: param.key.as_str().into(),
-                label: param.label.as_str().into(),
+                label: crate::localize::label(&param.label).into(),
                 options: ModelRc::new(VecModel::from(options)),
                 values: ModelRc::new(VecModel::from(
                     param
@@ -2552,7 +2555,7 @@ fn chain_rows(chain: &[AppliedFilter]) -> (Vec<AppliedEntryData>, Vec<AppliedPar
         rows.push(AppliedEntryData {
             id: entry.id.as_str().into(),
             name: package
-                .map(|package| package.manifest.effect.name.clone())
+                .map(|package| crate::localize::name(&package.manifest.effect.name))
                 .unwrap_or_else(|| label_of(&entry.id))
                 .into(),
             on: entry.enabled,
@@ -2606,7 +2609,7 @@ fn chain_rows(chain: &[AppliedFilter]) -> (Vec<AppliedEntryData>, Vec<AppliedPar
             knobs.push(AppliedParamData {
                 entry: index as i32,
                 key: param.key.as_str().into(),
-                label: param.label.as_str().into(),
+                label: crate::localize::label(&param.label).into(),
                 group: "".into(),
                 unit: param.unit.as_str().into(),
                 min: param.min as f32,
@@ -2669,8 +2672,8 @@ fn grading_rows(
                 wheels.push(WheelData {
                     entry,
                     key: param.key.as_str().into(),
-                    label: param.label.as_str().into(),
-                    group: param.group.as_str().into(),
+                    label: crate::localize::label(&param.label).into(),
+                    group: crate::localize::label(&param.group).into(),
                     x: value(&x, 0.0) as f32,
                     y: value(&y, 0.0) as f32,
                     master: value(&m, param.default) as f32,
@@ -2697,8 +2700,8 @@ fn grading_rows(
                     CurveData {
                         entry,
                         key: param.key.as_str().into(),
-                        label: param.label.as_str().into(),
-                        group: param.group.as_str().into(),
+                        label: crate::localize::label(&param.label).into(),
+                        group: crate::localize::label(&param.group).into(),
                         points: ModelRc::default(),
                         path: grading::curve_path(params, &param.key).into(),
                     },
@@ -3034,7 +3037,7 @@ fn upgraded_effects(pairs: &[(String, String)]) -> Vec<String> {
         .map(|(old, new)| {
             let new = catalogue
                 .get(new)
-                .map(|package| package.manifest.effect.name.clone())
+                .map(|package| crate::localize::name(&package.manifest.effect.name))
                 .unwrap_or_else(|| label_of(new));
             format!("{} → {new}", label_of(old))
         })

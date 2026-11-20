@@ -92,6 +92,15 @@ export struct ExportData {
     done-size: string,
     /// nothing on the timeline to export
     empty: bool,
+    /// 工程里有 AI 素材、而 AI 标识没开时的一句话：建议开，不替人开。
+    ai-hint: string,
+    /// 三档质量选中的那一档（0 快速 / 1 标准 / 2 高质量）与名单。
+    quality: int,
+    quality-options: [string],
+    /// 跑起来之后的编码细节：已编帧数 / 总帧数 · 帧率 · 剩余秒数。
+    progress-detail: string,
+    /// 开工前的预计耗时。
+    estimate: string,
 }
 
 // One tile of the summary block.
@@ -302,6 +311,7 @@ component OutputSection inherits DialogSection {
     callback codec-changed(index: int);
     callback ten-bit-changed(on: bool);
     callback hdr-changed(on: bool);
+    callback quality-changed(index: int);
 
     title: I18n.t("export.output");
 
@@ -330,6 +340,30 @@ component OutputSection inherits DialogSection {
             details: root.data.rate-details;
             changed(index) => { root.rate-changed(index); }
         }
+    }
+
+    // 三档质量：编码速度与画质的取舍，不改格式。快速档给预览级
+    // 速度（芯片的 speed 档），标准档是平台常用，高质量档给存档。
+    DialogRow {
+        label: I18n.t("export.quality");
+        Select {
+            current: root.data.quality;
+            options: root.data.quality-options;
+            details: [
+                I18n.t("export.qualityQuickDetail"),
+                I18n.t("export.qualityStandardDetail"),
+                I18n.t("export.qualityHighDetail"),
+            ];
+            changed(index) => { root.quality-changed(index); }
+        }
+    }
+
+    // 编码器：硬件优先，不可用自动回退 CPU。
+    Text {
+        text: I18n.t("export.hardwareHint");
+        color: Theme.fg-dim;
+        font-size: Theme.fs-sm;
+        wrap: word-wrap;
     }
 
     // An HDR timeline is written as it is by default, or rolled off
@@ -505,6 +539,13 @@ component ExportFooter inherits VerticalLayout {
 
     if root.running: Progress { value: root.data.progress; live: true; }
 
+    if root.running && root.data.progress-detail != "": Text {
+        text: root.data.progress-detail;
+        color: Theme.fg-dim;
+        font-family: Theme.font-technical;
+        font-size: Theme.fs-sm;
+    }
+
     if root.running: HorizontalLayout {
         alignment: start;
         Button {
@@ -547,6 +588,13 @@ component ExportFooter inherits VerticalLayout {
             ghost: true;
             clicked => { root.again(); }
         }
+    }
+
+    if root.data.estimate != "" && root.data.phase == ExportPhase.idle: Text {
+        text: root.data.estimate;
+        color: Theme.fg-dim;
+        font-size: Theme.fs-sm;
+        horizontal-alignment: right;
     }
 
     if root.data.phase == ExportPhase.idle || root.data.phase == ExportPhase.failed:
@@ -611,6 +659,8 @@ export component ExportDialog inherits Rectangle {
     callback cancel();
     callback reveal();
     callback again();
+    callback enable-ai-badge();
+    callback quality-changed(index: int);
 
     property <bool> running: root.data.phase == ExportPhase.running;
     /// How many columns the width holds. Three groups a column wide need
@@ -728,6 +778,37 @@ export component ExportDialog inherits Rectangle {
                     padding-top: 8px;
                     padding-bottom: 16px;
 
+                    // AI 素材的合规建议：只提示，不替人打开。
+                    if !root.running && root.data.ai-hint != "": Rectangle {
+                        border-radius: Theme.r;
+                        background: Theme.raised;
+
+                        HorizontalLayout {
+                            padding: 10px;
+                            spacing: 8px;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Icon { glyph: Glyph.help; size: 14px; tint: Theme.fg-muted; }
+                            }
+
+                            Text {
+                                horizontal-stretch: 1;
+                                text: root.data.ai-hint;
+                                color: Theme.fg;
+                                font-size: Theme.fs-sm;
+                                wrap: word-wrap;
+                                vertical-alignment: center;
+                            }
+
+                            Button {
+                                label: I18n.t("export.aiBadgeEnable");
+                                glyph: Glyph.text-mark;
+                                clicked => { root.enable-ai-badge(); }
+                            }
+                        }
+                    }
+
                     if root.running || root.columns == 1: VerticalLayout {
                         SummarySection { first: true; data: root.data; }
                         if !root.running: DestinationSection {
@@ -743,6 +824,7 @@ export component ExportDialog inherits Rectangle {
                             codec-changed(index) => { root.codec-changed(index); }
                             ten-bit-changed(on) => { root.ten-bit-changed(on); }
                             hdr-changed(on) => { root.hdr-changed(on); }
+                            quality-changed(index) => { root.quality-changed(index); }
                         }
                     }
 
@@ -783,6 +865,7 @@ export component ExportDialog inherits Rectangle {
                                 codec-changed(index) => { root.codec-changed(index); }
                                 ten-bit-changed(on) => { root.ten-bit-changed(on); }
                                 hdr-changed(on) => { root.hdr-changed(on); }
+                                quality-changed(index) => { root.quality-changed(index); }
                             }
                         }
                     }
@@ -818,6 +901,7 @@ export component ExportDialog inherits Rectangle {
                                 codec-changed(index) => { root.codec-changed(index); }
                                 ten-bit-changed(on) => { root.ten-bit-changed(on); }
                                 hdr-changed(on) => { root.hdr-changed(on); }
+                                quality-changed(index) => { root.quality-changed(index); }
                             }
                         }
 

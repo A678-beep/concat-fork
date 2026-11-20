@@ -2461,6 +2461,61 @@ pub struct TextStyle {
     /// a document with them as the title in its own look.
     #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "wire::list")]
     pub runs: Vec<TextRun>,
+    /// Types the words in one character at a time; absent for a title that
+    /// is all there at once. Written only when set, so a title without one
+    /// is the document it always was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub typewriter: Option<Typewriter>,
+}
+
+/// A title typed in one character at a time, the way a typewriter writes:
+/// the characters land one after another, left to right (or the way the
+/// writing is read), and an optional cursor waits at the end.
+///
+/// The document keeps only what a person chose. How long the typing takes
+/// follows from the characters, the speed and the clip's own length, and
+/// is worked out where the title is painted - see
+/// `concat_host::titles` - so a title dragged longer types for longer
+/// instead of finishing in its first breath.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Typewriter {
+    /// How long each character takes to appear, in milliseconds: 20 is a
+    /// quick machine, 80 a slow one. Held to [`Typewriter::SLOWEST`] and
+    /// [`Typewriter::QUICKEST`] by the reader.
+    pub speed: f64,
+    /// A block cursor after the words, there from the first frame.
+    pub cursor: bool,
+}
+
+impl Typewriter {
+    /// The quickest a character appears, in milliseconds.
+    pub const QUICKEST: f64 = 20.0;
+    /// The slowest a character appears, in milliseconds.
+    pub const SLOWEST: f64 = 80.0;
+    /// The speed a title just switched to the typewriter is given: quick
+    /// enough to read as typing, slow enough to see.
+    pub const DEFAULT_SPEED: f64 = 45.0;
+
+    /// Every number pulled into the range a typewriter can run at.
+    pub fn tidy(mut self) -> Typewriter {
+        self.speed = if self.speed.is_finite() {
+            self.speed.clamp(Typewriter::QUICKEST, Typewriter::SLOWEST)
+        } else {
+            Typewriter::DEFAULT_SPEED
+        };
+        self
+    }
+}
+
+impl Default for Typewriter {
+    fn default() -> Self {
+        Typewriter {
+            speed: Typewriter::DEFAULT_SPEED,
+            cursor: false,
+        }
+    }
 }
 
 impl TextStyle {
@@ -2493,6 +2548,7 @@ impl TextStyle {
             finite(self.background_padding_x, base.background_padding_x).max(0.0);
         self.background_padding_y =
             finite(self.background_padding_y, base.background_padding_y).max(0.0);
+        self.typewriter = self.typewriter.map(Typewriter::tidy);
         self.tidy_runs();
         self
     }
@@ -2501,7 +2557,7 @@ impl TextStyle {
 impl Default for TextStyle {
     fn default() -> Self {
         Self {
-            content: "Your text".to_owned(),
+            content: "输入文字".to_owned(),
             // The face Concat ships (`concat_text::BUNDLED_FAMILY`), so a
             // title made without one - by the API, a template, the agent -
             // is drawn in it everywhere rather than in a fallback.
@@ -2527,6 +2583,7 @@ impl Default for TextStyle {
             max_width: 0.0,
             max_height: 0.0,
             runs: Vec::new(),
+            typewriter: None,
         }
     }
 }
@@ -3393,7 +3450,7 @@ impl Default for Timeline {
     fn default() -> Self {
         Timeline {
             id: String::new(),
-            name: "Timeline".to_owned(),
+            name: "时间线".to_owned(),
             video: VideoSettings::default(),
             background: Background::None,
             tracks: Vec::new(),
@@ -3691,7 +3748,7 @@ impl Project {
             extra: Map::new(),
             timelines: vec![Arc::new(Timeline {
                 id: "TL1".to_owned(),
-                name: "Timeline 1".to_owned(),
+                name: "时间线 1".to_owned(),
                 video,
                 background: Background::None,
                 tracks: (1..=4)

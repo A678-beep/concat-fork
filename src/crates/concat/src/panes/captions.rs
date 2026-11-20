@@ -80,6 +80,13 @@ pub enum CaptionsMsg {
     ExportSrt,
     /// Where they go.
     ExportSrtTo(PathBuf),
+    /// 查找与替换: what the find box holds, what the replacement box holds,
+    /// which scope is picked (0 every subtitle, 1 the selected title), and
+    /// the press that writes it - all of them one batch, one undo step.
+    FindEdited(String),
+    ReplaceEdited(String),
+    ReplaceScopeChanged(i32),
+    Replace,
 }
 
 /// The clip a transcription is running over, as the finished segments
@@ -144,6 +151,13 @@ pub struct CaptionsPane {
     timings: Timings,
     /// What the style picker's search holds.
     pub style_query: String,
+    /// 查找与替换: what is looked for, what it becomes, the scope - 0 every
+    /// subtitle on the captions' lane, 1 the selected title alone - and how
+    /// many places the last press replaced.
+    pub find: String,
+    pub replace_with: String,
+    pub replace_scope: usize,
+    pub replaced: usize,
 }
 
 impl CaptionsPane {
@@ -208,6 +222,22 @@ impl CaptionsPane {
                 }
             }
             CaptionsMsg::TextEdited(text) => self.text = text,
+            // 查找与替换. The status line is rebuilt from the timeline at
+            // every publish, so a box only has to say what it holds; a new
+            // look or a new scope forgets how many the last press replaced.
+            CaptionsMsg::FindEdited(text) => {
+                self.find = text;
+                self.replaced = 0;
+            }
+            CaptionsMsg::ReplaceEdited(text) => {
+                self.replace_with = text;
+                self.replaced = 0;
+            }
+            CaptionsMsg::ReplaceScopeChanged(scope) => {
+                self.replace_scope = usize::try_from(scope).unwrap_or(0).min(1);
+                self.replaced = 0;
+            }
+            CaptionsMsg::Replace => self.replace(studio),
             CaptionsMsg::ModelChanged(index) => self.model = index.max(0) as usize,
             CaptionsMsg::LanguageChanged(index) => {
                 self.language = language_at(index);
@@ -344,6 +374,59 @@ impl CaptionsPane {
             commands: font.into_iter().chain(commands).collect(),
         });
         studio.notify(&tf("captions.addedCaptions", &[&count]), false);
+    }
+
+    /// 查找与替换: writes the replacement into every subtitle it reaches, as
+    /// one batch - one undo step, so a wrong replacement is one Ctrl+Z
+    /// away. Each one keeps its look; a title's styled words are dropped
+    /// only when the replacement changes the length, since their ranges
+    /// would no longer land on the words they were put on.
+    fn replace(&mut self, studio: &mut Studio) {
+        let find = self.find.clone();
+        if find.is_empty() {
+            return;
+        }
+        let (found, captions) = matches_in(studio, self.replace_scope, &find);
+        if found == 0 {
+            self.replaced = 0;
+            return;
+        }
+        let mut commands = Vec::new();
+        for id in replace_targets(studio, self.replace_scope) {
+            let Some(clip) = studio.clip(&id) else {
+                continue;
+            };
+            let Some(text) = clip.text.as_ref() else {
+                continue;
+            };
+            if !text.content.contains(&find) {
+                continue;
+            }
+            let mut style = text.clone();
+            style.content = style.content.replace(&find, &self.replace_with);
+            if style.content.chars().count() != text.content.chars().count() {
+                style.runs.clear();
+            }
+            commands.push(Command::UpdateClip {
+                clip_id: id.clone(),
+                patch: concat_project::commands::ClipPatch {
+                    text: Some(Some(style)),
+                    ..concat_project::commands::ClipPatch::default()
+                },
+            });
+        }
+        if commands.is_empty() {
+            self.replaced = 0;
+            return;
+        }
+        log::info!(
+            "captions: replaced {found} place(s) of {:?} in {captions} caption(s)",
+            find
+        );
+        /* One batch is one undo step, as a generated run of captions is. */
+        studio.apply(Command::Batch { commands });
+        self.replaced = found;
+        studio.notify(&tf("captions.replacedMatches", &[&found]), false);
     }
 
     /// Asks where to write the captions, offering the project's folder
@@ -684,6 +767,20 @@ impl CaptionsPane {
             .map(|source| source.label.into())
             .collect();
         let english_only = self.english_only(studio);
+        // 查找与替换's one line: what matches now, or what the last press
+        // replaced - the timeline itself is asked every publish, so a
+        // caption deleted or typed over underneath is counted afresh.
+        let (matches, matched_captions) =
+            matches_in(studio, self.replace_scope, &self.find);
+        let replace_status = if self.find.trim().is_empty() {
+            t("captions.typeToFind").to_owned()
+        } else if matches > 0 {
+            tf("captions.findMatches", &[&matches, &matched_captions])
+        } else if self.replaced > 0 {
+            tf("captions.replacedMatches", &[&self.replaced])
+        } else {
+            t("captions.noMatches").to_owned()
+        };
         CaptionsSheetData {
             open: self.open,
             from_voice: self.from_voice,
@@ -712,6 +809,11 @@ impl CaptionsPane {
             .into(),
             ready: !installed(&studio.settings.transcribers).is_empty(),
             message: self.message.as_str().into(),
+            find: self.find.as_str().into(),
+            replace_with: self.replace_with.as_str().into(),
+            replace_scope: self.replace_scope as i32,
+            replace_status: replace_status.into(),
+            replace_enabled: matches > 0,
         }
     }
 }
@@ -965,6 +1067,56 @@ pub fn caption_style_id(studio: &Studio) -> &str {
         .as_deref()
         .filter(|id| studio.text_presets.iter().any(|preset| preset.id == *id))
         .unwrap_or("default")
+}
+
+/// The title clips a find-and-replace reaches. In the selected title's
+/// scope that is the one title selected alone; in the every-subtitle scope
+/// it is the captions' lane - the lane with the most titles, which is how
+/// an SRT export finds the captions too, since nothing in the document
+/// tells a caption from a title card.
+fn replace_targets(studio: &Studio, scope: usize) -> Vec<String> {
+    let timeline = studio.timeline();
+    if scope == 0 {
+        return concat_project::srt::busiest_title_lane(timeline)
+            .map(|track_id| {
+                timeline
+                    .clips
+                    .iter()
+                    .filter(|clip| {
+                        clip.kind == ClipKind::Text && clip.track_id == track_id
+                    })
+                    .map(|clip| clip.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+    }
+    studio
+        .sole_selection()
+        .and_then(|id| studio.clip(&id))
+        .filter(|clip| clip.kind == ClipKind::Text)
+        .map(|clip| vec![clip.id.clone()])
+        .unwrap_or_default()
+}
+
+/// How many places `find` matches, and in how many captions, over the same
+/// clips a replace would write to.
+fn matches_in(studio: &Studio, scope: usize, find: &str) -> (usize, usize) {
+    if find.is_empty() {
+        return (0, 0);
+    }
+    let mut places = 0;
+    let mut captions = 0;
+    for id in replace_targets(studio, scope) {
+        let Some(text) = studio.clip(&id).and_then(|clip| clip.text.as_ref()) else {
+            continue;
+        };
+        let found = text.content.matches(find).count();
+        if found > 0 {
+            places += found;
+            captions += 1;
+        }
+    }
+    (places, captions)
 }
 
 /// Longest a caption line gets before it is wrapped: about what two lines

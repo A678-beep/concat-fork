@@ -2958,6 +2958,9 @@ export component AudioPanel inherits VerticalLayout {
 
     callback set(field: ClipField, value: float);
     callback commit();
+    /// 人声降噪：强度（-1 关，0 轻，1 中，2 强）、是否去工频、
+    /// 试听（0 不放，1 原声，2 处理后）。
+    callback denoise(strength: int, hum: bool, audition: int);
 
     /// A fade longer than half the clip would overlap the other one.
     property <float> fade-limit: Math.max(0.1, Math.min(10, root.selected.duration / 2));
@@ -3035,6 +3038,97 @@ export component AudioPanel inherits VerticalLayout {
                 fade-out <=> root.fade-out;
                 in-changed(v) => { root.set(ClipField.fade-in, v); root.commit(); }
                 out-changed(v) => { root.set(ClipField.fade-out, v); root.commit(); }
+            }
+        }
+    }
+
+    // 人声降噪 / 去电流声：把内置的两个音频效果（高通 70Hz + FFT 降噪 +
+    // 去齿音 + 轻压缩 + 压高频毛刺；50/100/150Hz 工频陷波）一键写进
+    // 音频链，强度轻/中/强，去工频单独开关；前后三秒可以对着听。
+    if !root.selected.batch-volume: Section {
+        denoise := SectionHeader {
+            title: I18n.t("clipInspector.voiceClean");
+            collapsible: true;
+            summary: root.selected.denoise-on
+                ? I18n.t("clipInspector.voiceCleanOn") : "";
+        }
+
+        if denoise.open: SectionBody {
+            SwitchRow {
+                label: I18n.t("clipInspector.voiceCleanSwitch");
+                checked: root.selected.denoise-on;
+
+                HelpButton { text: I18n.t("clipInspector.voiceCleanHint"); }
+
+                toggled(on) => {
+                    root.denoise(on ? root.selected.denoise-strength : -1,
+                        root.selected.denoise-hum, 0);
+                }
+            }
+
+            if root.selected.denoise-on: Row {
+                label: I18n.t("clipInspector.voiceCleanStrength");
+                SegmentedControl {
+                    options: [
+                        I18n.t("clipInspector.voiceCleanLight"),
+                        I18n.t("clipInspector.voiceCleanMedium"),
+                        I18n.t("clipInspector.voiceCleanStrong"),
+                    ];
+                    current: root.selected.denoise-strength;
+                    changed(index) => {
+                        root.denoise(index, root.selected.denoise-hum, 0);
+                    }
+                }
+            }
+
+            if root.selected.denoise-on: SwitchRow {
+                label: I18n.t("clipInspector.humRemove");
+                checked: root.selected.denoise-hum;
+                toggled(on) => {
+                    root.denoise(root.selected.denoise-strength, on, 0);
+                }
+            }
+
+            if root.selected.denoise-on: HorizontalLayout {
+                padding-left: Theme.pad;
+                padding-right: Theme.pad;
+                padding-bottom: 8px;
+                spacing: 8px;
+
+                Button {
+                    label: I18n.t("clipInspector.auditionOriginal");
+                    ghost: true;
+                    glyph: Glyph.circle-play;
+                    clicked => {
+                        root.denoise(root.selected.denoise-strength,
+                            root.selected.denoise-hum, 1);
+                    }
+                }
+
+                Button {
+                    label: I18n.t("clipInspector.auditionClean");
+                    ghost: true;
+                    glyph: Glyph.circle-play;
+                    clicked => {
+                        root.denoise(root.selected.denoise-strength,
+                            root.selected.denoise-hum, 2);
+                    }
+                }
+
+            }
+
+            HorizontalLayout {
+                padding-left: Theme.pad;
+                padding-right: Theme.pad;
+                padding-bottom: 8px;
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: I18n.t("clipInspector.auditionHint");
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
             }
         }
     }

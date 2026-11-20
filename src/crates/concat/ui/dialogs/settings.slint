@@ -79,6 +79,15 @@ export struct SettingsData {
     proxies: bool,
     /// 导出视频带「AI 生成」角标。
     ai-badge: bool,
+    /// 自定义水印：开关、图片的文件名与大小（没选图时是一句提示）、
+    /// 位置（0 左上、1 右上、2 左下、3 右下、4 居中）、不透明度百分比
+    /// （10–90）和大小百分比（5–30）。
+    watermark-on: bool,
+    watermark-file: string,
+    watermark-chosen: bool,
+    watermark-position: int,
+    watermark-opacity: float,
+    watermark-size: float,
     /// a launch opens with the panels and the window where the last
     /// session left them
     remember-layout: bool,
@@ -689,6 +698,13 @@ export component SettingsDialog inherits Sheet {
     callback playhead-stops-changed(on: bool);
     callback proxies-changed(on: bool);
     callback ai-badge-changed(on: bool);
+    /// 自定义水印：开关、选图、清掉，位置/透明度/大小三行。
+    callback watermark-changed(on: bool);
+    callback watermark-pick();
+    callback watermark-remove();
+    callback watermark-position-changed(index: int);
+    callback watermark-opacity-changed(value: float);
+    callback watermark-size-changed(value: float);
     callback remember-layout-changed(on: bool);
     callback gpu-changed(on: bool);
     /// 星籁 AI：运行方式（0 智能 / 1 仅本地 / 2 仅云端）与重新检测硬件。
@@ -1052,11 +1068,127 @@ export component SettingsDialog inherits Sheet {
                 DialogSection {
                     ruled: false;
                     title: "导出时带「AI 生成」角标";
-                    hint: "默认打开：导出的视频右下角有一枚「AI 生成」小角标，用来标识 AI 生成内容；关掉后不再叠加。";
+                    hint: "默认关闭：只有工程真的用了 AI 素材（数字人 / AI 配音 / AI 生图）时才建议打开——导出面板会用一行提示提醒你，但不会替你勾上。打开后导出的视频右下角有一枚「AI 生成」小角标。";
                     switchable: true;
                     on: root.data.ai-badge;
                     open: false;
                     switched(on) => { root.ai-badge-changed(on); }
+                }
+
+                // 自定义水印：导出成片上叠的一张 PNG（≤2MB），可选四角或
+                // 居中、透明度 10–90%、大小 5–30%。与「AI 生成」角标各叠
+                // 各的，互不影响；关掉开关时设置还在，下次打开还是这张。
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.watermark");
+                    hint: I18n.t("settings.watermarkHint");
+                    switchable: true;
+                    on: root.data.watermark-on;
+                    open: root.data.watermark-on;
+                    switched(on) => { root.watermark-changed(on); }
+
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        padding-bottom: 8px;
+                        spacing: 8px;
+
+                        Text {
+                            horizontal-stretch: 1;
+                            text: root.data.watermark-file;
+                            color: root.data.watermark-chosen ? Theme.fg : Theme.fg-dim;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+
+                        Button {
+                            label: root.data.watermark-chosen
+                                ? I18n.t("settings.watermarkReplace")
+                                : I18n.t("settings.watermarkChoose");
+                            ghost: true;
+                            glyph: Glyph.import;
+                            clicked => { root.watermark-pick(); }
+                        }
+
+                        if root.data.watermark-chosen: Button {
+                            label: I18n.t("settings.watermarkRemove");
+                            ghost: true;
+                            glyph: Glyph.close;
+                            clicked => { root.watermark-remove(); }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        padding-bottom: 8px;
+                        spacing: 10px;
+
+                        Text {
+                            width: 78px;
+                            text: I18n.t("settings.watermarkPosition");
+                            color: Theme.fg-muted;
+                            font-size: Theme.fs;
+                            vertical-alignment: center;
+                        }
+
+                        Select {
+                            horizontal-stretch: 1;
+                            options: [
+                                I18n.t("settings.watermarkTopLeft"),
+                                I18n.t("settings.watermarkTopRight"),
+                                I18n.t("settings.watermarkBottomLeft"),
+                                I18n.t("settings.watermarkBottomRight"),
+                                I18n.t("settings.watermarkCentre"),
+                            ];
+                            current: root.data.watermark-position;
+                            changed(index) => { root.watermark-position-changed(index); }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        padding-bottom: 12px;
+                        spacing: 10px;
+
+                        Text {
+                            text: I18n.t("settings.watermarkOpacity");
+                            color: Theme.fg-muted;
+                            font-size: Theme.fs;
+                            vertical-alignment: center;
+                        }
+
+                        NumberField {
+                            width: 96px;
+                            value: root.data.watermark-opacity;
+                            minimum: 10;
+                            maximum: 90;
+                            step: 5;
+                            precision: 0;
+                            unit: "%";
+                            changed(value) => { root.watermark-opacity-changed(value); }
+                        }
+
+                        Text {
+                            text: I18n.t("settings.watermarkSize");
+                            color: Theme.fg-muted;
+                            font-size: Theme.fs;
+                            vertical-alignment: center;
+                        }
+
+                        NumberField {
+                            horizontal-stretch: 1;
+                            value: root.data.watermark-size;
+                            minimum: 5;
+                            maximum: 30;
+                            step: 1;
+                            precision: 0;
+                            unit: "%";
+                            changed(value) => { root.watermark-size-changed(value); }
+                        }
+                    }
                 }
 
                 // On, the next launch opens with the panels where this one

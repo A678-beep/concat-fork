@@ -458,11 +458,19 @@ export component App inherits Window {
     callback export-start();
     callback export-cancel();
     callback export-reveal();
+    callback export-enable-ai-badge();
+    callback export-quality-changed(index: int);
     callback export-again();
 
     callback settings-closed();
     callback settings-page-changed(index: int);
     callback settings-ai-badge-changed(on: bool);
+    callback settings-watermark-changed(on: bool);
+    callback settings-watermark-pick();
+    callback settings-watermark-remove();
+    callback settings-watermark-position-changed(index: int);
+    callback settings-watermark-opacity-changed(value: float);
+    callback settings-watermark-size-changed(value: float);
     /// 打开 AGPL 许可证或源码页面。
     callback settings-open-license(url: string);
     callback settings-show-log();
@@ -538,6 +546,10 @@ export component App inherits Window {
     callback captions-cancel();
     callback captions-import-srt();
     callback captions-export-srt();
+    callback captions-find-edited(text: string);
+    callback captions-replace-edited(text: string);
+    callback captions-replace-scope-changed(index: int);
+    callback captions-replace-pressed();
 
     in property <SpeechSheetData> speech;
     in property <[string]> speech-models;
@@ -984,6 +996,10 @@ export component App inherits Window {
             cancel => { root.captions-cancel(); }
             import-srt => { root.captions-import-srt(); }
             export-srt => { root.captions-export-srt(); }
+            find-edited(text) => { root.captions-find-edited(text); }
+            replace-edited(text) => { root.captions-replace-edited(text); }
+            replace-scope-changed(index) => { root.captions-replace-scope-changed(index); }
+            replace-pressed => { root.captions-replace-pressed(); }
         }
 
         SpeechDialog {
@@ -1099,6 +1115,8 @@ export component App inherits Window {
         cancel => { root.export-cancel(); }
         reveal => { root.export-reveal(); }
         again => { root.export-again(); }
+        enable-ai-badge => { root.export-enable-ai-badge(); }
+        quality-changed(index) => { root.export-quality-changed(index); }
     }
 
     SettingsDialog {
@@ -1127,6 +1145,12 @@ export component App inherits Window {
         closed => { root.settings-closed(); }
         page-changed(index) => { root.settings-page-changed(index); }
         ai-badge-changed(on) => { root.settings-ai-badge-changed(on); }
+        watermark-changed(on) => { root.settings-watermark-changed(on); }
+        watermark-pick => { root.settings-watermark-pick(); }
+        watermark-remove => { root.settings-watermark-remove(); }
+        watermark-position-changed(index) => { root.settings-watermark-position-changed(index); }
+        watermark-opacity-changed(value) => { root.settings-watermark-opacity-changed(value); }
+        watermark-size-changed(value) => { root.settings-watermark-size-changed(value); }
         open-license(url) => { root.settings-open-license(url); }
         shortcut-capture(id) => { root.settings-shortcut-capture(id); }
         shortcut-reset(id) => { root.settings-shortcut-reset(id); }

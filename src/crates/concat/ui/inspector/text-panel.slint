@@ -182,7 +182,7 @@ export component TextPanel inherits VerticalLayout {
         content := SectionHeader {
             title: I18n.t("textPanel.content");
             collapsible: true;
-            summary: root.selected.content == "" ? "Empty" : root.selected.content;
+            summary: root.selected.content == "" ? "空" : root.selected.content;
         }
 
         if content.open: SectionBody {
@@ -824,6 +824,52 @@ export component TextPanel inherits VerticalLayout {
             unit-scale: 100;
             changed(v) => { root.set(ClipField.offset-y, v); root.commit(); }
         }
+        }
+    }
+
+    // ── typewriter ───────────────────────────────────────────────────────
+    // A title that types itself in: the characters land one at a time,
+    // each a few tens of milliseconds after the last, and a block cursor
+    // waits after the words if it is wanted. The words are laid out where
+    // the finished title has them and revealed in place, so a title caught
+    // mid-typing sits where it ends - nothing jumps as it types, in the
+    // monitor or in the exported file.
+    Section {
+        typewriter := SectionHeader {
+            title: I18n.t("textPanel.typewriter");
+            collapsible: true;
+            summary: root.selected.typewriter-on
+                ? I18n.t1("textPanel.typewriterSummary",
+                    "\{Math.round(root.selected.typewriter-speed)}")
+                : "";
+        }
+
+        if typewriter.open: SectionBody {
+            SwitchRow {
+                label: I18n.t("textPanel.typewriterOn");
+                checked: root.selected.typewriter-on;
+
+                HelpButton { text: I18n.t("textPanel.typewriterHint"); }
+
+                toggled(on) => { root.set(ClipField.typewriter, on ? 1 : 0); root.commit(); }
+            }
+
+            if root.selected.typewriter-on: Param {
+                label: I18n.t("textPanel.typewriterSpeed");
+                value: root.selected.typewriter-speed;
+                minimum: 20;
+                maximum: 80;
+                step: 1;
+                default-value: 45;
+                fmt: ParamFormat.millis;
+                changed(v) => { root.set(ClipField.typewriter-speed, v); root.commit(); }
+            }
+
+            if root.selected.typewriter-on: SwitchRow {
+                label: I18n.t("textPanel.typewriterCursor");
+                checked: root.selected.typewriter-cursor;
+                toggled(on) => { root.set(ClipField.typewriter-cursor, on ? 1 : 0); root.commit(); }
+            }
         }
     }
 }

@@ -225,6 +225,10 @@ export enum ClipField {
     shape-stroke-on, shape-stroke-width, shape-stroke-align, shape-dash,
     shape-start-head, shape-end-head, shape-trim-start, shape-trim-end,
     shape-shadow-on, shape-shadow-blur, shape-shadow-distance, shape-shadow-angle,
+    /// the typewriter: on (1) or off (0), how long each character takes to
+    /// appear in milliseconds (20..80), and whether a block cursor waits
+    /// after the words (1) or not (0)
+    typewriter, typewriter-speed, typewriter-cursor,
 }
 
 /// One keyable property's state at the playhead, as the inspector needs it.
@@ -648,6 +652,15 @@ export struct SelectedClipData {
     text-width: float,
     /// the box's height as a fraction of the frame's; zero is the words' own
     text-height: float,
+    /// The typewriter: on, how long each character takes to appear in
+    /// milliseconds, and whether a block cursor waits after the words.
+    typewriter-on: bool,
+    typewriter-speed: float,
+    typewriter-cursor: bool,
+    /// 人声降噪：开关、强度（0 轻 / 1 中 / 2 强）、去工频开关。
+    denoise-on: bool,
+    denoise-strength: int,
+    denoise-hum: bool,
 }
 
 /// One picture under the playhead, as the monitor places it.

@@ -289,6 +289,45 @@ impl RevealMap {
     pub fn identity() -> RevealMap {
         RevealMap::from_rects(2, 2, &[])
     }
+
+    /// A map like [`RevealMap::from_rects`], but with each rect's level
+    /// given rather than spread evenly: `0` is revealed from the first
+    /// frame and `255` at the end. What a typewriter writes - a character
+    /// at a time, and a cursor that is there from the start - instead of
+    /// one word at a time.
+    pub fn from_levels(width: u32, height: u32, rects: &[(i32, i32, u32, u32, u8)]) -> RevealMap {
+        let mut gray = vec![0u8; width as usize * height as usize];
+        for &(x, y, w, h, value) in rects {
+            let x0 = x.clamp(0, width as i32) as u32;
+            let y0 = y.clamp(0, height as i32) as u32;
+            let x1 = (x + w as i32).clamp(0, width as i32) as u32;
+            let y1 = (y + h as i32).clamp(0, height as i32) as u32;
+            for row in y0..y1 {
+                let start = row as usize * width as usize + x0 as usize;
+                gray[start..start + (x1 - x0) as usize].fill(value);
+            }
+        }
+        // The same name a map of boxes has: the size and the boxes, and
+        // the level each box holds.
+        let mut made_of = Vec::with_capacity(8 + rects.len() * 17);
+        for value in [width, height] {
+            made_of.extend_from_slice(&value.to_le_bytes());
+        }
+        for &(x, y, w, h, level) in rects {
+            made_of.extend_from_slice(&x.to_le_bytes());
+            made_of.extend_from_slice(&y.to_le_bytes());
+            made_of.extend_from_slice(&w.to_le_bytes());
+            made_of.extend_from_slice(&h.to_le_bytes());
+            made_of.push(level);
+        }
+        let id = fnv64(&made_of) ^ u64::from(width) ^ (u64::from(height) << 32);
+        RevealMap {
+            id,
+            width,
+            height,
+            gray: gray.into(),
+        }
+    }
 }
 
 /// FNV-1a, so a table's id needs no dependency and is the same on every
@@ -359,6 +398,23 @@ mod tests {
         assert_eq!(map.gray[5 * 10], 255);
         // A pixel no rect covers is left at the "already revealed" value.
         assert_eq!(map.gray[9 * 10 + 9], 0);
+    }
+
+    /// Levels given one box at a time: a character's own threshold, and a
+    /// cursor's zero, which is there from the first frame - the
+    /// typewriter's map rather than the word reveal's.
+    #[test]
+    fn levels_are_the_maps_own_and_a_cursor_is_there_from_the_start() {
+        let map = RevealMap::from_levels(
+            10,
+            10,
+            &[(0, 0, 2, 2, 0), (2, 0, 2, 2, 128), (4, 0, 2, 2, 255)],
+        );
+        assert_eq!(map.gray[0], 0);
+        assert_eq!(map.gray[2], 128, "the second character half way");
+        assert_eq!(map.gray[4], 255, "the last");
+        assert_eq!(map.gray[9 * 10 + 9], 0, "nothing is no character");
+        assert_ne!(map.id, RevealMap::from_levels(10, 10, &[]).id);
     }
 
     /// A stage's picture is the layer's size shrunk and rounded up, never

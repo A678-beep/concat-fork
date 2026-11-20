@@ -160,6 +160,9 @@ export global Editor {
     /// fresh model on every publish, and every panel would re-seed for it.
     in-out property <[string]> audio-tracks;
     callback clip-set(field: ClipField, value: float);
+    /// 人声降噪 / 去电流声：强度（-1 关，0 轻，1 中，2 强）、
+    /// 去工频开关、试听（0 不放，1 原声，2 处理后）。
+    callback clip-denoise(strength: int, hum: bool, audition: int);
     callback clip-set-text(field: ClipTextField, value: string);
     /// A title's words as typed, and the caret's byte after the edit.
     callback clip-set-words(text: string, caret: int);
@@ -448,6 +451,10 @@ export global Editor {
     callback captions-cancel();
     callback captions-import-srt();
     callback captions-export-srt();
+    callback captions-find-edited(text: string);
+    callback captions-replace-edited(text: string);
+    callback captions-replace-scope-changed(index: int);
+    callback captions-replace-pressed();
     in-out property <bool> speech-open;
     in-out property <bool> voiceover-open;
     /// The microphone while the voiceover panel is open, as positions

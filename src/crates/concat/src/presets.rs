@@ -121,6 +121,9 @@ struct PresetStyle {
     max_height: Option<f64>,
     /// Some of the words in a look of their own; see `TextStyle::runs`.
     runs: Option<Vec<concat_project::model::TextRun>>,
+    /// Types the words in one character at a time; see
+    /// `TextStyle::typewriter`.
+    typewriter: Option<concat_project::model::Typewriter>,
 }
 
 impl PresetStyle {
@@ -168,6 +171,9 @@ impl PresetStyle {
             max_width: self.max_width.unwrap_or(0.0).max(0.0),
             max_height: self.max_height.unwrap_or(0.0).max(0.0),
             runs: self.runs.unwrap_or_default(),
+            typewriter: self
+                .typewriter
+                .map(concat_project::model::Typewriter::tidy),
         };
         // A hand-written run past the words, or on top of another, comes
         // out in the shape the editor keeps them in.
@@ -466,5 +472,60 @@ mod tests {
         assert_eq!(style.runs[0].style.color.as_deref(), Some("#ff0000"));
         assert_eq!(style.runs[0].style.font_weight, Some(900.0));
         assert_eq!((style.runs[1].start, style.runs[1].end), (9, 13));
+    }
+
+    /// A preset can also turn a title into a typewriter, with its own
+    /// speed and cursor; one that asks for a speed outside the dial's
+    /// range is held to it, as the inspector would hold it.
+    #[test]
+    fn a_preset_carries_its_typewriter() {
+        let file: PresetFile = toml::from_str(
+            r##"
+            id = "t.typing"
+            name = "Typing"
+            language = "Chinese"
+            [style]
+            content = "type this"
+            [style.typewriter]
+            speed = 33
+            cursor = true
+            "##,
+        )
+        .expect("parses");
+        let style = file.style.over(&file.name);
+        let typewriter = style.typewriter.expect("a typewriter");
+        assert_eq!(typewriter.speed, 33.0);
+        assert!(typewriter.cursor);
+
+        let too_fast: PresetFile = toml::from_str(
+            r#"
+            id = "t.zoomy"
+            name = "Zoomy"
+            [style.typewriter]
+            speed = 1
+            "#,
+        )
+        .expect("parses");
+        let style = too_fast.style.over("Zoomy");
+        assert_eq!(
+            style.typewriter.expect("a typewriter").speed,
+            concat_project::model::Typewriter::QUICKEST
+        );
+    }
+
+    /// The shipped Chinese-group typewriter preset is in the Chinese
+    /// group, asks for the typewriter, and types a sentence a caption can
+    /// read.
+    #[test]
+    fn the_shipped_typewriter_preset_is_a_chinese_typewriter() {
+        let preset = builtin()
+            .into_iter()
+            .find(|preset| preset.id == "xinglai.typewriter")
+            .expect("the typewriter preset ships");
+        assert_eq!(preset.language, "Chinese");
+        assert!(!preset.style.content.trim().is_empty());
+        let typewriter = preset.style.typewriter.expect("it types itself in");
+        assert!((20.0..=80.0).contains(&typewriter.speed));
+        assert!(typewriter.cursor);
     }
 }

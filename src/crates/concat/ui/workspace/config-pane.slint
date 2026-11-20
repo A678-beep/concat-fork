@@ -235,6 +235,8 @@ export component ConfigPane inherits Rectangle {
     /// 3 the shadow.
     callback clip-shape-colour(which: int, value: color);
     callback clip-commit();
+    /// 人声降噪 / 去电流声（强度、去工频、试听方向）。
+    callback clip-denoise(strength: int, hum: bool, audition: int);
     /// The Text tab's font picker and its import button; see Editor.
     in property <[string]> font-families;
     callback import-font();
@@ -857,6 +859,9 @@ export component ConfigPane inherits Rectangle {
                         with-speed: root.is-audio;
                         set(field, value) => { root.clip-set(field, value); }
                         commit => { root.clip-commit(); }
+                        denoise(strength, hum, audition) => {
+                            root.clip-denoise(strength, hum, audition);
+                        }
                     }
                     // The three treatments, between the mix and the library:
                     // they are chain links like any other, but they are the

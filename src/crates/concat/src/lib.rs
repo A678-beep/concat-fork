@@ -40,6 +40,7 @@ mod gpu;
 mod grading;
 mod host;
 mod i18n;
+mod localize;
 /// The iPhone's pickers and its way to Photos; see the module.
 #[cfg(target_os = "ios")]
 mod ios;
@@ -1727,6 +1728,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     editor.on_clip_set(on_lanes!(|state, field: ClipField, value: f32| {
         state.clip_set(field, value);
     }));
+    editor.on_clip_denoise(on_lanes!(|state, strength: i32, hum: bool, audition: i32| {
+        state.clip_denoise(strength, hum, audition);
+    }));
     editor.on_clip_set_text(on_lanes!(
         |state, field: ClipTextField, value: SharedString| {
             state.clip_set_text(field, value.as_str());
@@ -2474,6 +2478,12 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     app.on_export_reveal(on_window!(|state| {
         state.handle(Msg::Export(ExportMsg::Reveal));
     }));
+    app.on_export_enable_ai_badge(on_window!(|state| {
+        state.handle(Msg::Export(ExportMsg::EnableAiBadge));
+    }));
+    app.on_export_quality_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Export(ExportMsg::QualityChanged(index)));
+    }));
     app.on_export_cancel(on_window!(|state| {
         state.handle(Msg::Export(ExportMsg::Cancel));
     }));
@@ -2598,6 +2608,24 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     app.on_settings_ai_badge_changed(on_window!(|state, on: bool| {
         state.handle(Msg::Settings(SettingsMsg::AiBadge(on)));
     }));
+    app.on_settings_watermark_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Settings(SettingsMsg::WatermarkChanged(on)));
+    }));
+    app.on_settings_watermark_pick(on_window!(|state| {
+        state.handle(Msg::Settings(SettingsMsg::WatermarkPick));
+    }));
+    app.on_settings_watermark_remove(on_window!(|state| {
+        state.handle(Msg::Settings(SettingsMsg::WatermarkRemove));
+    }));
+    app.on_settings_watermark_position_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Settings(SettingsMsg::WatermarkPosition(index)));
+    }));
+    app.on_settings_watermark_opacity_changed(on_window!(|state, value: f32| {
+        state.handle(Msg::Settings(SettingsMsg::WatermarkOpacity(value)));
+    }));
+    app.on_settings_watermark_size_changed(on_window!(|state, value: f32| {
+        state.handle(Msg::Settings(SettingsMsg::WatermarkSize(value)));
+    }));
 
     // ── the tray's sound and word tools ──
     // The tray's panel buttons are toggles: a press opens the panel, or
@@ -2694,6 +2722,18 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     app.on_captions_export_srt(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::ExportSrt));
     }));
+    app.on_captions_find_edited(on_window!(|state, text: SharedString| {
+        state.handle(Msg::Captions(CaptionsMsg::FindEdited(text.to_string())));
+    }));
+    app.on_captions_replace_edited(on_window!(|state, text: SharedString| {
+        state.handle(Msg::Captions(CaptionsMsg::ReplaceEdited(text.to_string())));
+    }));
+    app.on_captions_replace_scope_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Captions(CaptionsMsg::ReplaceScopeChanged(index)));
+    }));
+    app.on_captions_replace_pressed(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::Replace));
+    }));
     // The same answers from the library's Captions page, on a desk.
     editor.on_captions_shown(on_window!(|state, shown: bool| {
         state.handle(Msg::Captions(CaptionsMsg::Shown(shown)));
@@ -2730,6 +2770,18 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     }));
     editor.on_captions_export_srt(on_window!(|state| {
         state.handle(Msg::Captions(CaptionsMsg::ExportSrt));
+    }));
+    editor.on_captions_find_edited(on_window!(|state, text: SharedString| {
+        state.handle(Msg::Captions(CaptionsMsg::FindEdited(text.to_string())));
+    }));
+    editor.on_captions_replace_edited(on_window!(|state, text: SharedString| {
+        state.handle(Msg::Captions(CaptionsMsg::ReplaceEdited(text.to_string())));
+    }));
+    editor.on_captions_replace_scope_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Captions(CaptionsMsg::ReplaceScopeChanged(index)));
+    }));
+    editor.on_captions_replace_pressed(on_window!(|state| {
+        state.handle(Msg::Captions(CaptionsMsg::Replace));
     }));
     app.on_speech_closed(on_window!(|state| {
         state.handle(Msg::Speech(SpeechMsg::Close));

@@ -1769,6 +1769,10 @@ export component MediaPane inherits Rectangle {
     callback captions-cancel();
     callback captions-import-srt();
     callback captions-export-srt();
+    callback captions-find-edited(text: string);
+    callback captions-replace-edited(text: string);
+    callback captions-replace-scope-changed(index: int);
+    callback captions-replace-pressed();
 
     callback import-media();
     callback filter-changed(filter: MediaFilter);
@@ -2512,7 +2516,7 @@ export component MediaPane inherits Rectangle {
 
                             Text {
                                 horizontal-stretch: 1;
-                                text: "\{root.selected-count} selected";
+                                text: "\{root.selected-count} 项已选";
                                 color: Theme.fg-muted;
                                 font-size: Theme.fs-sm;
                                 vertical-alignment: center;
@@ -2669,6 +2673,10 @@ export component MediaPane inherits Rectangle {
                         cancel => { root.captions-cancel(); }
                         import-srt => { root.captions-import-srt(); }
                         export-srt => { root.captions-export-srt(); }
+                        find-edited(text) => { root.captions-find-edited(text); }
+                        replace-edited(text) => { root.captions-replace-edited(text); }
+                        replace-scope-changed(index) => { root.captions-replace-scope-changed(index); }
+                        replace-pressed => { root.captions-replace-pressed(); }
                     }
                 }
                 if root.tab == 1 && root.text-category != 2: HorizontalLayout {
