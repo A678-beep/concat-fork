@@ -282,7 +282,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
 
     // Not for a smoke run: it exits through `leave`, past the mark's drop,
     // and the mark it left put the next real launch in software for nothing.
-    let (startup_mark, safe) = if smoke == Smoke::No {
+    let (mut startup_mark, safe) = if smoke == Smoke::No {
         safe_start()
     } else {
         (None, false)
@@ -1926,6 +1926,14 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                 studio.handle(Msg::Assets(AssetsMsg::Visible { first, last }));
             });
         });
+        // 悬停预览（0.2.23）：鼠标停在卡片上起/停预览。和滚动一样不是窗口
+        // 别处的改动，只刷素材库这一页；耗时/取帧都在 worker 里做。
+        assets.on_hover_start(move |id: SharedString| {
+            hover_preview(id.to_string(), true);
+        });
+        assets.on_hover_end(move |id: SharedString| {
+            hover_preview(id.to_string(), false);
+        });
     }
 
     // ── the library's Audio page ──
@@ -3215,6 +3223,40 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     if let Some(op) = STARTING.lock().ok().and_then(|mut slot| slot.take()) {
         op.done("the window is up");
     }
+    // The window is up: this launch started. The mark that says "starting"
+    // goes here, not fifteen seconds later - a window that came up and was
+    // then killed (a test harness, Task Manager, a person closing it) is not
+    // a driver that dies at start, and must not put the next launch into
+    // software rendering for the rest of this build. Only the part before
+    // the first frame - device and window creation - is what the mark guards.
+    if let Some(mark) = startup_mark.take() {
+        drop(mark);
+        log::debug!("start: first frame up; the startup mark is gone");
+    }
+    // A launch that fell back to software because the last one died while
+    // starting is one launch, not a sentence: if this one has been up long
+    // enough to prove the machine runs, clear the fallback so the next
+    // launch tries the GPU again. (The person's own software switch is not
+    // touched; `safe` is false for that one.)
+    if safe
+        && let Ok(dirs) = concat_host::AppDirs::locate()
+    {
+        let build = concat_host::machine::build();
+        std::thread::Builder::new()
+            .name("concat-gpu-retry".into())
+            .spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                let mut preferences = prefs::Preferences::load(&dirs);
+                if preferences.software_after_crash.as_deref() == Some(build.as_str()) {
+                    preferences.software_after_crash = None;
+                    preferences.save(&dirs);
+                    log::warn!(
+                        "start: 30s up in software after a startup death; the next launch tries the GPU again"
+                    );
+                }
+            })
+            .ok();
+    }
 
     // As far as a smoke run goes: everything the first frame needs exists
     // and has been handed to the window. The exit is the one the event
@@ -3288,15 +3330,6 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
             log::debug!("memory: quiet, caches trimmed and freed memory returned");
         },
     );
-
-    // A launch that has run this long was not killed by its start; the
-    // mark goes, so the next one is not started safe for nothing.
-    let started = startup_mark.as_ref().map(|mark| mark.path().to_owned());
-    slint::Timer::single_shot(SAFE_AFTER, move || {
-        if let Some(path) = started {
-            let _ = std::fs::remove_file(path);
-        }
-    });
 
     // The chosen interface scale, as soon as the window is up.
     slint::Timer::single_shot(std::time::Duration::ZERO, || {
@@ -3429,8 +3462,19 @@ fn stop_exports() {
     }
 }
 
-/// How long a launch runs before it counts as having started.
-const SAFE_AFTER: std::time::Duration = std::time::Duration::from_secs(15);
+/// 素材库卡片的悬停预览起停：消息交给素材库面板，然后只刷那一页。
+/// 悬停是高频指针事件，不走整窗口发布；取帧/试听都在 worker 里做。
+fn hover_preview(id: String, on: bool) {
+    Shell::with(|shell, app| {
+        {
+            let Ok(mut studio) = shell.studio.try_borrow_mut() else {
+                return;
+            };
+            studio.handle(Msg::Assets(AssetsMsg::Hover { id, on }));
+        }
+        shell.studio.borrow().publish_assets(&app);
+    });
+}
 
 /// Safe start: whether this launch draws on the software rasteriser
 /// because the last one died while starting, and the mark that says this
@@ -3439,21 +3483,26 @@ const SAFE_AFTER: std::time::Duration = std::time::Duration::from_secs(15);
 /// Every recent release met a Windows driver that closed the app in its
 /// first seconds - a new one each time (#339, #378, #389, #242) - and a
 /// launch check on a CI machine meets none of them. A launch that dies
-/// before [`SAFE_AFTER`] leaves its mark; the next one finds it, draws on
-/// WARP or lavapipe instead of the GPU, and keeps doing so for that build -
-/// a driver that killed one launch kills the next, and starting on the GPU
-/// every other time would crash every other time. Slower, and it opens.
-/// The next build tries the GPU again: 0.2.8 kept the CPU for good, and a
-/// Task Manager kill or a crash an update fixed left fast machines drawing
-/// every hover on it (#476). Settings > General's GPU switch goes back
-/// sooner. On Windows and Linux, which have a software rasteriser to draw
-/// on, and on Android, where the safe way is OpenGL ES in place of Vulkan:
-/// a phone whose Vulkan driver dies on the first frame closed on every
-/// launch, and the backend's fall back to OpenGL ES only catches a surface
-/// that fails to open (#507). A Mac draws the window on Skia's own
-/// rasteriser and keeps the compositor on Metal: an Iris Pro or a patched
-/// Radeon whose Metal compiler failed as the device opened never showed a
-/// window at all (#600, #423).
+/// before its first frame leaves its mark; the next one finds it and draws
+/// on WARP or lavapipe instead of the GPU, which is slower but opens.
+///
+/// The fallback is one launch, not the rest of the build (0.2.23): the mark
+/// is dropped as soon as the window comes up, so a launch killed after that
+/// no longer counts as a start that failed, and a launch that did start in
+/// software clears the fallback once it has been up for 30 seconds - the
+/// next launch tries the GPU again. Before 0.2.23 the mark and the setting
+/// were per build, and a test harness killing the app (or a Task Manager
+/// kill during startup) left fast machines on the CPU for every launch after
+/// it: that was the "install 0.2.21/0.2.22 and it is still slow" report.
+/// The person's own switch is separate and is never cleared by this. On
+/// Windows and Linux, which have a software rasteriser to draw on, and on
+/// Android, where the safe way is OpenGL ES in place of Vulkan: a phone
+/// whose Vulkan driver dies on the first frame closed on every launch, and
+/// the backend's fall back to OpenGL ES only catches a surface that fails to
+/// open (#507). A Mac draws the window on Skia's own rasteriser and keeps
+/// the compositor on Metal: an Iris Pro or a patched Radeon whose Metal
+/// compiler failed as the device opened never showed a window at all
+/// (#600, #423).
 fn safe_start() -> (Option<concat_host::jobs::Tripwire>, bool) {
     if !cfg!(any(
         windows,

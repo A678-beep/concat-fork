@@ -520,6 +520,71 @@ pub fn cached_ids(dirs: &AppDirs) -> std::collections::HashSet<String> {
     ids
 }
 
+/// 悬停预览的缓存目录：`asset-cache/preview`。
+pub fn preview_dir(dirs: &AppDirs) -> PathBuf {
+    cache_dir(dirs).join("preview")
+}
+
+/// 一个素材悬停预览用的开头片段：HTTP Range 只取前 `max_bytes` 字节，
+/// 不整档下载。视频的 MP4 都是 moov 在文件头，音频开头也够听 5–8 秒。
+/// 缓存里已有够大的片段就直接复用（换分类/再悬停不再走网络）。
+pub fn preview_clip(
+    dirs: &AppDirs,
+    item: &AssetItem,
+    max_bytes: u64,
+    extension: &str,
+) -> Result<PathBuf, String> {
+    let dir = preview_dir(dirs);
+    std::fs::create_dir_all(&dir).map_err(|error| format!("建不了预览缓存：{error}"))?;
+    let path = dir.join(format!("{}.{extension}", safe(&item.id)));
+    if std::fs::metadata(&path).is_ok_and(|meta| meta.len() >= 64 * 1024) {
+        return Ok(path);
+    }
+    let temporary = dir.join(format!("{}.{extension}.part", safe(&item.id)));
+    let url = api(&format!("/assets/{}/download", item.id));
+    let no_cancel = std::sync::atomic::AtomicBool::new(false);
+    let got = crate::direct::download_range(&url, &temporary, max_bytes, &no_cancel)?;
+    if got < 64 * 1024 {
+        let _ = std::fs::remove_file(&temporary);
+        return Err("预览片段太小，先下载再看".to_owned());
+    }
+    std::fs::rename(&temporary, &path).map_err(|error| format!("存不下预览片段：{error}"))?;
+    Ok(path)
+}
+
+/// 悬停预览帧写在哪：一个素材一个目录，ffmpeg 的小 JPEG 放在里面。
+pub fn preview_frames_dir(dirs: &AppDirs, item: &AssetItem) -> PathBuf {
+    preview_dir(dirs).join(format!("{}-frames", safe(&item.id)))
+}
+
+/// 字体悬停要整个字体文件：字体本来就是要下载安装的小文件，预览和下载
+/// 共用同一份缓存。
+pub fn preview_font(dirs: &AppDirs, item: &AssetItem) -> Result<PathBuf, String> {
+    let dir = cache_dir(dirs).join("fonts");
+    std::fs::create_dir_all(&dir).map_err(|error| format!("建不了字体缓存：{error}"))?;
+    if let Some(path) = cached_file(&dir, &item.id) {
+        return Ok(path);
+    }
+    let url = api(&format!("/assets/{}/download", item.id));
+    let temporary = dir.join(format!("{}.part", safe(&item.id)));
+    let no_cancel = std::sync::atomic::AtomicBool::new(false);
+    crate::direct::download(&url, &temporary, &mut |_, _| {}, &no_cancel)?;
+    let bytes = std::fs::read(&temporary).map_err(|error| format!("读不回字体：{error}"))?;
+    if bytes.len() < 1024 {
+        return Err("下载到的字体不完整".to_owned());
+    }
+    let extension = if bytes.starts_with(b"OTTO") {
+        "otf"
+    } else if bytes.starts_with(&[0x00, 0x01, 0x00, 0x00]) || bytes.starts_with(b"true") {
+        "ttf"
+    } else {
+        "bin"
+    };
+    let path = dir.join(format!("{}.{extension}", safe(&item.id)));
+    std::fs::rename(&temporary, &path).map_err(|error| format!("存不下字体：{error}"))?;
+    Ok(path)
+}
+
 /// 一个文件名安全的 id。
 fn safe(id: &str) -> String {
     id.chars()

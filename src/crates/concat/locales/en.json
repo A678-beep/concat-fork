@@ -911,9 +911,9 @@
   "start.removeFromList": "Remove from list",
   "start.reportProblem": "Report a problem",
   "start.reportProblemNote": "What to send so it can be fixed",
-  "start.safeMode": "Concat closed while starting once, so it draws in software until its next update: slower, but it opens. To try the graphics card now, turn on Draw on the GPU in Settings > General.",
+  "start.safeMode": "The last launch stopped while starting, so this launch draws in software (slower). It recovers by itself: the next launch tries the GPU again, or turn on Draw on the GPU in Settings > General now.",
   "start.safeModePhone": "Concat closed while starting once, so it draws in a slower, safer mode until its next update.",
-  "start.softwareRender": "The window is drawn in software, so it is slower: the asset library and the preview will stutter. Turn on Draw on the GPU in Settings > General, or start with --force-gpu.",
+  "start.softwareRender": "The window is drawn in software, so it lags and playback barely moves. Turn on Draw on the GPU in Settings > General, or restart with --force-gpu.",
   "start.searchProjects": "Search projects",
   "start.settingsApplyWholeEdit": "The frame, the rate and the background can all be changed later in Project settings.",
   "start.shape": "Shape",
@@ -1247,5 +1247,10 @@
   "assets.insertedToast": "Asset added: {0}",
   "assets.insertFailed": "Could not insert the asset into the bin; try again",
   "assets.fontCached": "Font \"{0}\" cached (installing fonts in the text panel comes in a later version)",
-  "assets.licenseHint": "All assets are cleared for commercial use; items marked Needs credit must be attributed as licensed. Downloads are cached locally in asset-cache."
+  "assets.licenseHint": "All assets are cleared for commercial use; items marked Needs credit must be attributed as licensed. Downloads are cached locally in asset-cache.",
+  "playback.nothingToPlay": "Nothing on the timeline to play yet - drag a clip onto it, or insert one from the asset library.",
+  "assets.previewPreparing": "Preparing preview...",
+  "assets.previewAudio": "Previewing - move away to stop",
+  "assets.previewFont": "Font preview",
+  "assets.previewUnavailable": "This asset cannot be previewed; download it first"
 }

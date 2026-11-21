@@ -422,7 +422,7 @@ impl Preferences {
             }
             None if died_starting => {
                 log::warn!(
-                    "start: the last launch closed while starting; this build draws in software until the next one, or until Draw on the GPU is turned back on"
+                    "start: the last launch closed while starting; this launch draws in software, and the next one tries the GPU again (or Draw on the GPU turns it back on now)"
                 );
                 self.software_after_crash = Some(build.to_owned());
                 true

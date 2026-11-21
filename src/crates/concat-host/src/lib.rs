@@ -23,6 +23,8 @@ pub mod account;
 /// 本地 AI 模型目录：效果、大小、显存内存要求、本机适不适合。
 pub mod ai_models;
 pub mod assets;
+/// 素材库悬停试听：一个只播一小段的小播放器（不影响时间线的混音）。
+pub mod audio_preview;
 /// 星籁 AI 生视频：平台 aivideo 接口、长视频续写拼接、本地模型预留。
 pub mod aivideo;
 pub mod awake;
@@ -75,6 +77,8 @@ pub mod stabilize;
 pub mod templates;
 pub mod titles;
 pub mod updates;
+/// 素材库悬停预览的本地取帧/取声：随包 ffmpeg 把开头片段解成小 JPEG / PCM。
+pub mod video_preview;
 pub mod voices;
 /// 本地数字人引擎（Wav2Lip 插件）：一次「照片 + 配音 → 对口型视频」。
 pub mod wav2lip;

@@ -39,6 +39,12 @@ export struct AssetCardData {
     progress: float,
     /// 按钮上的字：下载 / 下载中 xx% / 插入时间轴 / 重试
     action: string,
+    /// 悬停预览：0 无 / 1 准备中 / 2 视频帧循环 / 3 试听中 / 4 字体示例 / 5 不可用
+    preview-state: int,
+    /// 视频预览帧（3–5 秒循环）或空。
+    preview-frames: [image],
+    /// 字体预览注册进窗口字体集合后的 family 名；不是字体卡时为空。
+    font-family: string,
 }
 
 export global Assets {
@@ -69,6 +75,17 @@ export global Assets {
     /// 网格可视区域：`first`..`last` 是 items 的下标（含）。滚动时才会变，
     /// 用来只给看得见的卡片下载缩略图。
     callback visible-range(first: int, last: int);
+    /// 悬停预览起停：鼠标在卡片缩略图上停留 400ms 起，移开即停。
+    callback hover-start(id: string);
+    callback hover-end(id: string);
+}
+
+// 悬停感知：TouchArea 的 has-hover 变成一条回调。Slint 没有悬停回调，
+// 但能监听一个绑定到 has-hover 的属性的变化；进出卡片各说一次。
+component HoverArea inherits TouchArea {
+    callback hover(on: bool);
+    property <bool> now-hover: root.has-hover;
+    changed now-hover => { root.hover(root.now-hover); }
 }
 
 // 一张素材卡。
@@ -77,6 +94,24 @@ component AssetCard inherits Rectangle {
     in property <length> thumb-height;
 
     callback act();
+    /// 悬停 400ms 后向素材库面板要预览；移开时收回。
+    callback ask-preview();
+    callback end-preview();
+
+    /// 视频预览循环到第几帧。
+    property <int> preview-index: 0;
+    hover-timer := Timer {
+        interval: 400ms;
+        running: false;
+        triggered => { self.running = false; root.ask-preview(); }
+    }
+    frames-timer := Timer {
+        interval: 125ms;
+        running: root.data.preview-state == 2 && root.data.preview-frames.length > 1;
+        triggered => {
+            root.preview-index = Math.mod(root.preview-index + 1, Math.max(1, root.data.preview-frames.length));
+        }
+    }
 
     border-radius: Theme.r;
     background: Theme.raised;
@@ -96,6 +131,46 @@ component AssetCard inherits Rectangle {
                 height: 100%;
                 source: root.data.thumb;
                 image-fit: cover;
+            }
+
+            // 悬停预览：视频放后台解好的 3–5 秒循环帧；字体用该字体渲染示例。
+            if root.data.preview-state == 2 && root.data.preview-frames.length > 0: Image {
+                width: 100%;
+                height: 100%;
+                source: root.data.preview-frames[Math.min(root.preview-index, root.data.preview-frames.length - 1)];
+                image-fit: cover;
+            }
+
+            if root.data.preview-state == 4: Rectangle {
+                width: 100%;
+                height: 100%;
+                background: Theme.field;
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 1px;
+
+                    Text {
+                        text: "星籁剪辑";
+                        font-family: root.data.font-family;
+                        color: Theme.fg;
+                        font-size: 21px;
+                        horizontal-alignment: center;
+                    }
+                    Text {
+                        text: "让好内容被看见";
+                        font-family: root.data.font-family;
+                        color: Theme.fg;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                    }
+                    Text {
+                        text: I18n.t("assets.previewFont");
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-xs;
+                        horizontal-alignment: center;
+                    }
+                }
             }
 
             if !root.data.has-thumb: VerticalLayout {
@@ -161,6 +236,43 @@ component AssetCard inherits Rectangle {
                     horizontal-alignment: center;
                     padding-left: 6px;
                     padding-right: 6px;
+                }
+            }
+
+            // 悬停预览状态：准备中 / 试听中 / 预览不了，压在图右下角。
+            if root.data.preview-state == 1 || root.data.preview-state == 3 || root.data.preview-state == 5: Rectangle {
+                x: parent.width - self.width - 6px;
+                y: parent.height - self.height - 6px;
+                height: 18px;
+                border-radius: Theme.r-xs;
+                background: Theme.accent-soft;
+
+                Text {
+                    text: root.data.preview-state == 1 ? I18n.t("assets.previewPreparing")
+                        : root.data.preview-state == 3 ? I18n.t("assets.previewAudio")
+                        : I18n.t("assets.previewUnavailable");
+                    color: Theme.fg;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                    padding-left: 6px;
+                    padding-right: 6px;
+                }
+            }
+
+            // 悬停感知盖在缩略图上：停留 400ms 起预览，移开就停；试听中
+            // 点一下画面也可以停（任务卡允许点击暂停）。
+            HoverArea {
+                hover(on) => {
+                    if (on) {
+                        hover-timer.running = true;
+                    } else {
+                        hover-timer.running = false;
+                        root.end-preview();
+                    }
+                }
+                clicked => {
+                    if (root.data.preview-state == 3) { root.end-preview(); }
                 }
             }
         }
@@ -282,6 +394,9 @@ component AssetGrid inherits Rectangle {
     in property <length> page-top;
     callback action(id: string);
     callback visible-range(first: int, last: int);
+    /// 卡片悬停起停（缩略图停 400ms 后起预览，移开停）。
+    callback hover-start(id: string);
+    callback hover-end(id: string);
 
     property <length> gap: 8px;
     property <length> min-card: 158px;
@@ -325,6 +440,8 @@ component AssetGrid inherits Rectangle {
             thumb-height: root.thumb-h;
             data: item;
             act => { root.action(item.id); }
+            ask-preview => { root.hover-start(item.id); }
+            end-preview => { root.hover-end(item.id); }
         }
     }
 }
@@ -440,6 +557,8 @@ export component AssetPage inherits VerticalLayout {
             page-top: root.absolute-position.y;
             action(id) => { Assets.action(id); }
             visible-range(first, last) => { Assets.visible-range(first, last); }
+            hover-start(id) => { Assets.hover-start(id); }
+            hover-end(id) => { Assets.hover-end(id); }
         }
     }
 

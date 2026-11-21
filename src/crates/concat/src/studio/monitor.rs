@@ -212,6 +212,13 @@ impl Studio {
         if self.session.is_none() {
             return;
         }
+        // An empty timeline has nothing to play. Before 0.2.23 this returned
+        // silently: the play button flickered, the picture never moved, and
+        // it read as "播放没有任何反应". Say so instead of pretending.
+        if self.duration() <= 0.0 {
+            self.notify(&crate::i18n::t("playback.nothingToPlay"), false);
+            return;
+        }
         // Playing from the tail would sit there doing nothing, so the
         // button rewinds first - what every editor does.
         if self.playhead >= self.duration() {

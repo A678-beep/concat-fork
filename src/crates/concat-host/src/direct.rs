@@ -24,7 +24,26 @@ pub fn download(
     progress: &mut dyn FnMut(f32, &str),
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<u64, String> {
-    match fetch(url, dest, progress, cancel, 0) {
+    match fetch(url, dest, progress, cancel, 0, None) {
+        Ok(bytes) => Ok(bytes),
+        Err(error) => {
+            let _ = std::fs::remove_file(dest);
+            Err(error)
+        }
+    }
+}
+
+/// 只取文件开头 `max_bytes` 字节的下载，给素材库悬停预览用：HTTP Range
+/// （平台 302 到 OSS 后同样带 Range），不整档下载。服务器不认 Range 时也
+/// 只读到上限就断开，同样不会把整个文件收下来。失败时半截文件删掉。
+pub fn download_range(
+    url: &str,
+    dest: &Path,
+    max_bytes: u64,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<u64, String> {
+    let max = max_bytes.max(1);
+    match fetch(url, dest, &mut |_, _| {}, cancel, 0, Some(max)) {
         Ok(bytes) => Ok(bytes),
         Err(error) => {
             let _ = std::fs::remove_file(dest);
@@ -40,6 +59,7 @@ fn fetch(
     progress: &mut dyn FnMut(f32, &str),
     cancel: &std::sync::atomic::AtomicBool,
     redirects: u8,
+    cap: Option<u64>,
 ) -> Result<u64, String> {
     use std::net::ToSocketAddrs;
 
@@ -81,8 +101,11 @@ fn fetch(
     let mut stream = connector
         .connect(host.as_str(), socket)
         .map_err(|error| format!("TLS 握手失败（{host}）：{error}"))?;
+    let range = cap
+        .map(|max| format!("Range: bytes=0-{}\r\n", max.saturating_sub(1)))
+        .unwrap_or_default();
     let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: {host}\r\nAccept: */*\r\nUser-Agent: XingLaiCut/{}\r\nConnection: close\r\n\r\n",
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nAccept: */*\r\nUser-Agent: XingLaiCut/{}\r\n{range}Connection: close\r\n\r\n",
         env!("CARGO_PKG_VERSION"),
     );
     stream
@@ -127,7 +150,7 @@ fn fetch(
         } else {
             format!("https://{host}{location}")
         };
-        return fetch(&next, dest, progress, cancel, redirects + 1);
+        return fetch(&next, dest, progress, cancel, redirects + 1, cap);
     }
     if !(200..300).contains(&status) {
         return Err(format!("下载失败（HTTP {status}）"));
@@ -168,7 +191,7 @@ fn fetch(
         progress(fraction.clamp(0.0, 1.0), &detail);
     }
     out.flush().map_err(|error| format!("下载文件写不进去：{error}"))?;
-    if total > 0 && got != total {
+    if cap.is_none() && total > 0 && got != total {
         return Err(format!("下载不完整：收到 {got}/{total} 字节"));
     }
     Ok(got)
@@ -206,14 +229,20 @@ fn fetch(
     progress: &mut dyn FnMut(f32, &str),
     cancel: &std::sync::atomic::AtomicBool,
     redirects: u8,
+    cap: Option<u64>,
 ) -> Result<u64, String> {
     if redirects > 5 {
         return Err("下载地址跳转太多次，停下来了".to_owned());
     }
-    let response = ureq::get(url)
-        .timeout(std::time::Duration::from_secs(120))
-        .call()
-        .map_err(|error| format!("下载失败：{error}"))?;
+    let range = cap.map(|max| format!("bytes=0-{}", max.saturating_sub(1)));
+    let response = match &range {
+        Some(range) => ureq::get(url)
+            .set("Range", range)
+            .timeout(std::time::Duration::from_secs(120))
+            .call(),
+        None => ureq::get(url).timeout(std::time::Duration::from_secs(120)).call(),
+    }
+    .map_err(|error| format!("下载失败：{error}"))?;
     let total = response
         .header("content-length")
         .and_then(|value| value.parse::<u64>().ok())
@@ -236,6 +265,9 @@ fn fetch(
         out.write_all(&buffer[..read])
             .map_err(|error| format!("下载文件写不进去：{error}"))?;
         got += read as u64;
+        if cap.is_some_and(|max| got >= max) {
+            break;
+        }
         let fraction = if total > 0 {
             got as f32 / total as f32
         } else {

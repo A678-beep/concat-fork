@@ -31,6 +31,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use concat_host::assets::{self, AssetItem, Industry};
+use concat_host::audio_preview::AudioPreview;
 use concat_host::AppDirs;
 use concat_project::Command;
 use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
@@ -49,6 +50,16 @@ const THUMB_FIRST: usize = 18;
 const THUMB_MEMORY_CAP: usize = 96;
 /// 下载进度最多多久刷新一次界面。
 const PROGRESS_GAP: Duration = Duration::from_millis(250);
+/// 悬停预览只取开头这么多字节（视频 MP4 的 moov 在文件头，够解前几秒）。
+const PREVIEW_VIDEO_BYTES: u64 = 4_000_000;
+/// 音乐/音效试听取开头这么多字节，够听 5–8 秒。
+const PREVIEW_AUDIO_BYTES: u64 = 1_800_000;
+/// 视频预览：帧数、帧率、缩略宽度、循环时长 4 秒。
+const PREVIEW_FRAMES: u32 = 40;
+const PREVIEW_FPS: u32 = 10;
+const PREVIEW_WIDTH: u32 = 360;
+/// 音乐/音效悬停试听最多听几秒。
+const PREVIEW_AUDIO_SECONDS: f64 = 8.0;
 
 /// 五类素材。
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -174,6 +185,40 @@ pub enum AssetsMsg {
         id: String,
         result: Result<PathBuf, String>,
     },
+    /// 卡片缩略图的悬停起停：`on` 是进去还是离开。
+    Hover {
+        id: String,
+        on: bool,
+    },
+    /// 视频预览帧解好了（worker 里读好的图片）。
+    PreviewVideo {
+        id: String,
+        generation: u64,
+        /// worker 解好的预览帧文件；图片在 UI 线程读（slint::Image 不能跨线程）。
+        result: Result<Vec<PathBuf>, String>,
+    },
+    /// 试听 PCM 解好了：48k 立体声交错 f32。
+    PreviewAudio {
+        id: String,
+        generation: u64,
+        result: Result<(Vec<f32>, u32, u16), String>,
+    },
+    /// 字体文件取回来了，UI 线程注册进窗口字体集合。
+    PreviewFont {
+        id: String,
+        generation: u64,
+        result: Result<Vec<u8>, String>,
+    },
+}
+
+/// 一张卡的悬停预览。
+#[derive(Clone, Default)]
+struct CardPreview {
+    /// 0 无 / 1 准备中 / 2 视频帧 / 3 试听 / 4 字体 / 5 不可用
+    state: i32,
+    frames: Vec<Image>,
+    /// 字体预览用的 family 名（注册进窗口字体集合后的名字）。
+    family: String,
 }
 
 /// 素材库面板的状态。
@@ -214,6 +259,18 @@ pub struct AssetsPane {
     full: Cell<bool>,
     /// 只需要改一行的卡 id。
     rows: RefCell<HashSet<String>>,
+    /// 悬停预览的请求号：移开/换卡后旧 worker 的结果直接丢。
+    preview_generation: Cell<u64>,
+    /// 正在准备预览的卡；空是没在准备。
+    preview_id: RefCell<String>,
+    /// 只允许一个预览 worker 在跑（任务卡要求限并发）。
+    preview_busy: Cell<bool>,
+    /// 每张卡的预览内容（同一时刻最多一张有）。
+    previews: RefCell<HashMap<String, CardPreview>>,
+    /// 悬停试听的小播放器，第一次需要时才开输出流。
+    audio_preview: RefCell<Option<AudioPreview>>,
+    /// 已注册进窗口字体集合的素材字体：id -> family。
+    font_families: RefCell<HashMap<String, String>>,
 }
 
 impl Default for AssetsPane {
@@ -245,6 +302,12 @@ impl Default for AssetsPane {
             index_of: RefCell::new(HashMap::new()),
             full: Cell::new(true),
             rows: RefCell::new(HashSet::new()),
+            preview_generation: Cell::new(0),
+            preview_id: RefCell::new(String::new()),
+            preview_busy: Cell::new(false),
+            previews: RefCell::new(HashMap::new()),
+            audio_preview: RefCell::new(None),
+            font_families: RefCell::new(HashMap::new()),
         }
     }
 }
@@ -340,6 +403,7 @@ impl AssetsPane {
         self.progress.clear();
         self.thumbs.clear();
         self.thumbs_failed.borrow_mut().clear();
+        self.clear_previews();
         self.bump_full();
         let query = self.query.clone();
         let kind = self.kind.param().to_owned();
@@ -619,6 +683,7 @@ impl AssetsPane {
         let phase = self.phase.get(&item.id).copied().unwrap_or(Phase::Idle);
         let progress = self.progress.get(&item.id).copied().unwrap_or(0.0);
         let kind = kind_of(item);
+        let preview = self.previews.borrow().get(&item.id).cloned().unwrap_or_default();
         AssetCardData {
             id: SharedString::from(item.id.clone()),
             title: SharedString::from(item.title.clone()),
@@ -633,6 +698,9 @@ impl AssetsPane {
             state: phase.code(),
             progress,
             action: SharedString::from(self.action_label(item, phase, progress)),
+            preview_state: preview.state,
+            preview_frames: ModelRc::new(VecModel::from(preview.frames.clone())),
+            font_family: SharedString::from(preview.family.clone()),
         }
     }
 
@@ -780,12 +848,310 @@ impl AssetsPane {
         self.pump_thumbs();
     }
 
+
+    // ── 悬停预览（0.2.23）──────────────────────────────────────────
+
+    /// 换页/换分类/关面板：停试听、清掉所有预览，旧 worker 的结果作废。
+    fn clear_previews(&self) {
+        self.preview_generation
+            .set(self.preview_generation.get().wrapping_add(1));
+        self.preview_id.borrow_mut().clear();
+        if let Some(player) = self.audio_preview.borrow().as_ref() {
+            player.stop();
+        }
+        self.previews.borrow_mut().clear();
+    }
+
+    /// 鼠标停在卡片缩略图上（`on = true`）或移开。停留 400ms 由 Slint 侧
+    /// 计时，这里只负责取预览：网络 Range 片段 + 本地解码都在 worker 里，
+    /// 同一时刻最多一个 worker、最多一个声音（任务卡要求限并发）。
+    fn hover(&mut self, id: String, on: bool) {
+        if !on {
+            self.preview_generation
+                .set(self.preview_generation.get().wrapping_add(1));
+            if self.preview_id.borrow().as_str() == id {
+                self.preview_id.borrow_mut().clear();
+            }
+            if let Some(player) = self.audio_preview.borrow().as_ref() {
+                player.stop();
+            }
+            // 只留这一张卡的帧缓存（再悬停时不用重新解），别的清掉。
+            let mut had = false;
+            self.previews.borrow_mut().retain(|key, preview| {
+                if key == &id {
+                    preview.state = 0;
+                    true
+                } else {
+                    had = true;
+                    false
+                }
+            });
+            self.bump_row(&id);
+            if had {
+                self.bump_full();
+            }
+            return;
+        }
+        // 同一张卡还留着上次的解码结果：直接再显示/再试听，不走网络。
+        let cached = {
+            let previews = self.previews.borrow();
+            previews
+                .get(&id)
+                .map(|preview| {
+                    if !preview.frames.is_empty() {
+                        2
+                    } else if !preview.family.is_empty() {
+                        4
+                    } else {
+                        0
+                    }
+                })
+                .unwrap_or(0)
+        };
+        if cached != 0 {
+            if let Some(preview) = self.previews.borrow_mut().get_mut(&id) {
+                preview.state = cached;
+            }
+            self.bump_row(&id);
+            return;
+        }
+        let Some(item) = self.items.iter().find(|item| item.id == id).cloned() else {
+            return;
+        };
+        let Some(dirs) = self.dirs() else {
+            return;
+        };
+        if self.preview_busy.get() {
+            return;
+        }
+        let media_kind = kind_of(&item);
+        let generation = self.preview_generation.get().wrapping_add(1);
+        self.preview_generation.set(generation);
+        *self.preview_id.borrow_mut() = id.clone();
+        self.previews.borrow_mut().insert(
+            id.clone(),
+            CardPreview {
+                state: 1,
+                ..Default::default()
+            },
+        );
+        self.bump_row(&id);
+        self.preview_busy.set(true);
+        let report = id.clone();
+        let spawned = std::thread::Builder::new()
+            .name("concat-asset-preview".into())
+            .spawn(move || match media_kind {
+                Kind::Video => {
+                    let result = (|| -> Result<Vec<PathBuf>, String> {
+                        let clip =
+                            assets::preview_clip(&dirs, &item, PREVIEW_VIDEO_BYTES, "mp4")?;
+                        let dir = assets::preview_frames_dir(&dirs, &item);
+                        let paths = concat_host::video_preview::video_frames(
+                            &clip,
+                            &dir,
+                            PREVIEW_FRAMES,
+                            PREVIEW_FPS,
+                            PREVIEW_WIDTH,
+                        )?;
+                        Ok(paths.into_iter().take(PREVIEW_FRAMES as usize).collect())
+                    })();
+                    crate::host::on_ui_assets(move |studio, _| {
+                        studio.handle(crate::panes::Msg::Assets(AssetsMsg::PreviewVideo {
+                            id: report,
+                            generation,
+                            result,
+                        }));
+                    });
+                }
+                Kind::Music | Kind::Sfx => {
+                    let result = (|| -> Result<(Vec<f32>, u32, u16), String> {
+                        let clip =
+                            assets::preview_clip(&dirs, &item, PREVIEW_AUDIO_BYTES, "mp3")?;
+                        let work = assets::preview_dir(&dirs);
+                        concat_host::video_preview::audio_pcm(&clip, PREVIEW_AUDIO_SECONDS, &work)
+                    })();
+                    crate::host::on_ui_assets(move |studio, _| {
+                        studio.handle(crate::panes::Msg::Assets(AssetsMsg::PreviewAudio {
+                            id: report,
+                            generation,
+                            result,
+                        }));
+                    });
+                }
+                Kind::Font => {
+                    let result = (|| -> Result<Vec<u8>, String> {
+                        let path = assets::preview_font(&dirs, &item)?;
+                        std::fs::read(&path).map_err(|error| format!("读不回字体：{error}"))
+                    })();
+                    crate::host::on_ui_assets(move |studio, _| {
+                        studio.handle(crate::panes::Msg::Assets(AssetsMsg::PreviewFont {
+                            id: report,
+                            generation,
+                            result,
+                        }));
+                    });
+                }
+                Kind::Image => {
+                    crate::host::on_ui_assets(move |studio, _| {
+                        studio.handle(crate::panes::Msg::Assets(AssetsMsg::PreviewVideo {
+                            id: report,
+                            generation,
+                            result: Err("图片不需要悬停预览".to_owned()),
+                        }));
+                    });
+                }
+            });
+        if spawned.is_err() {
+            log::warn!("assets: 起不了预览线程");
+            self.preview_busy.set(false);
+            self.fail_preview(&id);
+        }
+    }
+
+    /// 预览结果是不是还给这张卡（移开/换卡/换页后回来的一律丢掉）。
+    fn preview_current(&self, id: &str, generation: u64) -> bool {
+        generation == self.preview_generation.get() && self.preview_id.borrow().as_str() == id
+    }
+
+    fn fail_preview(&mut self, id: &str) {
+        self.previews.borrow_mut().insert(
+            id.to_owned(),
+            CardPreview {
+                state: 5,
+                ..Default::default()
+            },
+        );
+        self.bump_row(id);
+    }
+
+    fn video_arrived(
+        &mut self,
+        id: String,
+        generation: u64,
+        result: Result<Vec<PathBuf>, String>,
+    ) {
+        self.preview_busy.set(false);
+        if !self.preview_current(&id, generation) {
+            return;
+        }
+        match result {
+            Ok(paths) => {
+                let frames: Vec<Image> = paths
+                    .iter()
+                    .filter_map(|path| Image::load_from_path(path).ok())
+                    .collect();
+                if frames.is_empty() {
+                    self.fail_preview(&id);
+                    return;
+                }
+                self.previews.borrow_mut().insert(
+                    id.clone(),
+                    CardPreview {
+                        state: 2,
+                        frames,
+                        family: String::new(),
+                    },
+                );
+                self.bump_row(&id);
+            }
+            Err(error) => {
+                log::debug!("assets: preview {id} failed: {error}");
+                self.fail_preview(&id);
+            }
+        }
+    }
+
+    fn audio_arrived(
+        &mut self,
+        id: String,
+        generation: u64,
+        result: Result<(Vec<f32>, u32, u16), String>,
+    ) {
+        self.preview_busy.set(false);
+        if !self.preview_current(&id, generation) {
+            return;
+        }
+        match result {
+            Ok((pcm, rate, channels)) => {
+                if self.audio_preview.borrow().is_none() {
+                    match AudioPreview::new() {
+                        Ok(player) => *self.audio_preview.borrow_mut() = Some(player),
+                        Err(error) => {
+                            log::warn!("assets: 试听没有输出设备：{error}");
+                            self.fail_preview(&id);
+                            return;
+                        }
+                    }
+                }
+                if let Some(player) = self.audio_preview.borrow().as_ref() {
+                    player.play(pcm, rate, channels);
+                }
+                self.previews.borrow_mut().insert(
+                    id.clone(),
+                    CardPreview {
+                        state: 3,
+                        ..Default::default()
+                    },
+                );
+                self.bump_row(&id);
+            }
+            Err(error) => {
+                log::debug!("assets: audio preview {id} failed: {error}");
+                self.fail_preview(&id);
+            }
+        }
+    }
+
+    fn font_arrived(&mut self, id: String, generation: u64, result: Result<Vec<u8>, String>) {
+        self.preview_busy.set(false);
+        if !self.preview_current(&id, generation) {
+            return;
+        }
+        match result {
+            Ok(bytes) => {
+                // 注册进窗口的字体集合，拿它自己的 family 名：卡片示例文字
+                // 用这个 family 就真的用该字体渲染。
+                let family = {
+                    let mut collection = slint::fontique_011::shared_collection();
+                    let blob = slint::fontique_011::fontique::Blob::new(std::sync::Arc::new(bytes));
+                    let registered = collection.register_fonts(blob, None);
+                    registered
+                        .iter()
+                        .find_map(|(family, _)| collection.family_name(*family).map(str::to_owned))
+                };
+                match family {
+                    Some(family) => {
+                        self.font_families
+                            .borrow_mut()
+                            .insert(id.clone(), family.clone());
+                        self.previews.borrow_mut().insert(
+                            id.clone(),
+                            CardPreview {
+                                state: 4,
+                                frames: Vec::new(),
+                                family,
+                            },
+                        );
+                        self.bump_row(&id);
+                    }
+                    None => self.fail_preview(&id),
+                }
+            }
+            Err(error) => {
+                log::debug!("assets: font preview {id} failed: {error}");
+                self.fail_preview(&id);
+            }
+        }
+    }
+
     pub fn update(&mut self, msg: AssetsMsg, studio: &mut Studio) {
         match msg {
             AssetsMsg::Shown(on) => {
                 if on && !self.loaded_once {
                     self.loaded_once = true;
                     self.load();
+                } else if !on {
+                    self.clear_previews();
                 }
             }
             AssetsMsg::KindChanged(index) => {
@@ -899,6 +1265,22 @@ impl AssetsPane {
                     self.bump_full();
                 }
             }
+            AssetsMsg::Hover { id, on } => self.hover(id, on),
+            AssetsMsg::PreviewVideo {
+                id,
+                generation,
+                result,
+            } => self.video_arrived(id, generation, result),
+            AssetsMsg::PreviewAudio {
+                id,
+                generation,
+                result,
+            } => self.audio_arrived(id, generation, result),
+            AssetsMsg::PreviewFont {
+                id,
+                generation,
+                result,
+            } => self.font_arrived(id, generation, result),
         }
     }
 }

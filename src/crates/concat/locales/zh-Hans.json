@@ -911,9 +911,9 @@
   "start.removeFromList": "从列表中移除",
   "start.reportProblem": "报告问题",
   "start.reportProblemNote": "需要发送什么才能修复",
-  "start.safeMode": "Concat 上次在启动时关闭，因此现在改用软件绘制：较慢，但能打开。要再次尝试使用显卡，请在“设置 > 通用”中打开“使用 GPU 绘制”。",
+  "start.safeMode": "上次启动在开始阶段中断，这次先用软件渲染（较慢）。启动 30 秒后会自动恢复——下次启动会重新尝试 GPU；也可以现在到「设置 > 通用」打开「使用 GPU 绘制」。",
   "start.safeModePhone": "Concat 曾在启动时关闭，因此在下次更新前改用较慢但更稳妥的方式绘制。",
-  "start.softwareRender": "当前为软件渲染（界面较慢，素材库和预览都会卡）。可在“设置 > 通用”打开“使用 GPU 绘制”，或用 --force-gpu 重新启动。",
+  "start.softwareRender": "当前为软件渲染：界面会明显变卡、播放几乎不前进。请在「设置 > 通用」打开「使用 GPU 绘制」，或退出后用 --force-gpu 重新启动。",
   "start.searchProjects": "搜索项目",
   "start.settingsApplyWholeEdit": "画面、帧率和背景之后都可以在项目设置中更改。",
   "start.shape": "形状",
@@ -1247,5 +1247,10 @@
   "assets.insertedToast": "已插入素材：{0}",
   "assets.insertFailed": "插入失败：素材没有进媒体库，请重试",
   "assets.fontCached": "字体「{0}」已缓存（字体安装到文字面板将在后续版本接入）",
-  "assets.licenseHint": "素材全部可商用；标「需署名」的音乐/图片请按授权说明署名；下载缓存在本机 asset-cache。"
+  "assets.licenseHint": "素材全部可商用；标「需署名」的音乐/图片请按授权说明署名；下载缓存在本机 asset-cache。",
+  "playback.nothingToPlay": "时间线上还没有片段，播放不了：先把素材拖到时间线，或点素材库的「插入时间轴」。",
+  "assets.previewPreparing": "正在准备预览…",
+  "assets.previewAudio": "试听中 · 移开停止",
+  "assets.previewFont": "字体预览",
+  "assets.previewUnavailable": "这个素材预览不了，可先下载"
 }
