@@ -55,6 +55,7 @@ impl Studio {
         self.publish_lanes(app, models);
         self.publish_chrome(app, models);
         self.publish_dock(app, models);
+        self.assets.publish(app);
     }
 
     /// The project's saved state and the toast, and nothing else: what a

@@ -22,6 +22,7 @@
 pub mod account;
 /// 本地 AI 模型目录：效果、大小、显存内存要求、本机适不适合。
 pub mod ai_models;
+pub mod assets;
 pub mod awake;
 pub mod brush;
 pub mod capcut;

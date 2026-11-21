@@ -1239,6 +1239,8 @@ pub struct Studio {
     pub speech: crate::panes::speech::SpeechPane,
     /// The library's Audio page: the user's own sounds.
     pub sounds: crate::panes::sounds::SoundsPane,
+    /// 素材库面板：星籁免费商用素材，来自平台 `/assets/*`。
+    pub assets: crate::panes::assets::AssetsPane,
     /// A file from the library lent the monitor and the speakers; see
     /// `crate::source`.
     pub source: Option<crate::source::Source>,
@@ -3185,6 +3187,7 @@ impl Studio {
             captions: crate::panes::captions::CaptionsPane::default(),
             speech: crate::panes::speech::SpeechPane::with_saved(&host.dirs),
             sounds: crate::panes::sounds::SoundsPane::open(&host.dirs),
+            assets: crate::panes::assets::AssetsPane::open(&host.dirs),
             source: None,
             meters: crate::meters::MeterFeed::default(),
             voiceover: crate::panes::voiceover::VoiceoverPane::default(),

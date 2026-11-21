@@ -15,6 +15,7 @@
 //! export sheet is the first, and the shape the rest follow.
 
 pub mod ai;
+pub mod assets;
 pub mod captions;
 pub mod export;
 pub mod glide;
@@ -35,6 +36,8 @@ pub mod voiceover;
 pub enum Msg {
     /// 到 AI 面板（本地插件、云端兜底、算力向导）。
     Ai(ai::AiMsg),
+    /// 到素材库面板。
+    Assets(assets::AssetsMsg),
     /// To the export sheet.
     Export(export::ExportMsg),
     /// To the settings sheet.
@@ -93,6 +96,8 @@ pub fn activity(msg: &Msg) -> Option<Activity> {
         | Msg::Settings(SettingsMsg::ModelProgress { .. } | SettingsMsg::InstallProgress { .. }) => {
             return None;
         }
+        // 素材库的加载、缩略图、下载进度都是重复的机械消息，不进活动日志。
+        Msg::Assets(_) => return None,
         // A wheel tick that zooms by nothing - a trackpad's idle events -
         // did nothing, and says nothing.
         Msg::Timeline(TimelineMsg::Zoomed { factor, .. }) if (factor - 1.0).abs() < 1e-6 => {

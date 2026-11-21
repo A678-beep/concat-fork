@@ -1,0 +1,321 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 XingLai AI and Concat contributors
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { Button } from "../primitives/modal.slint";
+import { Field } from "../primitives/modal.slint";
+import { Select } from "../primitives/select.slint";
+
+// 星籁免费商用素材库（0.2.20）。
+//
+// 与「媒体」页同一块面板：左侧分类列选类型与行业，右侧工具条搜索，网格
+// 显示缩略图。每个卡片标「可商用」；需要署名的素材显示授权与 attribution。
+// 下载缓存在 `%APPDATA%\app.concat.editor\asset-cache`，缓存好了按钮变成
+// 「插入时间轴」。数据全部来自平台 `/assets/*` 真实接口，不用 mock。
+
+export struct AssetCardData {
+    id: string,
+    title: string,
+    detail: string,
+    /// 0 视频 / 1 图片 / 2 音乐 / 3 音效 / 4 字体
+    kind: int,
+    thumb: image,
+    has-thumb: bool,
+    commercial: bool,
+    /// 授权与署名说明；需要署名时带 CC BY 的 attribution。
+    attribution: string,
+    /// 0 未下载 / 1 下载中 / 2 已缓存 / 3 失败
+    state: int,
+    progress: float,
+    /// 按钮上的字：下载 / 下载中 xx% / 插入时间轴 / 重试
+    action: string,
+}
+
+export global Assets {
+    /// 当前类型 tab，0..4。
+    in property <int> kind: 0;
+    in property <[string]> kinds;
+    /// 0 是「全部行业」，其余是 industries 的下标 + 1。
+    in property <int> industry: 0;
+    in property <[string]> industries;
+    /// 0 = 全部分类，其余是 categories 的下标 + 1。
+    in property <int> category: 0;
+    in property <[string]> categories;
+    in property <string> query;
+    in property <[AssetCardData]> items;
+    in property <bool> loading;
+    in property <string> message;
+    /// 「共 N 条 · 已显示 M 条」
+    in property <string> stats;
+
+    callback kind-changed(index: int);
+    callback industry-changed(index: int);
+    callback category-changed(index: int);
+    callback query-edited(text: string);
+    callback search();
+    callback load-more();
+    callback action(id: string);
+    callback shown(on: bool);
+}
+
+// 一张素材卡。
+component AssetCard inherits Rectangle {
+    in property <AssetCardData> data;
+    in property <length> thumb-height;
+
+    callback act();
+
+    border-radius: Theme.r;
+    background: Theme.raised;
+    clip: true;
+
+    VerticalLayout {
+        spacing: 0;
+
+        Rectangle {
+            height: root.thumb-height;
+            background: Theme.well;
+            clip: true;
+
+            Image {
+                visible: root.data.has-thumb;
+                width: 100%;
+                height: 100%;
+                source: root.data.thumb;
+                image-fit: cover;
+            }
+
+            if !root.data.has-thumb: VerticalLayout {
+                alignment: center;
+                Text {
+                    text: "…";
+                    color: Theme.fg-dim;
+                    horizontal-alignment: center;
+                }
+            }
+
+            // 授权角标压在图左上角。
+            if root.data.commercial: Rectangle {
+                x: 6px;
+                y: 6px;
+                height: 18px;
+                border-radius: Theme.r-xs;
+                background: Theme.accent;
+
+                Text {
+                    text: I18n.t("assets.commercial");
+                    color: Theme.on-accent;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                    padding-left: 6px;
+                    padding-right: 6px;
+                }
+            }
+        }
+
+        VerticalLayout {
+            padding: 6px;
+            padding-top: 4px;
+            spacing: 2px;
+
+            Text {
+                text: root.data.title;
+                color: Theme.fg;
+                font-size: Theme.fs-sm;
+                overflow: elide;
+            }
+
+            Text {
+                text: root.data.detail;
+                color: Theme.fg-dim;
+                font-family: Theme.font-technical;
+                font-size: Theme.fs-xs;
+                overflow: elide;
+            }
+
+            // 授权行：CC BY 这类需要署名的显示授权名 + attribution。
+            Text {
+                text: root.data.attribution;
+                color: root.data.commercial ? Theme.fg-dim : Theme.fg-muted;
+                font-size: Theme.fs-xs;
+                overflow: elide;
+            }
+
+            Rectangle { height: 3px; }
+
+            if root.data.state == 1: Rectangle {
+                height: 4px;
+                border-radius: 2px;
+                background: Theme.well;
+
+                Rectangle {
+                    width: parent.width * Math.min(1.0, Math.max(0.0, root.data.progress));
+                    height: parent.height;
+                    border-radius: 2px;
+                    background: Theme.accent;
+                }
+            }
+
+            Button {
+                height: 26px;
+                label: root.data.action;
+                clicked => { root.act(); }
+            }
+        }
+    }
+}
+
+// 网格：Slint 没有 auto-fill grid，按列数算坐标（和媒体页同一套算术）。
+component AssetGrid inherits Rectangle {
+    in property <[AssetCardData]> items;
+    callback action(id: string);
+
+    property <length> gap: 8px;
+    property <length> min-card: 158px;
+    property <int> cols: Math.max(1,
+        Math.floor((root.width + root.gap) / (root.min-card + root.gap)));
+    property <length> card-w: (root.width - (root.cols - 1) * root.gap) / root.cols;
+    property <length> thumb-h: root.card-w * 9 / 16;
+    property <length> card-h: root.thumb-h + 92px;
+    property <int> rows: Math.ceil(root.items.length / root.cols);
+
+    height: root.rows > 0 ? root.rows * (root.card-h + root.gap) - root.gap : 0px;
+
+    for item[index] in root.items: AssetCard {
+        x: Math.mod(index, root.cols) * (root.card-w + root.gap);
+        y: Math.floor(index / root.cols) * (root.card-h + root.gap);
+        width: root.card-w;
+        height: root.card-h;
+        thumb-height: root.thumb-h;
+        data: item;
+        act => { root.action(item.id); }
+    }
+}
+
+// 素材库的一页：类型 tab、搜索、网格、加载更多、授权说明。
+export component AssetPage inherits VerticalLayout {
+    spacing: 4px;
+
+    // ── 类型 tab ──
+    Rectangle {
+        height: 40px;
+        background: Theme.panel;
+
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            spacing: 4px;
+            alignment: start;
+
+            for label[index] in Assets.kinds: Button {
+                label: label;
+                primary: Assets.kind == index;
+                ghost: Assets.kind != index;
+                clicked => { Assets.kind-changed(index); }
+            }
+        }
+    }
+
+    // ── 搜索 ──
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 8px;
+
+        Field {
+            horizontal-stretch: 1;
+            placeholder: I18n.t("assets.searchPlaceholder");
+            value: Assets.query;
+            edited(text) => { Assets.query-edited(text); }
+        }
+
+        if Assets.categories.length > 1: Select {
+            horizontal-stretch: 0;
+            width: self.natural-width;
+            options: Assets.categories;
+            current: Assets.category;
+            changed(index) => { Assets.category-changed(index); }
+        }
+
+        Button {
+            label: I18n.t("assets.search");
+            glyph: Glyph.search;
+            clicked => { Assets.search(); }
+        }
+
+        Text {
+            text: Assets.stats;
+            color: Theme.fg-dim;
+            font-family: Theme.font-technical;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+        }
+    }
+
+    if Assets.loading: Text {
+        text: I18n.t("assets.loading");
+        color: Theme.fg-muted;
+        font-size: Theme.fs-sm;
+    }
+
+    if Assets.message != "": Text {
+        text: Assets.message;
+        color: Theme.fg-muted;
+        font-size: Theme.fs-sm;
+        wrap: word-wrap;
+    }
+
+    if !Assets.loading && Assets.items.length == 0 && Assets.message == "": VerticalLayout {
+        padding: 24px;
+        alignment: center;
+        Text {
+            text: I18n.t("assets.empty");
+            color: Theme.fg-dim;
+            font-size: Theme.fs;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: I18n.t("assets.emptyHint");
+            color: Theme.fg-muted;
+            font-size: Theme.fs-sm;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+
+    // ── 网格 ──
+    if Assets.items.length > 0: VerticalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+
+        AssetGrid {
+            items: Assets.items;
+            action(id) => { Assets.action(id); }
+        }
+    }
+
+    // ── 加载更多 + 授权说明 ──
+    if Assets.items.length > 0 && Assets.stats != "": HorizontalLayout {
+        padding: 8px;
+        spacing: 8px;
+        alignment: start;
+
+        Button {
+            label: I18n.t("assets.loadMore");
+            ghost: true;
+            clicked => { Assets.load-more(); }
+        }
+
+        Text {
+            horizontal-stretch: 1;
+            text: I18n.t("assets.licenseHint");
+            color: Theme.fg-dim;
+            font-size: Theme.fs-xs;
+            wrap: word-wrap;
+            vertical-alignment: center;
+        }
+    }
+}

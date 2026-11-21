@@ -114,6 +114,7 @@ use panes::monitor::MonitorMsg;
 use panes::project::ProjectMsg;
 use panes::relink::RelinkMsg;
 use panes::settings::SettingsMsg;
+use panes::assets::AssetsMsg;
 use panes::sounds::SoundsMsg;
 use panes::speech::SpeechMsg;
 use panes::start::StartMsg;
@@ -1863,6 +1864,35 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     app.global::<SourcePreview>().on_closed(on_window!(|state| {
         state.close_source();
     }));
+
+    // ── the library's Assets page ──
+    {
+        let assets = app.global::<crate::ui::Assets>();
+        assets.on_shown(on_window!(|state, on: bool| {
+            state.handle(Msg::Assets(AssetsMsg::Shown(on)));
+        }));
+        assets.on_kind_changed(on_window!(|state, index: i32| {
+            state.handle(Msg::Assets(AssetsMsg::KindChanged(index)));
+        }));
+        assets.on_industry_changed(on_window!(|state, index: i32| {
+            state.handle(Msg::Assets(AssetsMsg::IndustryChanged(index)));
+        }));
+        assets.on_category_changed(on_window!(|state, index: i32| {
+            state.handle(Msg::Assets(AssetsMsg::CategoryChanged(index)));
+        }));
+        assets.on_query_edited(on_window!(|state, text: SharedString| {
+            state.handle(Msg::Assets(AssetsMsg::QueryEdited(text.to_string())));
+        }));
+        assets.on_search(on_window!(|state| {
+            state.handle(Msg::Assets(AssetsMsg::Search));
+        }));
+        assets.on_load_more(on_window!(|state| {
+            state.handle(Msg::Assets(AssetsMsg::LoadMore));
+        }));
+        assets.on_action(on_window!(|state, id: SharedString| {
+            state.handle(Msg::Assets(AssetsMsg::Action(id.to_string())));
+        }));
+    }
 
     // ── the library's Audio page ──
     {

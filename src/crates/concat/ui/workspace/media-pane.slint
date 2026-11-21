@@ -16,6 +16,7 @@ import { Wave } from "../primitives/wave.slint";
 import { ContextMenu, MenuItemData } from "../primitives/context-menu.slint";
 import { SourcePreview } from "source-preview.slint";
 import { Sounds, SoundList, VoiceList } from "audio-page.slint";
+import { AssetPage, Assets } from "asset-page.slint";
 import { CaptionsForm, CaptionsSheetData } from "../dialogs/captions.slint";
 
 export { SourcePreview }
@@ -1856,7 +1857,10 @@ export component MediaPane inherits Rectangle {
     property <int> tab;
     /// The Audio page is up, or not: a drop of sound files on the window
     /// goes into the library while it is.
-    changed tab => { Sounds.shown(root.tab == 8); }
+    changed tab => {
+        Sounds.shown(root.tab == 8);
+        Assets.shown(root.tab == 9);
+    }
     /// The Audio page's shelf: 0 = Mine, 10 = Voices, 11 = Styles. 1 was
     /// Concat's own sounds, off the page until their list is published (#60).
     property <int> audio-category;
@@ -2038,6 +2042,13 @@ export component MediaPane inherits Rectangle {
                             label: I18n.t("mediaPane.templates");
                             current: root.tab == 6;
                             clicked => { root.tab = 6; }
+                        }
+                        // 素材库：星籁免费商用素材（0.2.20）。
+                        LibraryTab {
+                            glyph: Glyph.folder;
+                            label: I18n.t("assets.library");
+                            current: root.tab == 9;
+                            clicked => { root.tab = 9; }
                         }
                         }
                     }
@@ -2452,6 +2463,34 @@ export component MediaPane inherits Rectangle {
                             current: true;
                         }
                     }
+
+                    // 素材库：行业筛选（全部 + 平台返回的 30 个行业，带数量）。
+                    if root.tab == 9: VerticalLayout {
+                        spacing: 1px;
+                        CategoryHeading {
+                            height: 26px;
+                            title: I18n.t("assets.industries");
+                            open: root.categories-open;
+                            toggled => { root.categories-open = !root.categories-open; }
+                        }
+                        if root.categories-open: CategoryRow {
+                            height: 24px;
+                            label: I18n.t("assets.allIndustries");
+                            count: -1;
+                            current: Assets.industry == 0;
+                            clicked => { Assets.industry-changed(0); }
+                        }
+                        if root.categories-open: VerticalLayout {
+                            spacing: 1px;
+                            for row[index] in Assets.industries: CategoryRow {
+                                height: 24px;
+                                label: row;
+                                count: -1;
+                                current: Assets.industry == index + 1;
+                                clicked => { Assets.industry-changed(index + 1); }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -2862,6 +2901,9 @@ export component MediaPane inherits Rectangle {
                     glyph: Glyph.slot;
                     text: I18n.t("mediaPane.noTemplatesYetMark");
                 }
+
+                // 素材库：搜索、网格、下载与插入时间轴。
+                if root.tab == 9: AssetPage { }
             }
         }
     }
