@@ -44,18 +44,29 @@ pub enum Family {
     Chatterbox,
     /// The phone's own text-to-speech engine, in the phone's voice.
     System,
+    /// 本地中文音色：Piper 插件，完全离线，文字不出本机。
+    Piper,
+    /// 云端中文音色：星籁 AI，需要登录并消耗套餐额度。
+    Cloud,
 }
 
 /// The phone's voice, as a model id: there is nothing to download, and the
 /// settings show it as a model like any other.
 pub const SYSTEM_ID: &str = "system-voice";
 
+/// 本地中文音色的模型 id：不是要下载的模型，引擎是 Piper 插件。
+pub const PIPER_ID: &str = "piper-zh";
+
+/// 云端音色的模型 id：不下载，走平台 `/voice/tts`。
+pub const CLOUD_ID: &str = "cloud-voice";
+
 /// The family a model id belongs to.
 pub fn family_of(id: &str) -> Family {
-    if id == SYSTEM_ID {
-        Family::System
-    } else {
-        Family::Chatterbox
+    match id {
+        SYSTEM_ID => Family::System,
+        PIPER_ID => Family::Piper,
+        CLOUD_ID => Family::Cloud,
+        _ => Family::Chatterbox,
     }
 }
 
@@ -133,6 +144,13 @@ pub const CHATTERBOX_CLONE: i32 = 2099;
 /// The phone's voice: whichever its engine is set to.
 pub const SYSTEM_VOICES: &[(i32, &str)] = &[(3000, "system_default")];
 
+/// 本地中文音色：Piper 插件的普通话女声。`piper:` 后面是插件音色目录里的
+/// 模型 id，生成时据此在已安装插件里找到对应模型。
+pub const PIPER_VOICES: &[(i32, &str)] = &[
+    (4000, "piper:zh_CN-huayan-medium"),
+    (4001, "piper:zh_CN-huayan-x_low"),
+];
+
 /// The stock recordings Concat carries, by file name.
 #[cfg(feature = "chatterbox")]
 const RECORDINGS: &[(&str, &[u8])] = &[
@@ -169,6 +187,8 @@ pub fn voice_family(voice: i32) -> Option<Family> {
         Some(Family::Chatterbox)
     } else if SYSTEM_VOICES.iter().any(|(id, _)| *id == voice) {
         Some(Family::System)
+    } else if PIPER_VOICES.iter().any(|(id, _)| *id == voice) {
+        Some(Family::Piper)
     } else {
         None
     }
@@ -182,6 +202,12 @@ fn voice_name(voice: i32) -> Option<&'static str> {
         .map(|(_, name, _)| *name)
         .or_else(|| {
             SYSTEM_VOICES
+                .iter()
+                .find(|(id, _)| *id == voice)
+                .map(|(_, name)| *name)
+        })
+        .or_else(|| {
+            PIPER_VOICES
                 .iter()
                 .find(|(id, _)| *id == voice)
                 .map(|(_, name)| *name)
@@ -211,6 +237,9 @@ fn model_dir(dirs: &AppDirs, id: &str) -> Result<PathBuf, String> {
 fn model_downloaded(dirs: &AppDirs, id: &str) -> bool {
     match family_of(id) {
         Family::System => system_voice().is_some(),
+        Family::Piper => piper_available(dirs),
+        // 云端音色不下载：登录与额度在生成时检查。
+        Family::Cloud => true,
         #[cfg(feature = "chatterbox")]
         Family::Chatterbox => {
             model_dir(dirs, id).is_ok_and(|dir| crate::chatterbox::installed(&dir))
@@ -221,6 +250,18 @@ fn model_downloaded(dirs: &AppDirs, id: &str) -> bool {
             false
         }
     }
+}
+
+/// 本机装好的 Piper 本地配音插件。
+fn piper_plugin(dirs: &AppDirs) -> Option<concat_host::plugins::Plugin> {
+    concat_host::plugins::scan(dirs)
+        .into_iter()
+        .find(|plugin| plugin.engine().eq_ignore_ascii_case("piper"))
+}
+
+/// 本机有没有可用的本地中文音色（Piper 插件已安装）。
+pub fn piper_available(dirs: &AppDirs) -> bool {
+    piper_plugin(dirs).is_some()
 }
 
 /// Whether this build offers a model at all: the phone's voice only where
@@ -496,6 +537,12 @@ impl Speech {
                             avatar: None,
                         }),
                 )
+                .chain(PIPER_VOICES.iter().map(|(id, name)| VoiceInfo {
+                    id: *id,
+                    name: (*name).to_owned(),
+                    family: Family::Piper,
+                    avatar: None,
+                }))
                 .collect(),
         })
     }
@@ -513,6 +560,8 @@ impl Speech {
         let cancel = job.cancel_flag();
         let destination = model_dir(dirs, id)?;
         match family_of(id) {
+            // 本地中文音色由 Piper 插件提供，云端音色由平台合成：都不下载模型。
+            Family::Piper | Family::Cloud => Ok(()),
             Family::System => Ok(()),
             #[cfg(feature = "chatterbox")]
             Family::Chatterbox => crate::chatterbox::download(&destination, cancel, &mut progress),
@@ -543,6 +592,9 @@ impl Speech {
     pub fn delete_model(&self, dirs: &AppDirs, id: &str) -> Result<(), String> {
         if family_of(id) == Family::System {
             return Err("the phone's voice is part of the phone".to_owned());
+        }
+        if matches!(family_of(id), Family::Piper | Family::Cloud) {
+            return Err("本地中文音色与云端音色不是下载的模型".to_owned());
         }
         let dir = model_dir(dirs, id)?;
         let mut engine = self
@@ -620,14 +672,6 @@ impl Speech {
             1.0
         };
 
-        let dir = model_dir(dirs, &request.model_id)?;
-        if !model_downloaded(dirs, &request.model_id) {
-            return Err(format!(
-                "model {} is not downloaded - see Settings > Speech",
-                request.model_id
-            ));
-        }
-
         // The WAV goes in the project so it travels (and dies) with it - and
         // in `audio/`, not `cache/`, because a clip on the timeline points at
         // it: cache is for things that can be regenerated.
@@ -645,8 +689,41 @@ impl Speech {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|elapsed| elapsed.as_millis())
             .unwrap_or(0);
-        let voice_name = voice_name(request.voice).unwrap_or("voice");
+        // 文件名里不能有 Windows 的非法字符：本地中文音色的 id 带 `:`，
+        // 直接写会把文件变成 NTFS 的备用数据流（同名 0 字节文件 + 隐藏流）。
+        let voice_name: String = voice_name(request.voice)
+            .unwrap_or("voice")
+            .chars()
+            .map(|ch| match ch {
+                ':' | '<' | '>' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+                other => other,
+            })
+            .collect();
         let file = out_dir.join(format!("speech-{voice_name}-{stamp}.wav"));
+
+        if family == Family::Piper {
+            let duration =
+                speak_with_piper(dirs, request, text, speed, &file, &cancel, &mut progress)?;
+            log::info!(
+                "tts: wrote {} ({duration:.2}s) in {:.1}s with local Chinese voice",
+                file.display(),
+                started.elapsed().as_secs_f32()
+            );
+            return Ok(SpeakResult {
+                path: file.to_string_lossy().into_owned(),
+                duration,
+            });
+        }
+        if family == Family::Cloud {
+            return Err("云端音色需要登录星籁账号后在界面里生成".to_owned());
+        }
+        let dir = model_dir(dirs, &request.model_id)?;
+        if !model_downloaded(dirs, &request.model_id) {
+            return Err(format!(
+                "model {} is not downloaded - see Settings > Speech",
+                request.model_id
+            ));
+        }
 
         if family == Family::System {
             let voice = system_voice().ok_or("this device has no voice of its own")?;
@@ -990,6 +1067,197 @@ fn reference_samples(dir: &Path, request: &SpeakRequest) -> Result<Vec<f32>, Str
         log::warn!("tts: the voice recording is near silent - the read will be in nobody's voice");
     }
     Ok(samples)
+}
+
+/// 本地中文音色：文字按句交给 Piper 逐段合成，再把 WAV 拼成一条。
+///
+/// 一段几百字，长文（2000 字以上）也能读；每段之间报一次进度，取消时把
+/// 已生成的半截删掉。样本率取 Piper 模型的输出（华言 medium 是 22.05kHz），
+/// 拼接要求各段同格式——同一音色、同一引擎，格式必然一样。
+fn speak_with_piper(
+    dirs: &AppDirs,
+    request: &SpeakRequest,
+    text: &str,
+    speed: f32,
+    file: &Path,
+    cancel: &std::sync::atomic::AtomicBool,
+    progress: &mut impl FnMut(JobStage),
+) -> Result<f64, String> {
+    let plugin = piper_plugin(dirs).ok_or_else(|| {
+        "本地中文音色需要先安装 Piper 插件：打开「AI」面板 › 本地插件 › 安装「Piper 本地配音」".to_owned()
+    })?;
+    let engine = concat_host::piper::Engine::load(&plugin)?;
+    let wanted = voice_name(request.voice)
+        .and_then(|name| name.strip_prefix("piper:"))
+        .ok_or_else(|| "这不是本地中文音色".to_owned())?;
+    let voice = engine
+        .voices
+        .iter()
+        .position(|voice| voice.id == wanted)
+        .ok_or_else(|| format!("Piper 插件里没有音色 {wanted}"))?;
+    let pieces = split_for_speech(text, 600);
+    if pieces.is_empty() {
+        return Err("没有可朗读的文字".to_owned());
+    }
+    progress(JobStage::Working {
+        done: 0.0,
+        next: 1.0 / pieces.len() as f32,
+    });
+    let mut written: Vec<PathBuf> = Vec::with_capacity(pieces.len());
+    let mut seconds = 0.0f64;
+    for (index, piece) in pieces.iter().enumerate() {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            for path in &written {
+                let _ = std::fs::remove_file(path);
+            }
+            return Err("cancelled".to_owned());
+        }
+        let part = file.with_extension(format!("part{index}.wav"));
+        let spoken = engine.speak(voice, piece, speed, &part, cancel)?;
+        seconds += spoken.seconds;
+        written.push(part);
+        progress(JobStage::Working {
+            done: (index + 1) as f32 / pieces.len() as f32,
+            next: ((index + 2) as f32 / pieces.len() as f32).min(1.0),
+        });
+    }
+    let joined = join_wavs(&written).map_err(|error| {
+        for path in &written {
+            let _ = std::fs::remove_file(path);
+        }
+        error
+    })?;
+    for path in &written {
+        let _ = std::fs::remove_file(path);
+    }
+    std::fs::write(file, &joined).map_err(|error| format!("写不进 {}：{error}", file.display()))?;
+    Ok(seconds)
+}
+
+/// 把长文切成语音引擎一次能读的小段：先按句号/问号/感叹号/分号/换行切，
+/// 再按逗号切，仍超长的硬切。每段不超过 `limit` 个字符（不是字节）。
+fn split_for_speech(text: &str, limit: usize) -> Vec<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Vec::new();
+    }
+    let mut sentences: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for ch in text.chars() {
+        current.push(ch);
+        if matches!(ch, '。' | '！' | '？' | '!' | '?' | '；' | ';' | '\n') {
+            sentences.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.trim().is_empty() {
+        sentences.push(current);
+    }
+    let mut pieces = Vec::new();
+    for sentence in sentences {
+        if sentence.chars().count() <= limit {
+            pieces.push(sentence.trim().to_owned());
+            continue;
+        }
+        // A long sentence: commas first, then a hard cut.
+        let mut current = String::new();
+        for ch in sentence.chars() {
+            current.push(ch);
+            if matches!(ch, '，' | ',' | '、' | '：' | ':') && current.chars().count() >= limit / 2 {
+                pieces.push(std::mem::take(&mut current).trim().to_owned());
+            } else if current.chars().count() >= limit {
+                pieces.push(std::mem::take(&mut current));
+            }
+        }
+        if !current.trim().is_empty() {
+            pieces.push(current.trim().to_owned());
+        }
+    }
+    pieces.into_iter().filter(|piece| !piece.is_empty()).collect()
+}
+
+/// 把几段 Piper 输出的 WAV 拼成一条：读每段的 PCM，写一个规范的 44 字节
+/// 头。要求各段同采样率、同声道数、16 位——同一音色不可能不同。
+fn join_wavs(parts: &[PathBuf]) -> Result<Vec<u8>, String> {
+    let mut rate = 0u32;
+    let mut channels = 0u16;
+    let mut pcm: Vec<u8> = Vec::new();
+    for part in parts {
+        let bytes = std::fs::read(part)
+            .map_err(|error| format!("读不回 {}：{error}", part.display()))?;
+        let (part_rate, part_channels, bits, data) = wav_pcm(&bytes)
+            .ok_or_else(|| format!("{} 不是 16 位 PCM WAV", part.display()))?;
+        if rate == 0 {
+            rate = part_rate;
+            channels = part_channels;
+        } else if rate != part_rate || channels != part_channels {
+            return Err("几段配音的采样率/声道不一致，没法拼接".to_owned());
+        }
+        if bits != 16 {
+            return Err("配音不是 16 位 PCM，没法拼接".to_owned());
+        }
+        pcm.extend_from_slice(&data);
+    }
+    if pcm.is_empty() {
+        return Err("没有生成出声音".to_owned());
+    }
+    Ok(wav_from_pcm16(rate, channels, &pcm))
+}
+
+/// 一个 RIFF/WAVE 文件的 (采样率, 声道, 位深, data 块)，只认 PCM。
+fn wav_pcm(bytes: &[u8]) -> Option<(u32, u16, u16, Vec<u8>)> {
+    if bytes.len() < 44 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return None;
+    }
+    let mut at = 12usize;
+    let mut rate = 0u32;
+    let mut channels = 0u16;
+    let mut bits = 0u16;
+    let mut data: Option<Vec<u8>> = None;
+    while at + 8 <= bytes.len() {
+        let id = &bytes[at..at + 4];
+        let size = u32::from_le_bytes([bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]])
+            as usize;
+        let start = at + 8;
+        let end = start.saturating_add(size).min(bytes.len());
+        match id {
+            b"fmt " if size >= 16 && end >= start + 16 => {
+                channels = u16::from_le_bytes([bytes[start + 2], bytes[start + 3]]);
+                rate = u32::from_le_bytes([
+                    bytes[start + 4],
+                    bytes[start + 5],
+                    bytes[start + 6],
+                    bytes[start + 7],
+                ]);
+                bits = u16::from_le_bytes([bytes[start + 14], bytes[start + 15]]);
+            }
+            b"data" => data = Some(bytes[start..end].to_vec()),
+            _ => {}
+        }
+        at = end + (size & 1);
+    }
+    Some((rate, channels, bits, data?))
+}
+
+/// 一个规范的 16 位 PCM WAV。
+fn wav_from_pcm16(rate: u32, channels: u16, data: &[u8]) -> Vec<u8> {
+    let block = channels.max(1) * 2;
+    let byte_rate = rate * u32::from(block);
+    let data_len = data.len() as u32;
+    let mut out = Vec::with_capacity(44 + data.len());
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_len).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&channels.max(1).to_le_bytes());
+    out.extend_from_slice(&rate.to_le_bytes());
+    out.extend_from_slice(&byte_rate.to_le_bytes());
+    out.extend_from_slice(&block.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_len.to_le_bytes());
+    out.extend_from_slice(data);
+    out
 }
 
 #[cfg(test)]

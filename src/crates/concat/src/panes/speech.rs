@@ -26,8 +26,10 @@ use concat_project::Command;
 use concat_project::commands::ClipPatch;
 use concat_project::model::{AppliedFilter, ClipKind, MediaItem, MediaOrigin};
 use concat_speech::JobStage;
+use concat_host::cloud_ai;
 use concat_speech::tts::{
-    CHATTERBOX_CLONE, Family, Reference, VoiceInfo, family_of, is_clone, voice_family,
+    CHATTERBOX_CLONE, CLOUD_ID, Family, PIPER_ID, Reference, VoiceInfo, family_of, is_clone,
+    piper_available, voice_family,
 };
 use slint::SharedString;
 
@@ -49,6 +51,9 @@ const DEFAULT_SYSTEM_VOICE: i32 = 3000;
 /// The speeds a voice can be asked for, as the rate multiplier the sheet's
 /// slider runs over; 1 is the voice's own.
 const SPEEDS: (f32, f32) = (0.5, 2.0);
+/// 一次生成的文字上限。本地中文音色会按句切段后逐段合成，所以 2000 字
+/// 也能一次读完；云端同理按段请求。超长时给一句友好的中文提示。
+const MAX_READ_CHARS: usize = 2000;
 
 /// A style a voice can be read in: a few of the audio effects Concat ships,
 /// laid on the speech clip once it lands, where they stay as ordinary
@@ -89,6 +94,46 @@ pub const STYLES: [VoiceStyle; 6] = [
     },
 ];
 
+/// 文字转语音弹窗里「模型」一行的一个来源：本地录音棚音色（英文）、
+/// 本地中文音色（Piper，离线）、云端中文音色（星籁 AI，需登录）。
+#[derive(Clone)]
+struct Source {
+    /// 送给合成器的模型 id：Chatterbox 的模型目录名、PIPER_ID 或 CLOUD_ID。
+    model_id: String,
+    family: Family,
+    label: String,
+    detail: String,
+    ready: bool,
+    megabytes: f32,
+}
+
+/// 云端音色的一行。平台 `/voice/list` 返回之前先用常见中文音色垫着，
+/// 登录后换成平台真实返回的列表。
+#[derive(Clone)]
+struct CloudRow {
+    pub id: String,
+    pub name: String,
+    pub detail: String,
+}
+
+/// 没有登录 / 列表还没取回来时展示的常见中文音色。只有名字与说明，点生成
+/// 会先要求登录；登录后换成平台返回的真实音色。
+const CLOUD_FALLBACK: &[(&str, &str)] = &[
+    ("女声 · 亲切自然", "温柔亲切，适合门店服务 / 家政"),
+    ("男声 · 稳重专业", "沉稳可信，适合检测 / 工程 / 汽车"),
+    ("女声 · 活泼种草", "轻快种草，适合美业 / 餐饮 / 电商"),
+    ("男声 · 青年", "年轻自然，适合知识科普"),
+    ("男声 · 成熟", "成熟稳重，适合房产 / 金融"),
+];
+
+/// 这段文字里有汉字：用它在中文/英文之间挑默认音色。
+fn has_chinese(text: &str) -> bool {
+    text.chars().any(|ch| {
+        matches!(ch as u32,
+            0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF)
+    })
+}
+
 /// What the Audio page's Voices shelf opens the sheet on.
 #[derive(Clone, Debug)]
 pub enum VoiceChoice {
@@ -105,7 +150,12 @@ pub enum VoiceChoice {
 fn reading_pace(family: Family) -> f32 {
     match family {
         Family::System => 0.1,
-        Family::Chatterbox => 1.6,
+        // 每秒约 5 个字（实测华言 82 字 15.4 秒 ≈ 5.3 字/秒）。
+        Family::Chatterbox => 4.0,
+        // 本地中文音色：82 字约 4.5 秒（含分段开销）。
+        Family::Piper => 1.1,
+        // 云端合成要上传、排队、下载。
+        Family::Cloud => 0.5,
     }
 }
 
@@ -166,6 +216,8 @@ pub enum SpeechMsg {
     /// The synthesiser's worker is done: the file it wrote, probed, or
     /// why not.
     Finished(Box<Result<MediaSummary, String>>),
+    /// 云端音色列表取回来了（或取失败）。
+    CloudVoices(Box<Result<cloud_ai::CloudVoices, String>>),
 }
 
 /// The Voices shelf's New voice sheet: a recording from the system's
@@ -251,6 +303,16 @@ pub struct SpeechPane {
     /// Each saved voice's picture, read once, by its id: the rows are
     /// published on every frame of playback.
     pictures: std::cell::RefCell<std::collections::HashMap<String, slint::Image>>,
+    /// 云端音色：平台返回的列表；没登录 / 没取到时为空，用 CLOUD_FALLBACK。
+    cloud_voices: Vec<CloudRow>,
+    /// 云端列表已经取过一次（成功或失败）。
+    cloud_loaded: bool,
+    /// 云端列表正在取。
+    cloud_loading: bool,
+    /// 云端列表取失败的原因，显示在提示行里。
+    cloud_error: String,
+    /// 用户手动换过模型：换过之后不再按输入语言自动切。
+    model_touched: bool,
 }
 
 impl SpeechPane {
@@ -267,18 +329,22 @@ impl SpeechPane {
                     .and_then(|id| studio.clip(&id))
                     .filter(|clip| clip.kind == ClipKind::Text)
                     .cloned();
-                let installed = installed(&studio.settings.voices);
-                let model = installed.iter().position(|model| model.active).unwrap_or(0);
-                let family = installed
+                let text = title
+                    .as_ref()
+                    .and_then(|clip| clip.text.as_ref().map(|text| text.content.clone()))
+                    .unwrap_or_default();
+                // 默认音色按语言走：中文（或空脚本）默认本地中文音色，
+                // 英文默认录音棚音色。
+                let sources = self.sources(studio);
+                let model = Self::language_source(&sources, &text).unwrap_or(0);
+                let family = sources
                     .get(model)
-                    .map(|model| family_of(&model.id))
+                    .map(|source| source.family)
                     .unwrap_or_default();
                 *self = SpeechPane {
                     open: true,
                     clip: title.as_ref().map(|clip| clip.id.clone()),
-                    text: title
-                        .and_then(|clip| clip.text.map(|text| text.content))
-                        .unwrap_or_default(),
+                    text,
                     voice: 0,
                     model,
                     family,
@@ -291,6 +357,10 @@ impl SpeechPane {
                     saved: std::mem::take(&mut self.saved),
                     new_voice: std::mem::take(&mut self.new_voice),
                     pictures: std::mem::take(&mut self.pictures),
+                    cloud_voices: std::mem::take(&mut self.cloud_voices),
+                    cloud_loaded: self.cloud_loaded,
+                    cloud_loading: self.cloud_loading,
+                    cloud_error: std::mem::take(&mut self.cloud_error),
                     ..SpeechPane::default()
                 };
                 // The voice chosen last time, if the model reads with it;
@@ -299,6 +369,7 @@ impl SpeechPane {
                 let wanted = studio.prefs.tts_voice;
                 self.voice = self.voice_row(wanted);
                 self.sample = self.default_sample(studio);
+                self.ensure_cloud_voices(studio);
             }
             SpeechMsg::OpenWith(choice) => {
                 if !self.running {
@@ -405,13 +476,69 @@ impl SpeechPane {
                 }
             }
             SpeechMsg::ClearStyle => self.style = None,
+            SpeechMsg::CloudVoices(result) => {
+                self.cloud_loading = false;
+                match *result {
+                    Ok(cloud) => {
+                        let rows: Vec<CloudRow> = cloud
+                            .voices
+                            .into_iter()
+                            .filter(|voice| voice.ready && !voice.cloned)
+                            .map(|voice| CloudRow {
+                                id: voice.id.clone(),
+                                name: if voice.name.trim().is_empty() {
+                                    voice.id.clone()
+                                } else {
+                                    voice.name.clone()
+                                },
+                                detail: if voice.desc.trim().is_empty() {
+                                    voice.engine.clone()
+                                } else {
+                                    format!("{} · {}", voice.desc.trim(), voice.engine)
+                                },
+                            })
+                            .collect();
+                        if !rows.is_empty() {
+                            self.cloud_voices = rows;
+                        }
+                        self.cloud_loaded = true;
+                        self.cloud_error.clear();
+                    }
+                    Err(error) => {
+                        cloud_ai::forget_if_expired(&error);
+                        self.cloud_error = error;
+                    }
+                }
+            }
             SpeechMsg::Close => self.open = false,
-            SpeechMsg::TextEdited(text) => self.text = text,
+            SpeechMsg::TextEdited(text) => {
+                self.text = text;
+                // 用户没亲手挑过模型时跟着输入语言换：中文默认本地中文
+                // 音色，英文默认录音棚音色；挑过之后按用户挑的来。
+                if !self.model_touched {
+                    let sources = self.sources(studio);
+                    if let Some(row) = Self::language_source(&sources, &self.text) {
+                        if sources[row].family != self.family {
+                            self.model = row;
+                            self.family = sources[row].family;
+                            self.voice = self.voice_row(None);
+                            self.saved_voice = None;
+                            self.use_sample = false;
+                            self.ensure_cloud_voices(studio);
+                        }
+                    }
+                }
+            }
             // The row past the named voices is "Clone from a sample…":
             // the sample switch, turned on from where a voice is chosen.
             // Past them, the saved voices, for a model that reads in one.
             SpeechMsg::VoiceChanged(index) => {
                 let index = index.max(0) as usize;
+                if self.family == Family::Cloud {
+                    let count = self.cloud_rows().len();
+                    self.voice = index.min(count.saturating_sub(1));
+                    return;
+                }
                 let named = self.offered().len();
                 let saved = self.saved_offered();
                 if index < named {
@@ -424,18 +551,22 @@ impl SpeechPane {
                 }
             }
             SpeechMsg::ModelChanged(index) => {
-                self.model = index.max(0) as usize;
+                let sources = self.sources(studio);
+                self.model = (index.max(0) as usize).min(sources.len().saturating_sub(1));
                 // Another model may read with other voices: the list is
                 // rebuilt, and the row points at a voice on it.
                 let chosen = self.offered().get(self.voice).map(|voice| voice.id);
-                self.family = installed(&studio.settings.voices)
+                self.family = sources
                     .get(self.model)
-                    .map(|model| family_of(&model.id))
+                    .map(|source| source.family)
                     .unwrap_or_default();
                 self.voice = self.voice_row(chosen);
+                self.model_touched = true;
+                self.use_sample = false;
                 if self.sample_voice().is_none() {
                     self.saved_voice = None;
                 }
+                self.ensure_cloud_voices(studio);
             }
             SpeechMsg::SpeedChanged(speed) => {
                 self.speed = if speed.is_finite() {
@@ -534,13 +665,34 @@ impl SpeechPane {
             self.message = t("speech.nothingToReadYet");
             return;
         }
-        let Some((model, megabytes)) = installed(&studio.settings.voices)
-            .get(self.model)
-            .map(|model| (model.id.clone(), model.megabytes))
-        else {
+        if text.chars().count() > MAX_READ_CHARS {
+            self.message = tf(
+                "speech.textTooLong",
+                &[&format!("{}", MAX_READ_CHARS), &format!("{}", text.chars().count())],
+            );
+            return;
+        }
+        // 云端音色是另一条链路：上传文字、平台合成、下载音频。它的结果也
+        // 走同一个 Finished，落地成时间线上的片段。
+        if self.family == Family::Cloud {
+            self.run_cloud(studio);
+            return;
+        }
+        let sources = self.sources(studio);
+        let Some(source) = sources.get(self.model).cloned() else {
             self.message = t("speech.downloadVoiceModelFirst");
             return;
         };
+        if !source.ready {
+            self.message = if source.family == Family::Piper {
+                t("speech.piperNotInstalled")
+            } else {
+                t("speech.downloadVoiceModelFirst")
+            };
+            return;
+        }
+        let model = source.model_id.clone();
+        let megabytes = source.megabytes;
         // A sample voice is a recording of the sheet's choosing, handed over
         // as the request's reference under the family's own id for one.
         // Otherwise the voice is one the model names.
@@ -548,7 +700,14 @@ impl SpeechPane {
             .saved_voice
             .filter(|_| !self.use_sample)
             .and_then(|row| self.saved.get(row));
-        let (voice, reference) = if let Some(saved) = saved {
+        let (voice, reference) = if self.family == Family::Piper {
+            // 本地中文音色没有样本/克隆：直接用它自己的普通话女声。
+            let Some(voice) = self.offered().get(self.voice).map(|speaker| speaker.id) else {
+                self.message = t("speech.noVoiceRead");
+                return;
+            };
+            (voice, None)
+        } else if let Some(saved) = saved {
             let Some(voice) = self.sample_voice() else {
                 self.message = t("speech.needsCloningModel");
                 return;
@@ -609,8 +768,9 @@ impl SpeechPane {
         // read with this model measured, or the model's usual pace.
         let chars = text.chars().count() as f32;
         let learned = self.timings.get(&model);
-        let loaded = studio.host.speech.loaded_model().as_deref() == Some(model.as_str());
-        let load = if loaded {
+        let loaded = self.family != Family::Piper
+            && studio.host.speech.loaded_model().as_deref() == Some(model.as_str());
+        let load = if loaded || self.family == Family::Piper {
             0.0
         } else {
             learned.load.unwrap_or(0.5 + megabytes / 150.0)
@@ -618,7 +778,10 @@ impl SpeechPane {
         let per_char = learned
             .per_unit
             .unwrap_or(reading_pace(self.family) / CHARS_PER_SECOND / self.rate());
-        let mut plan = vec![(Stage::Loading, load)];
+        let mut plan = Vec::new();
+        if self.family != Family::Piper {
+            plan.push((Stage::Loading, load));
+        }
         if self.family == Family::Chatterbox {
             plan.push((Stage::Reading, 0.3));
         }
@@ -654,13 +817,198 @@ impl SpeechPane {
         );
     }
 
+
+    /// 弹窗能选的音色来源，按「本地录音棚音色 → 本地中文音色 → 云端音色」
+    /// 排。Chatterbox 只有在模型已下载时出现；Piper 插件没装时也留一行，
+    /// 选中后会告诉人去 AI 面板安装。
+    fn sources(&self, studio: &Studio) -> Vec<Source> {
+        let mut out = Vec::new();
+        for model in installed(&studio.settings.voices) {
+            match family_of(&model.id) {
+                Family::Chatterbox => out.push(Source {
+                    model_id: model.id.clone(),
+                    family: Family::Chatterbox,
+                    label: t("speech.modelChatterbox"),
+                    detail: t("speech.modelChatterboxDetail"),
+                    ready: true,
+                    megabytes: model.megabytes,
+                }),
+                Family::System => out.push(Source {
+                    model_id: model.id.clone(),
+                    family: Family::System,
+                    label: t("speech.modelSystem"),
+                    detail: t("speech.modelSystemDetail"),
+                    ready: true,
+                    megabytes: model.megabytes,
+                }),
+                Family::Piper | Family::Cloud => {}
+            }
+        }
+        let piper_ready = piper_available(&studio.host.dirs);
+        out.push(Source {
+            model_id: PIPER_ID.to_owned(),
+            family: Family::Piper,
+            label: t("speech.modelPiper"),
+            detail: if piper_ready {
+                t("speech.modelPiperDetail")
+            } else {
+                t("speech.modelPiperMissing")
+            },
+            ready: piper_ready,
+            megabytes: 0.0,
+        });
+        out.push(Source {
+            model_id: CLOUD_ID.to_owned(),
+            family: Family::Cloud,
+            label: t("speech.modelCloud"),
+            detail: if studio.account.is_some() {
+                t("speech.modelCloudDetail")
+            } else {
+                t("speech.modelCloudLogin")
+            },
+            ready: studio.account.is_some(),
+            megabytes: 0.0,
+        });
+        out
+    }
+
+    /// 按语言挑默认来源：中文或空脚本 → 本地中文音色；英文 → 录音棚音色。
+    /// 首选没就绪时退到另一个；云端放最后。
+    fn language_source(sources: &[Source], text: &str) -> Option<usize> {
+        let chinese = text.is_empty() || has_chinese(text);
+        let pick = |family: Family| {
+            sources
+                .iter()
+                .position(|source| source.family == family && source.ready)
+        };
+        if chinese {
+            pick(Family::Piper)
+                .or_else(|| pick(Family::Chatterbox))
+                .or_else(|| pick(Family::System))
+                .or_else(|| pick(Family::Cloud))
+                .or_else(|| sources.iter().position(|_| true))
+        } else {
+            pick(Family::Chatterbox)
+                .or_else(|| pick(Family::Piper))
+                .or_else(|| pick(Family::System))
+                .or_else(|| pick(Family::Cloud))
+                .or_else(|| sources.iter().position(|_| true))
+        }
+    }
+
+    /// 云端音色的行：平台列表取到了就用它，没有就先用常见中文音色垫着，
+    /// 并注明要登录。
+    fn cloud_rows(&self) -> Vec<CloudRow> {
+        if self.cloud_voices.is_empty() {
+            CLOUD_FALLBACK
+                .iter()
+                .map(|(name, detail)| CloudRow {
+                    id: String::new(),
+                    name: (*name).to_owned(),
+                    detail: format!("{detail} · {}", t("speech.cloudNeedsLogin")),
+                })
+                .collect()
+        } else {
+            self.cloud_voices.clone()
+        }
+    }
+
+    /// 登录着就把云端音色列表取回来，一次。没登录就等用户登录后再取。
+    fn ensure_cloud_voices(&mut self, studio: &Studio) {
+        if self.cloud_loaded || self.cloud_loading {
+            return;
+        }
+        let Some(account) = studio.account.as_ref() else {
+            return;
+        };
+        if account.token.trim().is_empty() {
+            return;
+        }
+        self.cloud_loading = true;
+        crate::host::spawn(
+            move || cloud_ai::token().and_then(|token| cloud_ai::list_voices(&token)),
+            |studio, _, _, result| {
+                studio.handle(Msg::Speech(SpeechMsg::CloudVoices(Box::new(result))));
+            },
+        );
+    }
+
+    /// 云端配音：平台合成 mp3 → 下载进工程的 `ai_voice/` → 走同一个
+    /// Finished 落地成媒体与片段。admin 免扣由平台按账号处理，桌面端只展示
+    /// 平台返回的提示。
+    fn run_cloud(&mut self, studio: &mut Studio) {
+        let text = self.text.trim().to_owned();
+        if self.family != Family::Cloud {
+            return;
+        }
+        let Ok(_) = cloud_ai::token() else {
+            self.message = t("speech.cloudLoginFirst");
+            return;
+        };
+        let rows = self.cloud_rows();
+        let Some(row) = rows.get(self.voice.min(rows.len().saturating_sub(1))).cloned() else {
+            self.message = t("speech.cloudNoVoice");
+            return;
+        };
+        if row.id.trim().is_empty() {
+            self.message = t("speech.cloudLoginFirst");
+            return;
+        }
+        let Some(project) = studio
+            .session
+            .as_ref()
+            .map(|session| session.path().to_owned())
+        else {
+            return;
+        };
+        self.landing = self
+            .clip
+            .as_ref()
+            .and_then(|id| studio.clip(id))
+            .map(|clip| clip.start)
+            .unwrap_or(f64::from(studio.playhead));
+        let chars = text.chars().count() as f32;
+        self.pace = Pace::new(vec![(Stage::Working, chars / CHARS_PER_SECOND * 0.6)]);
+        self.reading = Some((format!("cloud:{}", row.id), chars));
+        self.running = true;
+        self.message.clear();
+        let rate = self.speed;
+        let voice_id = row.id.clone();
+        let epoch = crate::host::project_epoch();
+        spawn_in_project(
+            move || -> Result<MediaSummary, String> {
+                let token = cloud_ai::token()?;
+                let tts = cloud_ai::tts(&token, &text, &voice_id, rate)?;
+                let dir = std::path::PathBuf::from(&project).join("ai_voice");
+                std::fs::create_dir_all(&dir)
+                    .map_err(|error| format!("建不了配音目录：{error}"))?;
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|elapsed| elapsed.as_millis())
+                    .unwrap_or(0);
+                let out = dir.join(format!("cloud-voice-{stamp}.mp3"));
+                let no_cancel = std::sync::atomic::AtomicBool::new(false);
+                concat_host::direct::download(&tts.url, &out, &mut |_, _| {}, &no_cancel)?;
+                media::probe(&out.to_string_lossy())
+            },
+            move |studio, _, _, result| {
+                let _ = epoch;
+                studio.handle(Msg::Speech(SpeechMsg::Finished(Box::new(result))))
+            },
+        );
+    }
+
     /// What the sheet's script would take to say, for the line under it.
     fn estimate(&self, studio: &Studio) -> String {
         let chars = self.text.trim().chars().count();
         if chars == 0 {
             return t("speech.nothingToReadYet");
         }
-        let seconds = chars as f32 / CHARS_PER_SECOND / self.rate();
+        let spoken_per_second = match self.family {
+            Family::System => 8.0,
+            Family::Chatterbox | Family::Piper | Family::Cloud => 5.0,
+        };
+        let seconds = chars as f32 / spoken_per_second / self.rate();
         let whole = seconds.round() as i32;
         let voice = if self.use_sample {
             self.sample_media(studio)
@@ -668,6 +1016,11 @@ impl SpeechPane {
                 .unwrap_or_default()
         } else if let Some(saved) = self.saved_voice.and_then(|row| self.saved.get(row)) {
             saved.name.clone()
+        } else if self.family == Family::Cloud {
+            self.cloud_rows()
+                .get(self.voice)
+                .map(|row| row.name.clone())
+                .unwrap_or_default()
         } else {
             self.offered()
                 .get(self.voice)
@@ -704,6 +1057,7 @@ impl SpeechPane {
         match self.family {
             Family::System => None,
             Family::Chatterbox => Some(CHATTERBOX_CLONE),
+            Family::Piper | Family::Cloud => None,
         }
     }
 
@@ -762,6 +1116,8 @@ impl SpeechPane {
         let default = match self.family {
             Family::System => DEFAULT_SYSTEM_VOICE,
             Family::Chatterbox => DEFAULT_CHATTERBOX_VOICE,
+            Family::Piper => 4000,
+            Family::Cloud => 0,
         };
         wanted
             .and_then(|id| offered.iter().position(|voice| voice.id == id))
@@ -788,6 +1144,13 @@ impl SpeechPane {
     /// saved voices, and last, for a model that reads in a recording, the
     /// row that clones one.
     pub fn speaker_rows(&self) -> Vec<SharedString> {
+        if self.family == Family::Cloud {
+            return self
+                .cloud_rows()
+                .iter()
+                .map(|row| row.name.as_str().into())
+                .collect();
+        }
         self.offered()
             .iter()
             .map(|speaker| voice_label(&speaker.name).0.into())
@@ -803,6 +1166,13 @@ impl SpeechPane {
     /// The voice list's second lines: each voice's accent and gender, or
     /// where a Pocket voice comes from.
     pub fn speaker_detail_rows(&self) -> Vec<SharedString> {
+        if self.family == Family::Cloud {
+            return self
+                .cloud_rows()
+                .iter()
+                .map(|row| row.detail.as_str().into())
+                .collect();
+        }
         self.offered()
             .iter()
             .map(|speaker| voice_label(&speaker.name).1.into())
@@ -822,6 +1192,20 @@ impl SpeechPane {
     /// the first letter of its name in the colour its name picks; and a
     /// plain mark for the clone row, which is nobody yet.
     pub fn speaker_avatar_rows(&self) -> Vec<crate::ui::AvatarData> {
+        if self.family == Family::Cloud {
+            return self
+                .cloud_rows()
+                .iter()
+                .map(|row| {
+                    let letter = avatar_letter(&row.name);
+                    crate::ui::AvatarData {
+                        hue: avatar_hue(&row.name),
+                        letter: letter.into(),
+                        ..Default::default()
+                    }
+                })
+                .collect();
+        }
         self.offered()
             .iter()
             .map(|speaker| {
@@ -856,16 +1240,20 @@ impl SpeechPane {
         self.sample_voice().is_some()
     }
 
-    /// The model list's second lines: what each model is for, in a few
-    /// words, since which one is chosen decides everything under it.
-    pub fn model_detail_rows(&self, studio: &Studio) -> Vec<SharedString> {
-        installed(&studio.settings.voices)
+    /// The model list: the voice sources this dialog offers.
+    pub fn model_rows(&self, studio: &Studio) -> Vec<SharedString> {
+        self.sources(studio)
             .iter()
-            .map(|model| match family_of(&model.id) {
-                Family::System => t("speech.builtInSpeakersFast"),
-                Family::Chatterbox => t("speech.studioVoiceSlow"),
-            })
-            .map(SharedString::from)
+            .map(|source| SharedString::from(source.label.as_str()))
+            .collect()
+    }
+
+    /// The model list's second lines: what each source is for, and whether
+    /// it needs the network or the login.
+    pub fn model_detail_rows(&self, studio: &Studio) -> Vec<SharedString> {
+        self.sources(studio)
+            .iter()
+            .map(|source| SharedString::from(source.detail.as_str()))
             .collect()
     }
 
@@ -908,14 +1296,44 @@ impl SpeechPane {
         let sample = self.sample_media(studio);
         let length = sample.and_then(|item| item.duration).unwrap_or(0.0);
         let named = self.offered().len();
+        let cloud = self.cloud_rows().len();
+        let sources = self.sources(studio);
+        let ready = sources.get(self.model).is_some_and(|source| source.ready);
+        let cloud_note = if self.family == Family::Cloud {
+            let mut note = if studio.account.is_some() {
+                t("speech.cloudNote")
+            } else {
+                t("speech.cloudLoginNote")
+            };
+            if !self.cloud_error.is_empty() {
+                note.push_str("（");
+                note.push_str(&self.cloud_error);
+                note.push('）');
+            }
+            note
+        } else {
+            String::new()
+        };
+        let local_note = if self.family == Family::Piper {
+            t("speech.localNote")
+        } else {
+            String::new()
+        };
         SpeechSheetData {
             open: self.open,
             text: self.text.as_str().into(),
-            voice: self
-                .saved_voice
-                .filter(|row| *row < self.saved_offered())
-                .map_or(self.voice, |row| named + row) as i32,
-            voice_count: (named + self.saved_offered()) as i32,
+            voice: if self.family == Family::Cloud {
+                self.voice.min(cloud.saturating_sub(1)) as i32
+            } else {
+                self.saved_voice
+                    .filter(|row| *row < self.saved_offered())
+                    .map_or(self.voice, |row| named + row) as i32
+            },
+            voice_count: if self.family == Family::Cloud {
+                cloud as i32
+            } else {
+                (named + self.saved_offered()) as i32
+            },
             style: self
                 .style
                 .and_then(|row| STYLES.get(row))
@@ -934,7 +1352,9 @@ impl SpeechPane {
             model: self.model as i32,
             family: match self.family {
                 Family::System => 0,
+                Family::Piper => 1,
                 Family::Chatterbox => 2,
+                Family::Cloud => 3,
             },
             speed: self.speed,
             samples_offered: self.sample_voice().is_some(),
@@ -957,9 +1377,11 @@ impl SpeechPane {
                 _ => t("speech.loadingTheModel"),
             }
             .into(),
-            ready: !installed(&studio.settings.voices).is_empty(),
+            ready,
             estimate: self.estimate(studio).into(),
             message: self.message.as_str().into(),
+            cloud_note: cloud_note.into(),
+            local_note: local_note.into(),
         }
     }
 }
@@ -1009,45 +1431,33 @@ impl SpeechPane {
 
     /// The sheet, just opened, on what the Audio page's card names.
     fn choose(&mut self, choice: VoiceChoice, studio: &Studio) {
-        let models = installed(&studio.settings.voices);
-        let pick_model = |pane: &mut SpeechPane, row: usize| {
-            pane.model = row;
-            pane.family = models
-                .get(row)
-                .map(|model| family_of(&model.id))
-                .unwrap_or_default();
+        let sources = self.sources(studio);
+        let pick_family = |pane: &mut SpeechPane, family: Family| -> bool {
+            match sources.iter().position(|source| source.family == family) {
+                Some(row) => {
+                    pane.model = row;
+                    pane.family = family;
+                    pane.model_touched = true;
+                    true
+                }
+                None => false,
+            }
         };
         match choice {
             VoiceChoice::Builtin(id) => {
                 let Some(family) = voice_family(id) else {
                     return;
                 };
-                if self.family != family {
-                    match models
-                        .iter()
-                        .position(|model| family_of(&model.id) == family)
-                    {
-                        Some(row) => pick_model(self, row),
-                        None => {
-                            self.message = t("speech.downloadModelForVoice");
-                            return;
-                        }
-                    }
+                if self.family != family && !pick_family(self, family) {
+                    self.message = t("speech.downloadModelForVoice");
+                    return;
                 }
                 self.voice = self.voice_row(Some(id));
             }
             VoiceChoice::Saved(id) => {
-                if self.sample_voice().is_none() {
-                    match models
-                        .iter()
-                        .position(|model| family_of(&model.id) == Family::Chatterbox)
-                    {
-                        Some(row) => pick_model(self, row),
-                        None => {
-                            self.message = t("speech.needsCloningModel");
-                            return;
-                        }
-                    }
+                if self.sample_voice().is_none() && !pick_family(self, Family::Chatterbox) {
+                    self.message = t("speech.needsCloningModel");
+                    return;
                 }
                 self.saved_voice = self.saved.iter().position(|voice| voice.id == id);
                 self.use_sample = false;
@@ -1224,6 +1634,29 @@ fn voice_label(name: &str) -> (String, String) {
             t("speech.readsVoiceHeardClip"),
         );
     }
+    // 本地中文音色：华言（普通话女声），模型 id 是 `piper:<plugin id>`。
+    if let Some(rest) = name.strip_prefix("piper:") {
+        return match rest {
+            "zh_CN-huayan-x_low" => (
+                t("speech.voiceHuayanLow"),
+                t("speech.localLowDetail"),
+            ),
+            _ => (
+                t("speech.voiceHuayanMedium"),
+                t("speech.localMediumDetail"),
+            ),
+        };
+    }
+    // 录音棚音色的内置嗓音：英文名给出中文名，说明里注明是英文。
+    match name {
+        "af_elizabeth" => {
+            return (t("speech.voiceElizabeth"), t("speech.englishFemale"))
+        }
+        "am_mark" => return (t("speech.voiceMark"), t("speech.englishMale")),
+        "bf_ruth" => return (t("speech.voiceRuth"), t("speech.englishFemale")),
+        "xm_bob" => return (t("speech.voiceBob"), t("speech.englishMale")),
+        _ => {}
+    }
     let (prefix, rest) = name.split_once('_').unwrap_or(("", name));
     let mut chars = rest.chars();
     let title = match chars.next() {
@@ -1255,8 +1688,12 @@ fn voice_label(name: &str) -> (String, String) {
     (title, detail)
 }
 
-/// The letter a voice's avatar shows: the first of its first name.
+/// The letter a voice's avatar shows: the first of its first name. A local
+/// Chinese voice wears its own family name instead of the plugin id's `p`.
 fn avatar_letter(name: &str) -> String {
+    if name.starts_with("piper:") {
+        return "华".to_owned();
+    }
     name.split_whitespace()
         .next()
         .and_then(|first| first.chars().next())

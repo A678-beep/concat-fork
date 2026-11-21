@@ -2120,14 +2120,7 @@ impl Studio {
         set_changed(app.get_captions(), captions, same_captions, |data| {
             app.set_captions(data)
         });
-        let voices = installed(&self.settings.voices);
-        sync(
-            &models.speech_models,
-            voices
-                .iter()
-                .map(|model| SharedString::from(model.name.as_str()))
-                .collect(),
-        );
+        sync(&models.speech_models, self.speech.model_rows(self));
         sync(
             &models.speech_model_details,
             self.speech.model_detail_rows(self),

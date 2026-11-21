@@ -77,6 +77,10 @@ export struct SpeechSheetData {
     estimate: string,
     /// Why the last run failed, when it did.
     message: string,
+    /// 云端音色要登录、会消耗积分：云端音色选中时的提示行。
+    cloud-note: string,
+    /// 本地中文音色完全离线、文字不出本机：本地中文音色选中时的提示行。
+    local-note: string,
     /// The style the speech lands in, by name, or empty for none: its
     /// effects go on the clip.
     style: string,
@@ -433,6 +437,20 @@ export component SpeechDialog inherits Modal {
                     enabled: root.voices.length > 0;
                     changed(index) => { root.voice-changed(index); }
                 }
+            }
+
+            if root.data.local-note != "": Text {
+                text: root.data.local-note;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+
+            if root.data.cloud-note != "": Text {
+                text: root.data.cloud-note;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
             }
 
             // A style from the Audio page: effects the speech lands with,

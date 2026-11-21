@@ -992,10 +992,23 @@ impl SettingsPane {
                 .map(|model| {
                     let (fetched, unpacking) =
                         downloading.get(&model.id).copied().unwrap_or((None, false));
+                    let (name, note) = match concat_speech::tts::family_of(&model.id) {
+                        concat_speech::tts::Family::Chatterbox => (
+                            t("speech.modelChatterbox"),
+                            t("speech.modelChatterboxDetail"),
+                        ),
+                        concat_speech::tts::Family::System => (
+                            t("speech.modelSystem"),
+                            t("speech.modelSystemDetail"),
+                        ),
+                        concat_speech::tts::Family::Piper | concat_speech::tts::Family::Cloud => {
+                            (model.label.clone(), model.blurb.clone())
+                        }
+                    };
                     ModelState {
                         id: model.id.clone(),
-                        name: model.label.clone(),
-                        note: model.blurb.clone(),
+                        name,
+                        note,
                         megabytes: model.size_bytes as f32 / 1_000_000.0,
                         accuracy: if model.id.contains("int8") { 4 } else { 5 },
                         installed: model.downloaded,
