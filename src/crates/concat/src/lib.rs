@@ -2484,6 +2484,13 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     app.on_export_quality_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Export(ExportMsg::QualityChanged(index)));
     }));
+    // 一键多版本矩阵：开关与版本数；真正的导出还是走同一个 Start。
+    app.on_export_matrix_toggled(on_window!(|state, on: bool| {
+        state.handle(Msg::Export(ExportMsg::MatrixToggled(on)));
+    }));
+    app.on_export_matrix_count_changed(on_window!(|state, delta: i32| {
+        state.handle(Msg::Export(ExportMsg::MatrixCountChanged(delta)));
+    }));
     app.on_export_cancel(on_window!(|state| {
         state.handle(Msg::Export(ExportMsg::Cancel));
     }));

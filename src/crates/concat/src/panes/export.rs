@@ -70,6 +70,26 @@ pub enum ExportMsg {
     /// The phone has moved the file to where it shows it - the path under
     /// the phone's storage - or could not, and the file is where it was.
     Published(Result<String, String>),
+    /// 一键多版本矩阵的开关：开时「导出」按钮一次导出 N 个变体。
+    MatrixToggled(bool),
+    /// 矩阵的版本数量加减：`delta` 是 +1 或 -1，数量收在 2..=5。
+    MatrixCountChanged(i32),
+    /// 矩阵里一个版本的进度：第 `index` 个（0 起）、共 `count` 个，
+    /// `fraction` 是这个版本自己的进度（0..=1），`stage` 是中文阶段名。
+    MatrixProgress {
+        /// 第几个版本，0 起。
+        index: usize,
+        /// 一共几个版本。
+        count: usize,
+        /// 版本的短名，如「钩子版」。
+        tag: String,
+        /// 这个版本自己的进度。
+        fraction: f32,
+        /// 阶段名，已翻译。
+        stage: String,
+    },
+    /// 矩阵跑完：按顺序写出的文件，或第一个失败的原因。
+    MatrixFinished(Result<Vec<String>, String>),
 }
 
 /// The export sheet's state.
@@ -105,6 +125,12 @@ pub struct ExportPane {
     last_speed: Option<f64>,
     /// The timeline's length when the render started, for that rate.
     started_media: f64,
+    /// 一键多版本矩阵：开时一次导出 N 个变体；关时是普通的单文件导出。
+    pub matrix: bool,
+    /// 矩阵要几个版本，收在 2..=5。
+    pub matrix_count: usize,
+    /// 矩阵写出的成片，按版本顺序；普通导出时为空。结果区用它列出文件。
+    matrix_outputs: Vec<String>,
 }
 
 impl Default for ExportPane {
@@ -136,6 +162,9 @@ impl Default for ExportPane {
             started_at: None,
             last_speed: None,
             started_media: 0.0,
+            matrix: false,
+            matrix_count: 3,
+            matrix_outputs: Vec::new(),
         }
     }
 }
@@ -191,6 +220,7 @@ impl ExportPane {
             ExportMsg::Again => {
                 self.phase = ExportPhase::Idle;
                 self.progress = 0.0;
+                self.matrix_outputs.clear();
             }
             // The picker runs with the studio unborrowed and answers as a
             // message of its own; see `host::after_dialog`.
@@ -214,8 +244,20 @@ impl ExportPane {
                     studio.notify(&i18n::tf("export.couldNotShowFile", &[&error]), true);
                 }
             }
-            ExportMsg::Start => self.start(studio),
-            ExportMsg::Overwrite => self.begin(studio, true),
+            ExportMsg::Start => {
+                if self.matrix {
+                    self.start_matrix(studio);
+                } else {
+                    self.start(studio);
+                }
+            }
+            ExportMsg::Overwrite => {
+                if self.matrix {
+                    self.begin_matrix(studio, true);
+                } else {
+                    self.begin(studio, true);
+                }
+            }
             ExportMsg::Cancel => {
                 studio.host.exporter.cancel();
                 self.phase = ExportPhase::Idle;
@@ -259,6 +301,64 @@ impl ExportPane {
             ExportMsg::Published(Err(error)) => {
                 let folder = platform::published_folder().unwrap_or_default();
                 studio.notify(&tf("export.couldNotPublish", &[&folder, &error]), true);
+            }
+            ExportMsg::MatrixToggled(on) => {
+                if self.phase == ExportPhase::Running {
+                    return;
+                }
+                self.matrix = on;
+                log::info!("export: 一键多版本矩阵 {}", if on { "开" } else { "关" });
+            }
+            ExportMsg::MatrixCountChanged(delta) => {
+                if self.phase == ExportPhase::Running {
+                    return;
+                }
+                let next = self.matrix_count as i32 + delta;
+                self.matrix_count = next.clamp(2, MATRIX_VARIANTS.len() as i32) as usize;
+            }
+            ExportMsg::MatrixProgress {
+                index,
+                count,
+                tag,
+                fraction,
+                stage,
+            } => {
+                if self.phase == ExportPhase::Running && count > 0 {
+                    // 一个版本的进度映射到整批进度里；同一版本内阶段切换
+                    // 会让引擎的帧数从头算，所以取已经到过的最大值，进度
+                    // 条不会倒着走。
+                    let wrapped = (index as f32 + fraction.clamp(0.0, 1.0)) / count as f32;
+                    self.progress = wrapped.clamp(self.progress, 1.0);
+                    self.stage = tf(
+                        "export.matrixProgress",
+                        &[
+                            &format!("{}", index + 1),
+                            &format!("{count}"),
+                            &tag,
+                            &stage,
+                        ],
+                    );
+                }
+            }
+            ExportMsg::MatrixFinished(Ok(written)) => {
+                if let Some(started) = self.started_at {
+                    let wall = started.elapsed().as_secs_f64().max(0.1);
+                    self.last_speed = Some(self.started_media.max(0.1) / wall);
+                }
+                self.phase = ExportPhase::Done;
+                self.progress = 1.0;
+                self.written = written.last().cloned().unwrap_or_default();
+                self.matrix_outputs = written;
+                studio.notify(&t("export.matrixFinished"), false);
+            }
+            ExportMsg::MatrixFinished(Err(error)) => {
+                if self.phase == ExportPhase::Idle {
+                    // 取消：面板已经退回空闲了。
+                    return;
+                }
+                self.phase = ExportPhase::Failed;
+                self.message = error.clone();
+                studio.notify(&tf("export.exportFailed", &[&error]), true);
             }
             ExportMsg::Finished(Err(error)) => {
                 if self.phase == ExportPhase::Idle {
@@ -361,6 +461,56 @@ impl ExportPane {
         let ladder = Self::ladder(studio);
         let short = ladder[self.resolution.min(ladder.len() - 1)];
         Self::frame_for(studio, short)
+    }
+
+    /// 矩阵要几个版本：收在 2..=5，默认 3。
+    fn matrix_count(&self) -> usize {
+        self.matrix_count.clamp(2, MATRIX_VARIANTS.len())
+    }
+
+    /// 导出面板上「一键多版本」的计划：每行一个版本，平台、版本名、
+    /// 真实秒数、开头剪掉多少、字幕样式。写出来是给人在点导出之前
+    /// 先看清楚的，不是日志。
+    fn matrix_plan(&self, studio: &Studio) -> String {
+        if !self.matrix {
+            return String::new();
+        }
+        let whole = f64::from(studio.duration()).max(0.0);
+        MATRIX_VARIANTS[..self.matrix_count()]
+            .iter()
+            .enumerate()
+            .map(|(index, variant)| {
+                let (skip, seconds) = variant_seconds(variant, whole);
+                tf(
+                    "export.matrixPlanLine",
+                    &[
+                        &format!("{}", index + 1),
+                        &t(variant.platform),
+                        &t(variant.tag),
+                        &format!("{seconds:.1}"),
+                        &format!("{skip:.1}"),
+                        &matrix_look_name(variant.look),
+                    ],
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// 矩阵导完之后的结果行：一句「已导出 N 个版本」，下面按顺序列出
+    /// 文件名；不是矩阵、还没导完就是空串。
+    fn matrix_done(&self) -> String {
+        if !self.matrix || self.phase != ExportPhase::Done || self.matrix_outputs.is_empty() {
+            return String::new();
+        }
+        let mut lines = vec![tf(
+            "export.matrixDone",
+            &[&format!("{}", self.matrix_outputs.len())],
+        )];
+        for path in &self.matrix_outputs {
+            lines.push(format!("· {}", crate::studio::file_name_of(path)));
+        }
+        lines.join("\n")
     }
 
     /// The bitrate the file is written at, in kbps: the typed one, or the
@@ -466,6 +616,220 @@ impl ExportPane {
     /// file is already there; its reports come back as messages.
     fn start(&mut self, studio: &mut Studio) {
         self.begin(studio, false);
+    }
+
+    /// 一键多版本矩阵：从同一个工程一次导出 N 个变体。
+    ///
+    /// 每个变体都是工程的一份副本：换开头（剪掉 `skip` 秒）、截时长到
+    /// 15/30/60 秒上限、换字幕样式（黄字黑边 / 原样 / 白字底板）。文件名
+    /// 按「平台 + 版本名 + 真实秒数」自动生成，例如
+    /// `宣传片-抖音-钩子版-15s.mp4`。用户的工程、撤销栈、工程文件都不动。
+    fn start_matrix(&mut self, studio: &mut Studio) {
+        self.begin_matrix(studio, false);
+    }
+
+    /// [`ExportPane::start_matrix`]，`overwrite` 同 [`ExportPane::begin`]：
+    /// 同名文件已有的时候，等确认页回来再覆盖。
+    fn begin_matrix(&mut self, studio: &mut Studio, overwrite: bool) {
+        if studio.session.is_none() {
+            return;
+        }
+        if studio.timeline().clips.is_empty() {
+            self.phase = ExportPhase::Failed;
+            self.message = t("export.nothingTimelineExport");
+            return;
+        }
+        // 名字照旧要是一个文件的名字；矩阵只在它后面接平台与版本。
+        let Some(name) = file_name(&self.name) else {
+            self.phase = ExportPhase::Failed;
+            self.message = t("export.nameNeedsToBeAFileName");
+            return;
+        };
+        let whole = f64::from(studio.duration());
+        if whole < 1.0 {
+            self.phase = ExportPhase::Failed;
+            self.message = t("export.matrixTooShort");
+            return;
+        }
+        let container = self.codec(studio).container();
+        let folder = self.folder.trim_end_matches('/').to_owned();
+        let count = self.matrix_count();
+        let variants: Vec<Variant> = MATRIX_VARIANTS[..count].to_vec();
+        let outputs: Vec<String> = variants
+            .iter()
+            .map(|variant| {
+                let (_, seconds) = variant_seconds(variant, whole);
+                matrix_output(&folder, &name, variant, seconds, container)
+            })
+            .collect();
+        // 同名文件已有：和普通导出一样，先把确认页交给用户。
+        if !overwrite
+            && let Some(existing) = outputs
+                .iter()
+                .find(|path| std::path::Path::new(path.as_str()).exists())
+        {
+            studio.confirm = Some(crate::studio::Confirm::ReplaceExport {
+                path: existing.clone(),
+            });
+            return;
+        }
+        let job = match studio.host.exporter.begin() {
+            Ok(job) => job,
+            Err(error) => {
+                self.phase = ExportPhase::Failed;
+                self.message = error;
+                return;
+            }
+        };
+        // 导出线程要的东西：一份工程副本、它的文件夹、帧与帧率、字幕
+        // 绘制器与预览监视器。都取完就把 session 的借用放下。
+        let (mut project, project_dir) = {
+            let Some(session) = studio.session.as_ref() else {
+                return;
+            };
+            (
+                session.project().clone(),
+                std::path::PathBuf::from(session.path()),
+            )
+        };
+        // AI 角标与水印照旧只进导出副本；每个变体都从同一份干净副本变出来。
+        if studio.prefs.ai_badge.unwrap_or(false) {
+            add_ai_badge(&mut project, whole);
+        }
+        let watermark = watermark_overlay(studio);
+        let (width, height) = self.size(studio);
+        let (num, den) = self.rate(studio);
+        let titles = std::sync::Arc::clone(&studio.host.titles);
+        let monitor = studio.host.monitor.clone();
+        let spec = ExportSpec {
+            // 每版写出前才填；这里只要一份公共设置。
+            output: String::new(),
+            crf: QUALITY_CRF[self.quality],
+            preset: QUALITY_PRESETS[self.quality].into(),
+            codec: self.codec(studio),
+            ten_bit: self.deep(studio),
+            rate_mode: concat_media::RateMode::Average,
+            bitrate_kbps: self.target_kbps(studio),
+            color_range: ColorRange::Limited,
+            hdr: self.hdr(studio),
+        };
+        let total_media: f64 = variants
+            .iter()
+            .map(|variant| variant_seconds(variant, whole).1)
+            .sum();
+        studio.pause();
+        self.started_media = total_media.max(0.1);
+        self.phase = ExportPhase::Running;
+        self.progress = 0.0;
+        self.stage = t("export.preparing");
+        self.message.clear();
+        self.written.clear();
+        self.matrix_outputs.clear();
+        self.started_at = Some(std::time::Instant::now());
+        log::info!("export: 一键多版本矩阵 · {count} 版 · 工程 {whole:.2} 秒");
+
+        spawn(
+            move || {
+                let job = job;
+                let cancel = job.cancel_flag();
+                let stopped = || cancel.load(std::sync::atomic::Ordering::Relaxed);
+                // 预览用的解码器先关掉，给导出自己的解码器与编码器让路；
+                // 与单文件导出同一套做法。
+                let closed = concat_host::scheduler()
+                    .pool()
+                    .close_idle(std::time::Duration::ZERO);
+                if closed > 0 {
+                    log::debug!("export: closed {closed} idle preview decoder(s) before matrix");
+                }
+                let mut written = Vec::with_capacity(count);
+                for (index, variant) in variants.iter().enumerate() {
+                    if stopped() {
+                        return Err("export cancelled".to_owned());
+                    }
+                    let (_, seconds) = variant_seconds(variant, whole);
+                    let output = matrix_output(&folder, &name, variant, seconds, container);
+                    let tag = t(variant.tag);
+                    // 标题/字幕按本变体自己的样式重新画；同一个工程副本
+                    // 会同时被剪开头、截时长，所以绘制与扁平化都在这之后。
+                    let mut edition = project.clone();
+                    shape_variant(&mut edition, variant, whole);
+                    let Some(titles) = titles.clips_unless(&edition, width, height, cancel) else {
+                        return Err("export cancelled".to_owned());
+                    };
+                    let titles = titles.into_iter().map(|title| title.clip).collect();
+                    let mut spec = spec.clone();
+                    spec.output = output.clone();
+                    let mut request =
+                        export::request_for(&edition, &project_dir, &spec, titles);
+                    request.width = width;
+                    request.height = height;
+                    request.rate_num = num;
+                    request.rate_den = den;
+                    if let Some(mut watermark) = watermark.clone() {
+                        watermark.track = request
+                            .clips
+                            .iter()
+                            .map(|clip| clip.track)
+                            .max()
+                            .unwrap_or(0)
+                            + 1;
+                        request.clips.push(watermark);
+                    }
+                    {
+                        let tag = tag.clone();
+                        let stage = t("export.matrixPreparing");
+                        on_ui(move |studio, _, _| {
+                            studio.handle(Msg::Export(ExportMsg::MatrixProgress {
+                                index,
+                                count,
+                                tag,
+                                fraction: 0.0,
+                                stage,
+                            }));
+                        });
+                    }
+                    let compositor = monitor.off_thread();
+                    let tag_progress = tag.clone();
+                    let result = export::run_on(&request, compositor, cancel, move |progress| {
+                        let fraction = if progress.total > 0 {
+                            progress.frame as f32 / progress.total as f32
+                        } else {
+                            0.0
+                        };
+                        let stage = stage_word(progress.stage);
+                        let tag = tag_progress.clone();
+                        on_ui(move |studio, _, _| {
+                            studio.handle(Msg::Export(ExportMsg::MatrixProgress {
+                                index,
+                                count,
+                                tag,
+                                fraction,
+                                stage,
+                            }));
+                        });
+                    });
+                    match result {
+                        Ok(path) => {
+                            log::info!(
+                                "export: 矩阵第 {}/{count} 版写出 {}",
+                                index + 1,
+                                crate::studio::file_name_of(&path)
+                            );
+                            written.push(path);
+                        }
+                        Err(error) => {
+                            return Err(tf(
+                                "export.matrixFailedVariant",
+                                &[&tag, &error],
+                            ));
+                        }
+                    }
+                }
+                log::info!("export: 一键多版本矩阵完成 · {} 个文件", written.len());
+                Ok(written)
+            },
+            |studio, _, _, result| studio.handle(Msg::Export(ExportMsg::MatrixFinished(result))),
+        );
     }
 
     /// [`ExportPane::start`], with `overwrite` saying the person has
@@ -777,11 +1141,210 @@ impl ExportPane {
             progress_detail: progress_detail(self, studio).into(),
             estimate: estimate(self, studio).into(),
             done_size: bytes(self.size_bytes(studio)).into(),
+            // 一键多版本矩阵：开关、版本数、导出前的计划、导完的清单。
+            matrix: self.matrix,
+            matrix_count: self.matrix_count() as i32,
+            matrix_plan: self.matrix_plan(studio).into(),
+            matrix_done: self.matrix_done().into(),
             empty: clips == 0,
         }
     }
 }
 
+
+/// 一键多版本矩阵的一个版本配方：同一个工程变出什么。
+///
+/// 变体之间只改导出用的工程副本：开头剪掉 `skip` 秒（换一个开头）、
+/// 总长截到 `cap` 秒（15/30/60 秒版）、字幕换成 `look` 的样式。
+#[derive(Clone, Copy, Debug)]
+struct Variant {
+    /// 版本名的 i18n key。
+    tag: &'static str,
+    /// 投放平台的 i18n key，也进文件名。
+    platform: &'static str,
+    /// 从头剪掉多少秒。
+    skip: f64,
+    /// 这一版最长多少秒。
+    cap: f64,
+    /// 字幕/标题的样式。
+    look: Look,
+}
+
+/// 矩阵里一个版本的字幕样式。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Look {
+    /// 黄字黑边、加粗：短视频平台的钩子款。
+    Hook,
+    /// 保持作者做好的样式。
+    Original,
+    /// 白字 + 半透明黑板：口播、信息流的长句更好读。
+    Plate,
+}
+
+/// 矩阵的五套配方。默认三版（钩子 / 标准 / 完整），数量可以加到五。
+const MATRIX_VARIANTS: [Variant; 5] = [
+    Variant {
+        tag: "export.matrixHook",
+        platform: "export.matrixDouyin",
+        skip: 1.5,
+        cap: 15.0,
+        look: Look::Hook,
+    },
+    Variant {
+        tag: "export.matrixStandard",
+        platform: "export.matrixChannels",
+        skip: 0.5,
+        cap: 30.0,
+        look: Look::Original,
+    },
+    Variant {
+        tag: "export.matrixFull",
+        platform: "export.matrixBilibili",
+        skip: 0.0,
+        cap: 60.0,
+        look: Look::Plate,
+    },
+    Variant {
+        tag: "export.matrixFast",
+        platform: "export.matrixKuaishou",
+        skip: 3.0,
+        cap: 12.0,
+        look: Look::Hook,
+    },
+    Variant {
+        tag: "export.matrixLight",
+        platform: "export.matrixXiaohongshu",
+        skip: 0.2,
+        cap: 20.0,
+        look: Look::Plate,
+    },
+];
+
+/// 一个变体在这个工程上真实的开头与时长：开头剪掉的秒数，和成片秒数。
+///
+/// 工程太短时 `skip` 自动收住，保证每版至少还剩两秒；比 `cap` 短的工程
+/// 不会被拉长。
+fn variant_seconds(variant: &Variant, whole: f64) -> (f64, f64) {
+    let whole = whole.max(0.1);
+    let skip = variant.skip.min((whole - 2.0).max(0.0));
+    let seconds = (whole - skip).clamp(0.1, variant.cap.max(0.1));
+    (skip, seconds)
+}
+
+/// 矩阵里某个版本的成片路径：平台、版本名、真实秒数都在文件名里，导出
+/// 完直接按平台上传，不用再改名。
+fn matrix_output(folder: &str, name: &str, variant: &Variant, seconds: f64, container: &str) -> String {
+    format!(
+        "{folder}/{name}-{}-{}-{:.0}s.{container}",
+        t(variant.platform),
+        t(variant.tag),
+        seconds.max(0.1)
+    )
+}
+
+/// 把一份工程副本改成矩阵里的一个版本：换开头、截时长、换字幕样式。
+/// 只碰这一份副本；用户工程、撤销栈、工程文件都不动。
+fn shape_variant(project: &mut concat_project::model::Project, variant: &Variant, whole: f64) {
+    let (skip, seconds) = variant_seconds(variant, whole);
+    retime(project, skip, seconds);
+    restyle(project, variant.look);
+}
+
+/// 剪掉开头 `skip` 秒、把结束点收到 `seconds`。
+///
+/// 视频、音频、文字一视同仁：跨过剪切点的片段改入点与长度，整段落在
+/// 丢掉的头里的删掉，越过结尾的截短。关键帧是相对片段自身长度的百分比，
+/// 片段剪短后仍按比例落在画面上，所以这里不改它。
+fn retime(project: &mut concat_project::model::Project, skip: f64, seconds: f64) {
+    const EPS: f64 = 1e-6;
+    let timeline = project.active_mut();
+    let mut kept: Vec<std::sync::Arc<concat_project::model::Clip>> =
+        Vec::with_capacity(timeline.clips.len());
+    for clip in timeline.clips.drain(..) {
+        let mut clip = (*clip).clone();
+        if clip.start + clip.duration <= skip + EPS {
+            continue;
+        }
+        if clip.start < skip {
+            let cut = skip - clip.start;
+            clip.source_start += cut * clip.speed.max(0.01);
+            clip.duration -= cut;
+            clip.start = 0.0;
+            clip.fade_in = clip.fade_in.min(clip.duration);
+        } else {
+            clip.start -= skip;
+        }
+        if clip.start >= seconds - EPS {
+            continue;
+        }
+        if clip.start + clip.duration > seconds {
+            clip.duration = seconds - clip.start;
+            clip.fade_out = clip.fade_out.min(clip.duration);
+        }
+        // 引擎的下限是六十分之一秒；比这还短的尾巴就不留了。
+        if clip.duration < 1.0 / 60.0 {
+            continue;
+        }
+        kept.push(std::sync::Arc::new(clip));
+    }
+    timeline.clips = kept;
+}
+
+/// 给所有文字片段（标题与字幕）换字幕样式；钩子款是黄字黑边并加粗，
+/// 底板款是白字 + 半透明黑板，原样款什么都不做。
+fn restyle(project: &mut concat_project::model::Project, look: Look) {
+    if look == Look::Original {
+        return;
+    }
+    let timeline = project.active_mut();
+    for clip in &mut timeline.clips {
+        let clip = std::sync::Arc::make_mut(clip);
+        let Some(text) = clip.text.as_mut() else {
+            continue;
+        };
+        match look {
+            Look::Hook => {
+                text.color = "#ffe100".to_owned();
+                text.stroke_width = 0.006;
+                text.stroke_color = "#000000".to_owned();
+                text.shadow = true;
+                text.background.clear();
+                text.font_size = (text.font_size * 1.12).clamp(0.02, 0.30);
+                text.font_weight = text.font_weight.max(800.0);
+            }
+            Look::Plate => {
+                text.color = "#ffffff".to_owned();
+                text.stroke_width = 0.0;
+                text.shadow = false;
+                text.background = "#000000b3".to_owned();
+                text.background_radius = 0.012;
+                text.background_padding_x = 0.02;
+                text.background_padding_y = 0.012;
+            }
+            Look::Original => {}
+        }
+    }
+}
+
+/// 一个阶段的界面说法，矩阵与单文件导出共用。
+fn stage_word(stage: &str) -> String {
+    match stage {
+        "rendering" => t("export.renderingVideo"),
+        concat_export::RENDERING_IN_SOFTWARE => t("export.renderingInSoftware"),
+        "mixing audio" => t("export.mixingAudio"),
+        "muxing" => t("export.finalisingFile"),
+        other => other.to_owned(),
+    }
+}
+
+/// 矩阵版本字幕样式的界面说法。
+fn matrix_look_name(look: Look) -> String {
+    t(match look {
+        Look::Hook => "export.matrixLookHook",
+        Look::Original => "export.matrixLookOriginal",
+        Look::Plate => "export.matrixLookPlate",
+    })
+}
 
 /// 三档质量的编码器 preset（x264 的名字，其它编码器按各自规则映射；见
 /// `concat_media` 的 AMF/NVENC/QSV 设置）与码率控制之外的 CRF。快速档

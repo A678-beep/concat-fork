@@ -5,10 +5,12 @@
 use super::*;
 
 
-/// 内置音频修整的两个效果 id：人声降噪与去工频。它们也是音效链里的
-/// 普通链接，Effects 面板能看到、能删；音频面板只是给了它们一排开关。
+/// 内置音频修整的三个效果 id：人声降噪、去工频、精准去电流声（哨音）。
+/// 它们也是音效链里的普通链接，Effects 面板能看到、能删；音频面板只是
+/// 给了它们一排开关。
 pub(crate) const DENOISE_ID: &str = "concat.voice-clean";
 pub(crate) const HUM_ID: &str = "concat.hum-remove";
+pub(crate) const WHISTLE_ID: &str = "concat.whistle-remove";
 
 impl Studio {
     /// 人声降噪 / 去电流声：把两个内置音频效果按开关、强度写进所选片段
@@ -17,7 +19,20 @@ impl Studio {
     /// 先把播放头退三秒再放——前后听的正好是同一段。
     pub fn clip_denoise(&mut self, strength: i32, hum: bool, audition: i32) {
         use concat_project::commands::ClipPatch;
-        let audition = audition.clamp(0, 2);
+        let audition = audition.clamp(0, 4);
+        // 3 与 4 是「精准去电流声」的两个动作：检测并写入、关闭。
+        // 它们复用这一条回调，是为了不再从检查器到窗口多拉两根线。
+        match audition {
+            3 => {
+                self.clip_whistle_detect();
+                return;
+            }
+            4 => {
+                self.clip_whistle_off();
+                return;
+            }
+            _ => {}
+        }
         let ids = self.edit_targets();
         if ids.is_empty() {
             return;
@@ -41,6 +56,26 @@ impl Studio {
                     let mut notch = AppliedFilter::new(HUM_ID);
                     notch.enabled = enabled;
                     chain.push(notch);
+                }
+                // 精准去电流声是单独一项：开关不在这一排，所以一直留在
+                // 链里；强度跟着这里改，试听原声时一起旁通。
+                if let Some(mut whistle) = clip
+                    .filters
+                    .iter()
+                    .find(|link| link.id == WHISTLE_ID)
+                    .cloned()
+                {
+                    whistle.enabled = enabled;
+                    whistle
+                        .params
+                        .insert("strength".to_owned(), f64::from(strength.clamp(0, 2)));
+                    if let Some(before) = whistle.params.get("before").copied() {
+                        let gain = -12.0 - f64::from(strength.clamp(0, 2)) * 14.0;
+                        whistle
+                            .params
+                            .insert("after".to_owned(), (before + gain).max(0.0));
+                    }
+                    chain.push(whistle);
                 }
             }
             commands.push(Command::UpdateClip {
@@ -73,6 +108,202 @@ impl Studio {
             audition
         );
     }
+}
+
+
+impl Studio {
+    /// 精准去电流声：分析选中片段的声音，找窄带纯音峰；找到了就把
+    /// `concat.whistle-remove` 的 4 个窄陷波写进音频链（一次编辑一步撤销）。
+    ///
+    /// 分析走后台线程（解码 + STFT，一段几秒的声音），结果回来才动工程；
+    /// 分析期间弹一条「正在分析」的提示。找不到峰就只说没找到，不改工程。
+    pub fn clip_whistle_detect(&mut self) {
+        let ids = self.edit_targets();
+        let Some(id) = ids.first().cloned() else {
+            return;
+        };
+        let (path, start, seconds, strength) = {
+            let Some(clip) = self.clip(&id).cloned() else {
+                return;
+            };
+            let Some(media) = self.project().media_by_id(&clip.media_id) else {
+                return;
+            };
+            let path = std::path::PathBuf::from(&media.path);
+            let start = clip.source_start.max(0.0);
+            let seconds = (clip.duration * clip.speed.max(0.1)).clamp(0.5, 20.0);
+            // 已经有降噪强度就沿用；没有就按强档（-40dB，够把纯音压没）。
+            let strength = clip
+                .filters
+                .iter()
+                .find(|link| link.id == DENOISE_ID)
+                .and_then(|link| link.params.get("strength"))
+                .copied()
+                .unwrap_or(2.0)
+                .clamp(0.0, 2.0) as i32;
+            (path, start, seconds, strength)
+        };
+        self.notify(&t("clipInspector.whistleAnalyzing"), false);
+        log::info!(
+            "audio: 分析电流声 · {} · {seconds:.1} 秒",
+            crate::studio::file_name_of(path.to_string_lossy().as_ref())
+        );
+        spawn_in_project(
+            move || concat_host::denoise::detect(&path, start, seconds),
+            move |studio, _, _, result| match result {
+                Ok(report) if !report.peaks.is_empty() => {
+                    studio.apply_whistle(&ids, &report, strength);
+                }
+                Ok(_) => studio.notify(&t("clipInspector.whistleNone"), false),
+                Err(error) => studio.notify(&tf("clipInspector.whistleFailed", &[&error]), true),
+            },
+        );
+    }
+
+    /// 把检测结果写成链上的一个 `concat.whistle-remove` 链接：最多 4 个频率，
+    /// 不足的补 20kHz（人耳听不到，等于空着）；强度决定陷波深度。
+    fn apply_whistle(
+        &mut self,
+        ids: &[String],
+        report: &concat_host::denoise::WhistleReport,
+        strength: i32,
+    ) {
+        use concat_project::commands::ClipPatch;
+        let strength = strength.clamp(0, 2);
+        let gain = -12.0 - f64::from(strength) * 14.0;
+        let after = (report.before_db + gain).max(0.0);
+        let mut commands = Vec::new();
+        for id in ids {
+            let Some(clip) = self.clip(id) else {
+                continue;
+            };
+            if !self.clip_has_sound(clip) {
+                continue;
+            }
+            let mut chain = clip.filters.clone();
+            chain.retain(|link| link.id != WHISTLE_ID);
+            chain.push(whistle_link(report, strength, after));
+            commands.push(Command::UpdateClip {
+                clip_id: id.clone(),
+                patch: ClipPatch {
+                    filters: Some(chain),
+                    ..ClipPatch::default()
+                },
+            });
+        }
+        match commands.len() {
+            0 => return,
+            1 => self.apply(commands.remove(0)),
+            _ => self.apply(Command::Batch { commands }),
+        };
+        let list = report
+            .peaks
+            .iter()
+            .map(|hz| format!("{hz:.0}"))
+            .collect::<Vec<_>>()
+            .join(" / ");
+        self.notify(
+            &tf(
+                "clipInspector.whistleFound",
+                &[
+                    &list,
+                    &format!("{:.0}", report.confidence * 100.0),
+                    &format!("{:.1}", report.before_db),
+                    &format!("{after:.1}"),
+                ],
+            ),
+            false,
+        );
+        log::info!(
+            "audio: 精准去电流声 {list} Hz · 置信度 {:.0}% · {:.1}dB → {after:.1}dB · 强度 {strength}",
+            report.confidence * 100.0,
+            report.before_db
+        );
+    }
+
+    /// 关掉选中片段的精准去电流声：把那个链接从音频链里删掉，其它效果不动。
+    pub fn clip_whistle_off(&mut self) {
+        use concat_project::commands::ClipPatch;
+        let ids = self.edit_targets();
+        let mut commands = Vec::new();
+        for id in &ids {
+            let Some(clip) = self.clip(id) else {
+                continue;
+            };
+            if !clip.filters.iter().any(|link| link.id == WHISTLE_ID) {
+                continue;
+            }
+            let mut chain = clip.filters.clone();
+            chain.retain(|link| link.id != WHISTLE_ID);
+            commands.push(Command::UpdateClip {
+                clip_id: id.clone(),
+                patch: ClipPatch {
+                    filters: Some(chain),
+                    ..ClipPatch::default()
+                },
+            });
+        }
+        match commands.len() {
+            0 => return,
+            1 => self.apply(commands.remove(0)),
+            _ => self.apply(Command::Batch { commands }),
+        };
+        self.notify(&t("clipInspector.whistleCleared"), false);
+    }
+}
+
+/// 一个精准去电流声链接。频率不足 4 个的补 20kHz：链上始终四个窄陷波，
+/// 空着的那个在人耳之外，等于没有。
+fn whistle_link(
+    report: &concat_host::denoise::WhistleReport,
+    strength: i32,
+    after: f64,
+) -> AppliedFilter {
+    let mut link = AppliedFilter::new(WHISTLE_ID);
+    for (index, key) in ["f1", "f2", "f3", "f4"].iter().enumerate() {
+        let frequency = report.peaks.get(index).copied().unwrap_or(20_000.0);
+        link.params.insert((*key).to_owned(), frequency);
+    }
+    link.params.insert("strength".to_owned(), f64::from(strength));
+    link.params.insert("confidence".to_owned(), report.confidence);
+    link.params.insert("before".to_owned(), report.before_db);
+    link.params.insert("after".to_owned(), after);
+    link
+}
+
+/// 选中片段上精准去电流声的一行说明：频率、置信度、峰能量的前后对比。
+/// 没有这个链接就是空串；检查器据此决定显不显示那一行。
+pub(crate) fn whistle_summary(clip: &Clip) -> String {
+    let Some(link) = clip.filters.iter().find(|link| link.id == WHISTLE_ID) else {
+        return String::new();
+    };
+    let mut freqs: Vec<f64> = ["f1", "f2", "f3", "f4"]
+        .iter()
+        .filter_map(|key| link.params.get(*key).copied())
+        .filter(|hz| *hz > 0.0 && *hz < 19_500.0)
+        .collect();
+    freqs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    freqs.dedup_by(|a, b| (*a - *b).abs() < 1.0);
+    if freqs.is_empty() {
+        return String::new();
+    }
+    let list = freqs
+        .iter()
+        .map(|hz| format!("{hz:.0}"))
+        .collect::<Vec<_>>()
+        .join(" / ");
+    let confidence = link.params.get("confidence").copied().unwrap_or(0.0) * 100.0;
+    let before = link.params.get("before").copied().unwrap_or(0.0);
+    let after = link.params.get("after").copied().unwrap_or(0.0);
+    tf(
+        "clipInspector.whistleSummary",
+        &[
+            &list,
+            &format!("{confidence:.0}"),
+            &format!("{before:.1}"),
+            &format!("{after:.1}"),
+        ],
+    )
 }
 
 impl Studio {

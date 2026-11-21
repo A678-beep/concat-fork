@@ -1,0 +1,93 @@
+format = 2
+
+[effect]
+id = "concat.whistle-remove"
+name = "Whistle Remove"
+kind = "audio"
+category = "Clean"
+order = 45
+intensity = "strength"
+description = "A narrow, steady tone - what a bad converter or a low-pass set for the wrong sample rate leaves behind - notched out at the exact frequency it sits on, without dulling the voice around it. The four frequencies come from the Audio tab's detection, which fills them in; strength sets how deep the notch is."
+
+[[param]]
+key = "strength"
+label = "Strength"
+type = "enum"
+values = [0, 1, 2]
+labels = ["Light", "Medium", "Strong"]
+default = 2
+min = 0
+max = 2
+step = 1
+
+[[param]]
+key = "f1"
+label = "Notch 1 (Hz)"
+type = "float"
+min = 20
+max = 20000
+default = 12000
+step = 1
+unit = "Hz"
+
+[[param]]
+key = "f2"
+label = "Notch 2 (Hz)"
+type = "float"
+min = 20
+max = 20000
+default = 50
+step = 1
+unit = "Hz"
+
+[[param]]
+key = "f3"
+label = "Notch 3 (Hz)"
+type = "float"
+min = 20
+max = 20000
+default = 100
+step = 1
+unit = "Hz"
+
+[[param]]
+key = "f4"
+label = "Notch 4 (Hz)"
+type = "float"
+min = 20
+max = 20000
+default = 150
+step = 1
+unit = "Hz"
+
+[[param]]
+key = "confidence"
+label = "Confidence"
+type = "float"
+min = 0
+max = 1
+default = 0
+step = 0.01
+
+[[param]]
+key = "before"
+label = "Peak before (dB)"
+type = "float"
+min = -120
+max = 120
+default = 0
+step = 0.1
+unit = "dB"
+
+[[param]]
+key = "after"
+label = "Peak after (dB)"
+type = "float"
+min = -120
+max = 120
+default = 0
+step = 0.1
+unit = "dB"
+
+[ffmpeg]
+chain = "equalizer=f={fixed(f1, 0)}:width_type=q:width={fixed(12 + strength * 2, 0)}:g={fixed(0 - 12 - strength * 14, 0)},equalizer=f={fixed(f2, 0)}:width_type=q:width={fixed(12 + strength * 2, 0)}:g={fixed(0 - 12 - strength * 14, 0)},equalizer=f={fixed(f3, 0)}:width_type=q:width={fixed(12 + strength * 2, 0)}:g={fixed(0 - 12 - strength * 14, 0)},equalizer=f={fixed(f4, 0)}:width_type=q:width={fixed(12 + strength * 2, 0)}:g={fixed(0 - 12 - strength * 14, 0)}"

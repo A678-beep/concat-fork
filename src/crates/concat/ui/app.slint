@@ -460,6 +460,8 @@ export component App inherits Window {
     callback export-reveal();
     callback export-enable-ai-badge();
     callback export-quality-changed(index: int);
+    callback export-matrix-toggled(on: bool);
+    callback export-matrix-count-changed(delta: int);
     callback export-again();
 
     callback settings-closed();
@@ -1117,6 +1119,8 @@ export component App inherits Window {
         again => { root.export-again(); }
         enable-ai-badge => { root.export-enable-ai-badge(); }
         quality-changed(index) => { root.export-quality-changed(index); }
+        matrix-toggled(on) => { root.export-matrix-toggled(on); }
+        matrix-count-changed(delta) => { root.export-matrix-count-changed(delta); }
     }
 
     SettingsDialog {

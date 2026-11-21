@@ -19,6 +19,8 @@ concat-core.workspace = true
 # The run's log: the file, the console, and operations timed step by step.
 concat-log.workspace = true
 concat-media.workspace = true
+# 精准去电流声的 STFT：纯 Rust，与语音分离用的是同一份 realfft。
+realfft = "3.5"
 concat-project.workspace = true
 concat-export.workspace = true
 # The effect cards: every picture package drawn by its own shader; see

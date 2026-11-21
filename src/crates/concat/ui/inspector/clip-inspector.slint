@@ -3089,6 +3089,50 @@ export component AudioPanel inherits VerticalLayout {
                 }
             }
 
+
+            // 精准去电流声（哨音）：分析这段声音里的窄带纯音（比如采样率
+            // 设错留下的 12kHz 哨音），只在检测到的频点上开窄陷波，语音
+            // 不会被压闷。检测到之后下面那行写频率、置信度与峰前后 dB。
+            HorizontalLayout {
+                padding-left: Theme.pad;
+                padding-right: Theme.pad;
+                spacing: 8px;
+
+                Button {
+                    label: I18n.t("clipInspector.whistleDetect");
+                    ghost: true;
+                    glyph: Glyph.wand;
+                    clicked => {
+                        root.denoise(root.selected.denoise-strength,
+                            root.selected.denoise-hum, 3);
+                    }
+                }
+
+                if root.selected.whistle-on: Button {
+                    label: I18n.t("clipInspector.whistleClear");
+                    ghost: true;
+                    glyph: Glyph.close;
+                    clicked => {
+                        root.denoise(root.selected.denoise-strength,
+                            root.selected.denoise-hum, 4);
+                    }
+                }
+            }
+
+            if root.selected.whistle-summary != "": HorizontalLayout {
+                padding-left: Theme.pad;
+                padding-right: Theme.pad;
+                padding-bottom: 8px;
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.selected.whistle-summary;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+            }
+
             if root.selected.denoise-on: HorizontalLayout {
                 padding-left: Theme.pad;
                 padding-right: Theme.pad;

@@ -1405,6 +1405,11 @@ impl Studio {
                 .filters
                 .iter()
                 .any(|link| link.id == super::chains::HUM_ID),
+            whistle_on: clip
+                .filters
+                .iter()
+                .any(|link| link.id == super::chains::WHISTLE_ID),
+            whistle_summary: super::chains::whistle_summary(clip).into(),
             cutout: match &clip.cutout {
                 None => 0,
                 Some(cutout) if cutout.mode == model::CutoutMode::Auto => 1,

@@ -34,6 +34,8 @@ pub mod consolidate;
 mod consolidate_tests;
 pub mod crash;
 pub mod cutout;
+/// 精准去电流声：找音频里的窄带纯音峰（12kHz 哨音一类）。
+pub mod denoise;
 /// 平台自己的 HTTPS 直连下载（OpenSSL，不走系统代理）。
 pub mod direct;
 pub mod dirs;

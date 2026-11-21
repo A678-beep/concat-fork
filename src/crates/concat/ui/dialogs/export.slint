@@ -101,6 +101,15 @@ export struct ExportData {
     progress-detail: string,
     /// 开工前的预计耗时。
     estimate: string,
+    /// 一键多版本矩阵：开时「导出」按钮一次导出 N 个变体。
+    matrix: bool,
+    /// 矩阵要几个版本（2..=5）。
+    matrix-count: int,
+    /// 导出之前的版本计划，每行一个：平台、版本名、真实秒数、开头剪掉
+    /// 多少、字幕样式。
+    matrix-plan: string,
+    /// 矩阵导完之后的结果清单：一句「已导出 N 个版本」，下面列文件名。
+    matrix-done: string,
 }
 
 // One tile of the summary block.
@@ -460,6 +469,59 @@ component OutputSection inherits DialogSection {
     }
 }
 
+// 一键多版本矩阵：同一个工程一次导出 N 个变体（换开头、截时长、换字幕
+// 样式），文件名自动带平台与真实秒数。变体只是导出副本，工程与撤销栈
+// 都不动；导出前这一组就把每版会写出什么列清楚。
+component MatrixSection inherits DialogSection {
+    in property <ExportData> data;
+
+    callback matrix-toggled(on: bool);
+    callback matrix-count-changed(delta: int);
+
+    title: I18n.t("export.matrixTitle");
+    switchable: true;
+    on: root.data.matrix;
+    open: root.data.matrix;
+    hint: I18n.t("export.matrixHint");
+    switched(on) => { root.matrix-toggled(on); }
+
+    // 版本数：2 到 5，默认 3。
+    DialogRow {
+        label: I18n.t("export.matrixCount");
+
+        Button {
+            label: "-";
+            ghost: true;
+            clicked => { root.matrix-count-changed(-1); }
+        }
+
+        Text {
+            text: "\{root.data.matrix-count}";
+            color: Theme.fg;
+            font-family: Theme.font-technical;
+            font-size: Theme.fs;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            min-width: 28px;
+        }
+
+        Button {
+            label: "+";
+            ghost: true;
+            clicked => { root.matrix-count-changed(1); }
+        }
+    }
+
+    // 点导出之前，每版会写成什么名字、多长、怎么开头、字幕什么样。
+    Text {
+        text: root.data.matrix-plan;
+        color: Theme.fg-muted;
+        font-family: Theme.font-technical;
+        font-size: Theme.fs-sm;
+        wrap: word-wrap;
+    }
+}
+
 // What is under the groups: the failure, the progress, the result, and
 // the button that starts it all.
 component ExportFooter inherits VerticalLayout {
@@ -590,6 +652,15 @@ component ExportFooter inherits VerticalLayout {
         }
     }
 
+    // 矩阵导完的结果：一句「已导出 N 个版本」，和按顺序写出的文件名。
+    if root.data.phase == ExportPhase.done && root.data.matrix-done != "": Text {
+        text: root.data.matrix-done;
+        color: Theme.fg-muted;
+        font-family: Theme.font-technical;
+        font-size: Theme.fs-sm;
+        wrap: word-wrap;
+    }
+
     if root.data.estimate != "" && root.data.phase == ExportPhase.idle: Text {
         text: root.data.estimate;
         color: Theme.fg-dim;
@@ -607,6 +678,7 @@ component ExportFooter inherits VerticalLayout {
             min-width: root.narrow ? 0px : 320px;
             glyph: Glyph.export;
             label: root.data.empty ? I18n.t("export.nothingToExport")
+                : root.data.matrix ? I18n.t1("export.matrixBegin", "\{root.data.matrix-count}")
                 : I18n.t("export.exportEstimate") + root.data.size-chosen;
             enabled: !root.data.empty && root.data.name != "";
             clicked => { root.begin(); }
@@ -661,6 +733,8 @@ export component ExportDialog inherits Rectangle {
     callback again();
     callback enable-ai-badge();
     callback quality-changed(index: int);
+    callback matrix-toggled(on: bool);
+    callback matrix-count-changed(delta: int);
 
     property <bool> running: root.data.phase == ExportPhase.running;
     /// How many columns the width holds. Three groups a column wide need
@@ -916,6 +990,14 @@ export component ExportDialog inherits Rectangle {
                                 browse => { root.browse(); }
                             }
                         }
+                    }
+
+                    // 一键多版本矩阵：整幅宽放在各列布局之下，开与关都在
+                    // 这里；导出中不显示，进度条已经在页脚里报第几版。
+                    if !root.running: MatrixSection {
+                        data: root.data;
+                        matrix-toggled(on) => { root.matrix-toggled(on); }
+                        matrix-count-changed(delta) => { root.matrix-count-changed(delta); }
                     }
                 }
             }

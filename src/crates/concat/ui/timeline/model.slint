@@ -661,6 +661,9 @@ export struct SelectedClipData {
     denoise-on: bool,
     denoise-strength: int,
     denoise-hum: bool,
+    /// 精准去电流声（哨音）：有没有这个链接，以及一行说明。
+    whistle-on: bool,
+    whistle-summary: string,
 }
 
 /// One picture under the playhead, as the monitor places it.
