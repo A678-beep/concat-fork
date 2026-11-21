@@ -809,6 +809,9 @@ pub struct Models {
     /// AI 面板的音色下拉与插件列表。
     pub ai_voices: Rc<VecModel<crate::ui::AiVoiceItem>>,
     pub ai_plugins: Rc<VecModel<crate::ui::AiPluginItem>>,
+    /// AI 生视频页的模型下拉与本地模型行。
+    pub ai_video_models: Rc<VecModel<SharedString>>,
+    pub ai_video_local: Rc<VecModel<SharedString>>,
     pub speech_sample_waves: Rc<VecModel<SharedString>>,
     pub speech_sample_details: Rc<VecModel<SharedString>>,
     /// The Audio page's shelves.
@@ -896,6 +899,8 @@ impl Models {
             voiceover_devices: Rc::new(VecModel::default()),
             ai_voices: Rc::new(VecModel::default()),
             ai_plugins: Rc::new(VecModel::default()),
+            ai_video_models: Rc::new(VecModel::default()),
+            ai_video_local: Rc::new(VecModel::default()),
             speech_sample_waves: Rc::new(VecModel::default()),
             speech_sample_details: Rc::new(VecModel::default()),
             sounds_mine: Rc::new(VecModel::default()),

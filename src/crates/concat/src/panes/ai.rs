@@ -26,9 +26,10 @@ use concat_project::model::{MediaKind, MediaOrigin};
 
 use crate::host::{self, spawn, spawn_in_project};
 use crate::panes::Msg;
+use crate::panes::ai_video::{AiVideoPane, VideoMsg};
 use crate::prefs::Preferences;
 use crate::studio::Studio;
-use crate::ui::{AiData, AiPluginItem, AiVoiceItem};
+use crate::ui::{AiData, AiPluginItem, AiVideoData, AiVoiceItem};
 
 /// 云端每次生成的提醒，界面上常驻。
 const CLOUD_COST: &str = "云端：需登录星籁账号，按套餐额度扣费（配音约 ¥0.004/51 字，数字人按次扣）；素材会上传到云端，每次生成前都会确认。";
@@ -166,6 +167,8 @@ pub enum AiMsg {
     Progress { fraction: f32, stage: String },
     /// 生成完成（成功是文件与插入结果，失败是一句中文）。
     Finished(Box<Result<Done, String>>),
+    /// 生视频页（AI 面板第 4 页）的消息。
+    Video(VideoMsg),
     /// 云端音色列表回来了。
     CloudVoices(Box<Result<concat_host::cloud_ai::CloudVoices, String>>),
 }
@@ -262,6 +265,8 @@ pub struct AiPane {
     pub account: String,
     /// 套餐名，给面板显示。
     pub account_plan: String,
+    /// 第 4 页：AI 生视频。
+    pub video: AiVideoPane,
     /// 远端插件清单；取到前是 None（模型中心先把「即将上线」写灰）。
     packages: Option<std::collections::HashMap<String, plugins::RemotePackage>>,
     /// 清单正在后台取。
@@ -327,6 +332,7 @@ impl Default for AiPane {
             signed_in: false,
             account: String::new(),
             account_plan: String::new(),
+            video: AiVideoPane::default(),
             packages: None,
             packages_loading: false,
             last_alert: String::new(),
@@ -347,6 +353,7 @@ impl AiPane {
             ..AiPane::default()
         };
         pane.hardware = Some(Hardware::detect());
+        pane.video.hardware = pane.hardware.clone();
         pane.refresh(dirs);
         // 上次用的音色还在插件里就接着用。
         if let Some(wanted) = prefs.ai_voice.as_deref()
@@ -770,6 +777,37 @@ impl AiPane {
         }
     }
 
+    /// 第 4 页（AI 生视频）的数据。
+    pub fn video_data(&self) -> AiVideoData {
+        let account_line = if self.signed_in {
+            let name = if self.account.trim().is_empty() {
+                "星籁用户".to_owned()
+            } else {
+                self.account.clone()
+            };
+            let plan = if self.account_plan.trim().is_empty() {
+                "未注明套餐".to_owned()
+            } else {
+                self.account_plan.clone()
+            };
+            format!("{name} · {plan}（已登录，生成走平台额度）")
+        } else {
+            "未登录（生成需先登录）".to_owned()
+        };
+        self.video
+            .data(self.signed_in, &account_line, self.hardware.as_ref())
+    }
+
+    /// 生视频页的模型下拉行。
+    pub fn video_models(&self) -> Vec<slint::SharedString> {
+        self.video.model_rows()
+    }
+
+    /// 生视频页的本地模型行（预留）。
+    pub fn video_local_rows(&self) -> Vec<slint::SharedString> {
+        self.video.local_rows()
+    }
+
     /// 音色下拉的行。
     pub fn voice_rows(&self) -> Vec<AiVoiceItem> {
         self.voices
@@ -903,6 +941,14 @@ impl AiPane {
     /// 处理一条消息。`studio` 是窗口的其余部分。
     pub fn update(&mut self, msg: AiMsg, studio: &mut Studio) {
         match msg {
+            AiMsg::Video(msg) => {
+                if let VideoMsg::Action { action, .. } = &msg
+                    && action.as_str() == "login"
+                {
+                    studio.request_login("星籁账号登录");
+                }
+                self.video.update(msg, studio);
+            }
             AiMsg::OpenTab(tab) => self.open_tab(tab, studio),
             AiMsg::Close => {
                 self.open = false;
@@ -910,7 +956,10 @@ impl AiPane {
                 self.confirm = None;
             }
             AiMsg::Tab(tab) => {
-                self.tab = tab.clamp(0, 2);
+                self.tab = tab.clamp(0, 3);
+                if self.tab == 3 && !self.busy {
+                    self.video.ensure_models(studio);
+                }
                 if self.tab == 2 && !self.busy {
                     self.load_packages(studio);
                 }
@@ -1149,11 +1198,14 @@ impl AiPane {
     /// 开面板并落到某一页。
     fn open_tab(&mut self, tab: i32, studio: &mut Studio) {
         self.open = true;
-        self.tab = tab.clamp(0, 2);
+        self.tab = tab.clamp(0, 3);
         let dirs = studio.host.dirs.clone();
         self.refresh(&dirs);
         if self.tab == 2 && !self.busy {
             self.load_packages(studio);
+        }
+        if self.tab == 3 {
+            self.video.ensure_models(studio);
         }
         if !studio.prefs.ai_wizard_seen {
             self.wizard_open = true;

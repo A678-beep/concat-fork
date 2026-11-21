@@ -15,6 +15,7 @@ import { SegmentedControl } from "../primitives/segmented-control.slint";
 import { Select } from "../primitives/select.slint";
 import { ResizeBox } from "../primitives/resize-box.slint";
 import { Rail } from "../inspector/controls.slint";
+import { AiVideoData, AiVideoPage } from "ai-video.slint";
 
 /// 音色下拉的一行。
 export struct AiVoiceItem {
@@ -939,6 +940,10 @@ export component AiDialog inherits Modal {
     in property <image> photo;
 
     callback tab-changed(int);
+    /// AI 生视频（第 4 页）的状态与两列。
+    in property <AiVideoData> video;
+    in property <[string]> video-models;
+    in property <[string]> video-locals;
     callback text-edited(string);
     callback voice-changed(int);
     callback rate-changed(float);
@@ -960,6 +965,8 @@ export component AiDialog inherits Modal {
     callback engine-changed(int);
     /// 打开星籁账号登录（未登录时的「去登录」）。
     callback login();
+    /// AI 生视频页的一个动作。
+    callback video-action(action: string, index: int, text: string);
 
     open: root.data.open;
     title: "星籁 AI · 本地优先";
@@ -1016,7 +1023,7 @@ export component AiDialog inherits Modal {
         SegmentedControl {
             height: 30px;
             tabs: true;
-            options: ["配音", "数字人", "模型"];
+            options: ["配音", "数字人", "模型", "生视频"];
             current: root.data.tab;
             changed(index) => { root.tab-changed(index); }
         }
@@ -1052,6 +1059,13 @@ export component AiDialog inherits Modal {
             open(id) => { root.plugin-open(id); }
             remove(id) => { root.plugin-remove(id); }
             refresh => { root.plugin-refresh(); }
+        }
+
+        if root.data.tab == 3: AiVideoPage {
+            data: root.video;
+            model-names: root.video-models;
+            local-models: root.video-locals;
+            action(action, index, text) => { root.video-action(action, index, text); }
         }
 
         // 进度。

@@ -23,6 +23,8 @@ pub mod account;
 /// 本地 AI 模型目录：效果、大小、显存内存要求、本机适不适合。
 pub mod ai_models;
 pub mod assets;
+/// 星籁 AI 生视频：平台 aivideo 接口、长视频续写拼接、本地模型预留。
+pub mod aivideo;
 pub mod awake;
 pub mod brush;
 pub mod capcut;

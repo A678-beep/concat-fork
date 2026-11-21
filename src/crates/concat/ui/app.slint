@@ -53,6 +53,7 @@ import {
 import { ConfirmData, ConfirmDialog } from "dialogs/confirm.slint";
 import { CloudData, CloudDialog, CloudItem } from "dialogs/cloud.slint";
 import { AiData, AiDialog, AiPluginItem, AiVoiceItem, AiWizard } from "dialogs/ai.slint";
+import { AiVideoData } from "dialogs/ai-video.slint";
 import { CaptionsDialog, CaptionsSheetData } from "dialogs/captions.slint";
 import { SpeechDialog, SpeechSheetData } from "dialogs/speech.slint";
 import { NewVoiceData, NewVoiceDialog } from "dialogs/new-voice.slint";
@@ -350,6 +351,10 @@ export component App inherits Window {
     // 星籁 AI：本地优先的算力选择、本地配音（Piper 插件）、照片数字人、
     // 插件管理，以及默认关闭的云端兜底。状态与两列由 Rust 写好；这里只转发。
     in property <AiData> ai;
+    /// AI 生视频（AI 面板第 4 页）的状态。
+    in property <AiVideoData> ai-video;
+    in property <[string]> ai-video-models;
+    in property <[string]> ai-video-locals;
     in property <[AiVoiceItem]> ai-voices;
     in property <[string]> ai-voice-names;
     in property <[AiPluginItem]> ai-plugins;
@@ -376,6 +381,8 @@ export component App inherits Window {
     callback ai-photo-pick();
     callback ai-photo-clear();
     callback ai-confirm-yes();
+    /// AI 生视频页的一个动作：action + 下拉下标 + 文本。
+    callback ai-video-action(action: string, index: int, text: string);
     callback ai-confirm-no();
     in property <bool> macos;
     /// The window is a phone's: one screen, held upright, driven by a
@@ -1324,6 +1331,9 @@ export component App inherits Window {
         width: root.width;
         height: root.height - root.sheets-top;
         data: root.ai;
+        video: root.ai-video;
+        video-models: root.ai-video-models;
+        video-locals: root.ai-video-locals;
         voices: root.ai-voices;
         voice-names: root.ai-voice-names;
         plugins: root.ai-plugins;
@@ -1350,6 +1360,7 @@ export component App inherits Window {
         confirm-yes => { root.ai-confirm-yes(); }
         confirm-no => { root.ai-confirm-no(); }
         login => { root.ai-login(); }
+        video-action(action, index, text) => { root.ai-video-action(action, index, text); }
     }
 
     // 星籁账号登录卡：AI 面板里的「去登录」、以及云端未登录时的引导都开

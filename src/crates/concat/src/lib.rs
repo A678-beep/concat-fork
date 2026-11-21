@@ -628,6 +628,8 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         app.set_voiceover_devices(ModelRc::from(models.voiceover_devices.clone()));
         app.set_ai_voices(ModelRc::from(models.ai_voices.clone()));
         app.set_ai_plugins(ModelRc::from(models.ai_plugins.clone()));
+        app.set_ai_video_models(ModelRc::from(models.ai_video_models.clone()));
+        app.set_ai_video_locals(ModelRc::from(models.ai_video_local.clone()));
         app.set_app_menu_items(ModelRc::from(models.bar.clone()));
         app.set_transcribers(ModelRc::from(models.transcribers.clone()));
         app.set_voices(ModelRc::from(models.voices.clone()));
@@ -1122,6 +1124,17 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     app.on_ai_confirm_no(on_window!(|state| {
         state.handle(Msg::Ai(AiMsg::CloudCancel));
     }));
+    app.on_ai_video_action(on_window!(
+        |state, action: SharedString, index: i32, text: SharedString| {
+            state.handle(Msg::Ai(AiMsg::Video(
+                crate::panes::ai_video::VideoMsg::Action {
+                    action: action.to_string(),
+                    index,
+                    text: text.to_string(),
+                },
+            )));
+        }
+    ));
 
     // ── the workspace's arrangement ──
     editor.on_workspace_resized(on_dock!(|state, width: f32, height: f32| {
@@ -2976,6 +2989,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                         "ai-voice" => state.handle(Msg::Ai(AiMsg::OpenTab(0))),
                         "ai-avatar" => state.handle(Msg::Ai(AiMsg::OpenTab(1))),
                         "ai-plugins" => state.handle(Msg::Ai(AiMsg::OpenTab(2))),
+                        "ai-video" => state.handle(Msg::Ai(AiMsg::OpenTab(3))),
                         "ai-wizard" => {
                             state.ai.wizard_open = true;
                         }

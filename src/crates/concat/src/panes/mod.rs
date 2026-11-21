@@ -15,6 +15,7 @@
 //! export sheet is the first, and the shape the rest follow.
 
 pub mod ai;
+pub mod ai_video;
 pub mod assets;
 pub mod captions;
 pub mod export;
