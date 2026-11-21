@@ -9,21 +9,46 @@
 //! - `/assets/{id}/thumb` 出缩略图（缓存在 `asset-cache/thumbs`）
 //! - `/assets/{id}/download` 跟随 302 下载（缓存在 `asset-cache/files`）
 //!
+//! 0.2.21 的几处改动，都是老板实测「卡」「进度不动」「按钮一直下载中」的
+//! 对症：
+//! - 网格虚拟化（Slint 侧只实例化可视行，见 `asset-page.slint`），缩略图
+//!   只为可视范围下载，最多 6 张并发，图片留在内存里复用。
+//! - 下载进度在 worker 里合并：256KB 一块的进度最多 250ms 报一次，完成时
+//!   另发一次 100%，界面只重画那一张卡（`host::on_ui_assets`），不再每块
+//!   都全窗口重发一遍。
+//! - 搜索/切分类换一个请求号，旧请求回来直接丢掉，加载中显示骨架屏。
+//! - 已缓存的素材加载出来就是「插入时间轴」，不用先点一次下载；下载完/
+//!   失败都复位状态，失败可重试。
+//!
 //! 卡片上的「可商用」来自 `license.commercial_ok`；需要署名的（CC BY 音乐等）
-//! 显示授权名与 `attribution`。下载好之后按钮才变「插入时间轴」：视频/图片
-//! 进主轨，音乐/音效进音频轨（`AddClipAtFirstFree` 按媒体类型选轨）。
+//! 显示「需署名」并带上 `attribution`。下载好之后按钮才是「插入时间轴」：
+//! 视频/图片进主轨，音乐/音效进音频轨（`AddClipAtFirstFree` 按媒体类型选轨）。
 
-use std::collections::HashMap;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use concat_host::assets::{self, AssetItem, Industry};
 use concat_host::AppDirs;
 use concat_project::Command;
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 
 use crate::i18n::{t, tf};
 use crate::studio::Studio;
 use crate::ui::{App, AssetCardData, Assets};
+
+/// 一页多少条。
+const PAGE_SIZE: u32 = 30;
+/// 同时最多下载几张缩略图。
+const THUMB_WORKERS: usize = 6;
+/// 打开一页时先要几行缩略图（够铺满一屏），其余滚到再要。
+const THUMB_FIRST: usize = 18;
+/// 内存里最多留多少张解码后的缩略图（一张 512×288 的 RGBA 约 0.6MB）。
+const THUMB_MEMORY_CAP: usize = 96;
+/// 下载进度最多多久刷新一次界面。
+const PROGRESS_GAP: Duration = Duration::from_millis(250);
 
 /// 五类素材。
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -64,6 +89,17 @@ impl Kind {
             Self::Music => "music",
             Self::Sfx => "sfx",
             Self::Font => "font",
+        }
+    }
+
+    /// 卡片上标的素材类型。
+    fn label(self) -> String {
+        match self {
+            Self::Video => t("assets.video"),
+            Self::Image => t("assets.image"),
+            Self::Music => t("assets.music"),
+            Self::Sfx => t("assets.sfx"),
+            Self::Font => t("assets.font"),
         }
     }
 }
@@ -119,9 +155,17 @@ pub enum AssetsMsg {
     LoadMore,
     /// 卡片上的按钮：没缓存就下载，缓存了就把素材插进时间轴。
     Action(String),
-    Loaded(Box<Result<Bundle, String>>),
-    MoreLoaded(Box<Result<assets::AssetPage, String>>),
-    Thumbs(Box<Vec<(String, PathBuf)>>),
+    /// 网格滚到哪了：只给可视范围（外加一两行）要缩略图。
+    Visible { first: i32, last: i32 },
+    /// 一次搜索/筛选的结果。`generation` 是发请求时的请求号，旧的结果
+    /// 回来时直接丢掉，不会盖掉新的。
+    Loaded(u64, Box<Result<Bundle, String>>),
+    MoreLoaded(u64, Box<Result<assets::AssetPage, String>>),
+    /// 一张缩略图下好了，`result` 是它在缓存里的路径。
+    Thumb {
+        id: String,
+        result: Result<PathBuf, String>,
+    },
     Progress {
         id: String,
         fraction: f32,
@@ -146,15 +190,30 @@ pub struct AssetsPane {
     items: Vec<AssetItem>,
     total: i64,
     page: u32,
+    /// 每次搜索/翻页 +1；回来的结果对不上就是旧请求。
+    request: u64,
     loading: bool,
     loaded_once: bool,
     message: String,
     phase: HashMap<String, Phase>,
     progress: HashMap<String, f32>,
-    thumbs: HashMap<String, slint::Image>,
-    /// 状态真变了才 +1；卡片模型里带缩略图，不能每帧重建。
-    revision: std::cell::Cell<u64>,
-    published: std::cell::Cell<u64>,
+    thumbs: HashMap<String, Image>,
+    /// 下载失败的缩略图，不再为它重试。
+    thumbs_failed: RefCell<HashSet<String>>,
+    /// 还在队列里等缩略图的 id（不重复排队）。
+    thumb_waiting: RefCell<HashSet<String>>,
+    thumb_queue: RefCell<VecDeque<String>>,
+    /// 正在下载的缩略图数，和 [`THUMB_WORKERS`] 比。
+    thumb_running: Cell<usize>,
+    /// 网格最近一次报上来的可视范围。
+    visible: Cell<(usize, usize)>,
+    /// 卡片模型；只有整页/整行换掉时才重建，进度和缩略图只改一行。
+    cards: RefCell<Option<Rc<VecModel<AssetCardData>>>>,
+    index_of: RefCell<HashMap<String, usize>>,
+    /// 整块重发（列表、筛选、状态行变了）。
+    full: Cell<bool>,
+    /// 只需要改一行的卡 id。
+    rows: RefCell<HashSet<String>>,
 }
 
 impl Default for AssetsPane {
@@ -170,14 +229,22 @@ impl Default for AssetsPane {
             items: Vec::new(),
             total: 0,
             page: 1,
+            request: 0,
             loading: false,
             loaded_once: false,
             message: String::new(),
             phase: HashMap::new(),
             progress: HashMap::new(),
             thumbs: HashMap::new(),
-            revision: std::cell::Cell::new(0),
-            published: std::cell::Cell::new(u64::MAX),
+            thumbs_failed: RefCell::new(HashSet::new()),
+            thumb_waiting: RefCell::new(HashSet::new()),
+            thumb_queue: RefCell::new(VecDeque::new()),
+            thumb_running: Cell::new(0),
+            visible: Cell::new((0, THUMB_FIRST - 1)),
+            cards: RefCell::new(None),
+            index_of: RefCell::new(HashMap::new()),
+            full: Cell::new(true),
+            rows: RefCell::new(HashSet::new()),
         }
     }
 }
@@ -190,12 +257,18 @@ impl AssetsPane {
         pane
     }
 
-    fn bump(&self) {
-        self.revision.set(self.revision.get() + 1);
-    }
-
     fn dirs(&self) -> Option<AppDirs> {
         self.dirs.clone()
+    }
+
+    /// 整块重发一次：列表、计数、按钮状态。下一次 publish 会重建卡片模型。
+    fn bump_full(&self) {
+        self.full.set(true);
+    }
+
+    /// 只改一张卡。
+    fn bump_row(&self, id: &str) {
+        self.rows.borrow_mut().insert(id.to_owned());
     }
 
     /// 类型 tab 上的五个词。
@@ -250,21 +323,24 @@ impl AssetsPane {
         if self.category == 0 {
             String::new()
         } else {
-            self.categories
-                .get(self.category - 1)
-                .cloned()
-                .unwrap_or_default()
+            self.categories.get(self.category - 1).cloned().unwrap_or_default()
         }
     }
 
     /// 第一次打开时把行业、分类和第一页一起取回来。
     fn load(&mut self) {
-        if self.loading {
-            return;
-        }
+        self.request = self.request.wrapping_add(1);
+        let generation = self.request;
         self.loading = true;
         self.message.clear();
-        self.bump();
+        // 旧列表先清掉：换类型/换行业/重新搜时显示骨架屏，而不是留着
+        // 上一个关键词的结果假装还在加载。
+        self.items.clear();
+        self.phase.clear();
+        self.progress.clear();
+        self.thumbs.clear();
+        self.thumbs_failed.borrow_mut().clear();
+        self.bump_full();
         let query = self.query.clone();
         let kind = self.kind.param().to_owned();
         let industry = self.industry_name();
@@ -273,74 +349,131 @@ impl AssetsPane {
             move || -> Result<Bundle, String> {
                 let industries = assets::industries().unwrap_or_default();
                 let categories = assets::categories().unwrap_or_default();
-                let page = assets::search(&query, &kind, &industry, &category, 1, 30)?;
+                let page = assets::search(&query, &kind, &industry, &category, 1, PAGE_SIZE)?;
                 Ok(Bundle {
                     industries,
                     categories,
                     page,
                 })
             },
-            |studio, _, _, result| {
-                studio.handle(crate::panes::Msg::Assets(AssetsMsg::Loaded(Box::new(
-                    result,
-                ))));
+            move |studio, _, _, result| {
+                studio.handle(crate::panes::Msg::Assets(AssetsMsg::Loaded(
+                    generation,
+                    Box::new(result),
+                )));
             },
         );
     }
 
     /// 下一页，追加到现有列表后面。
     fn load_more(&mut self) {
-        if self.loading {
+        if self.loading || self.items.is_empty() {
             return;
         }
         self.loading = true;
-        self.bump();
+        self.request = self.request.wrapping_add(1);
+        let generation = self.request;
+        self.bump_full();
         let query = self.query.clone();
         let kind = self.kind.param().to_owned();
         let industry = self.industry_name();
         let category = self.category_name();
         let page = self.page + 1;
         crate::host::spawn(
-            move || assets::search(&query, &kind, &industry, &category, page, 30),
-            |studio, _, _, result| {
-                studio.handle(crate::panes::Msg::Assets(AssetsMsg::MoreLoaded(Box::new(
-                    result,
-                ))));
+            move || assets::search(&query, &kind, &industry, &category, page, PAGE_SIZE),
+            move |studio, _, _, result| {
+                studio.handle(crate::panes::Msg::Assets(AssetsMsg::MoreLoaded(
+                    generation,
+                    Box::new(result),
+                )));
             },
         );
     }
 
-    /// 给刚回来的一页补缩略图：后台逐个下载，好了交回事件循环。
-    fn fetch_thumbs(&self) {
+    /// 一页回来之后：卡片状态按本机缓存先定好，缩略图按可视范围排队。
+    fn settle_page(&mut self) {
+        self.mark_cached();
+        self.thumbs_failed.borrow_mut().clear();
+        // 先铺满第一屏；网格把真实可视范围报上来之后，再补后面几行。
+        self.request_thumbs(0, THUMB_FIRST.saturating_sub(1));
+        let (first, last) = self.visible.get();
+        self.request_thumbs(first, last);
+    }
+
+    /// 已下载的素材直接显示「插入时间轴」，不用先点一次下载。
+    fn mark_cached(&mut self) {
         let Some(dirs) = self.dirs() else {
             return;
         };
-        let mut wanted = Vec::new();
+        let cached = assets::cached_ids(&dirs);
         for item in &self.items {
-            if self.thumbs.contains_key(&item.id) {
-                continue;
+            if cached.contains(&assets::cache_stem(&item.id)) {
+                self.phase.insert(item.id.clone(), Phase::Cached);
             }
-            wanted.push(item.clone());
         }
-        if wanted.is_empty() {
+    }
+
+    /// 给可视范围（外加上下一行）要缩略图；已在内存、在排队或失败过的不再要。
+    fn request_thumbs(&self, first: usize, last: usize) {
+        if self.items.is_empty() || self.dirs.is_none() {
             return;
         }
-        crate::host::spawn(
-            move || {
-                let mut done = Vec::new();
-                for item in &wanted {
-                    if let Ok(path) = assets::thumb(&dirs, item) {
-                        done.push((item.id.clone(), path));
-                    }
-                }
-                done
-            },
-            |studio, _, _, done| {
-                studio.handle(crate::panes::Msg::Assets(AssetsMsg::Thumbs(Box::new(
-                    done,
-                ))));
-            },
-        );
+        let last = last.min(self.items.len() - 1);
+        if first > last {
+            return;
+        }
+        let failed = self.thumbs_failed.borrow();
+        let mut waiting = self.thumb_waiting.borrow_mut();
+        let mut queue = self.thumb_queue.borrow_mut();
+        for index in first..=last {
+            let item = &self.items[index];
+            if self.thumbs.contains_key(&item.id)
+                || failed.contains(&item.id)
+                || waiting.contains(&item.id)
+            {
+                continue;
+            }
+            waiting.insert(item.id.clone());
+            queue.push_back(item.id.clone());
+        }
+        drop(failed);
+        drop(waiting);
+        drop(queue);
+        self.pump_thumbs();
+    }
+
+    /// 起缩略图下载线程，最多 [`THUMB_WORKERS`] 个同时跑。
+    fn pump_thumbs(&self) {
+        while self.thumb_running.get() < THUMB_WORKERS {
+            let Some(id) = self.thumb_queue.borrow_mut().pop_front() else {
+                break;
+            };
+            let Some(item) = self.items.iter().find(|item| item.id == id).cloned() else {
+                self.thumb_waiting.borrow_mut().remove(&id);
+                continue;
+            };
+            let Some(dirs) = self.dirs() else {
+                return;
+            };
+            self.thumb_running.set(self.thumb_running.get() + 1);
+            let thread_id = id.clone();
+            let spawned = std::thread::Builder::new()
+                .name("concat-asset-thumb".into())
+                .spawn(move || {
+                    let result = assets::thumb(&dirs, &item);
+                    crate::host::on_ui_assets(move |studio, _| {
+                        studio.handle(crate::panes::Msg::Assets(AssetsMsg::Thumb {
+                            id: thread_id,
+                            result,
+                        }));
+                    });
+                });
+            if spawned.is_err() {
+                log::warn!("assets: 起不了缩略图线程，{id} 先留占位图");
+                self.thumb_running.set(self.thumb_running.get().saturating_sub(1));
+                self.thumb_waiting.borrow_mut().remove(&id);
+            }
+        }
     }
 
     /// 下载一个素材；缓存里已有就只把状态写对。
@@ -357,21 +490,29 @@ impl AssetsPane {
         }
         self.phase.insert(item.id.clone(), Phase::Downloading);
         self.progress.insert(item.id.clone(), 0.0);
-        self.bump();
+        self.bump_row(&item.id);
         let key = item.id.clone();
         let id2 = key.clone();
         crate::host::spawn(
             move || {
                 let cancel = std::sync::atomic::AtomicBool::new(false);
-                let report = key.clone();
+                // 合并进度：一个 256KB 块报一条，界面会被重绘淹没；
+                // 250ms 一条足够看出在动，完成时另有一次强制刷新。
+                let mut last: Option<Instant> = None;
+                let report = key;
                 assets::download(
                     &dirs,
                     &item,
                     &mut |fraction, _| {
-                        let report = report.clone();
-                        crate::host::on_ui(move |studio, _, _| {
+                        let now = Instant::now();
+                        if last.is_some_and(|at: Instant| now.duration_since(at) < PROGRESS_GAP) {
+                            return;
+                        }
+                        last = Some(now);
+                        let id = report.clone();
+                        crate::host::on_ui_assets(move |studio, _| {
                             studio.handle(crate::panes::Msg::Assets(AssetsMsg::Progress {
-                                id: report.clone(),
+                                id: id.clone(),
                                 fraction,
                             }));
                         });
@@ -392,18 +533,20 @@ impl AssetsPane {
         match result {
             Ok(_) => {
                 self.phase.insert(id.to_owned(), Phase::Cached);
-                self.progress.remove(id);
+                self.progress.insert(id.to_owned(), 1.0);
             }
             Err(error) => {
                 self.phase.insert(id.to_owned(), Phase::Failed);
+                self.progress.remove(id);
                 self.message = error;
             }
         }
-        self.bump();
+        self.bump_full();
     }
 
     fn action(&mut self, id: &str, studio: &mut Studio) {
         match self.phase.get(id).copied().unwrap_or(Phase::Idle) {
+            Phase::Downloading => {}
             Phase::Cached => {
                 let Some(dirs) = self.dirs() else {
                     return;
@@ -411,11 +554,22 @@ impl AssetsPane {
                 if let Some(path) = assets::cached(&dirs, id) {
                     self.insert(id, &path, studio);
                 } else {
+                    // 缓存文件被外面删了：重新下载，按钮回到下载中。
+                    self.phase.remove(id);
                     self.download(id);
                 }
             }
-            Phase::Downloading => {}
-            Phase::Idle | Phase::Failed => self.download(id),
+            Phase::Idle | Phase::Failed => {
+                if let Some(dirs) = self.dirs()
+                    && let Some(path) = assets::cached(&dirs, id)
+                {
+                    // 打开面板时它还没缓存，现在有了：点一下直接插，不再下载。
+                    self.phase.insert(id.to_owned(), Phase::Cached);
+                    self.insert(id, &path, studio);
+                    return;
+                }
+                self.download(id);
+            }
         }
     }
 
@@ -426,14 +580,14 @@ impl AssetsPane {
         };
         if kind_of(&item) == Kind::Font {
             self.message = tf("assets.fontCached", &[&item.title]);
-            self.bump();
+            self.bump_full();
             return;
         }
         let summary = match concat_host::media::probe(path.to_string_lossy().as_ref()) {
             Ok(summary) => summary,
             Err(error) => {
                 self.message = error;
-                self.bump();
+                self.bump_full();
                 return;
             }
         };
@@ -457,16 +611,58 @@ impl AssetsPane {
         } else {
             self.message = t("assets.insertFailed");
         }
-        self.bump();
+        self.bump_full();
     }
 
-    /// 面板状态变了才发布：卡片模型里带着缩略图，不能每帧重建。
+    /// 卡片模型里的一张卡：状态、进度、缩略图都从当前状态现取。
+    fn card_data(&self, item: &AssetItem) -> AssetCardData {
+        let phase = self.phase.get(&item.id).copied().unwrap_or(Phase::Idle);
+        let progress = self.progress.get(&item.id).copied().unwrap_or(0.0);
+        let kind = kind_of(item);
+        AssetCardData {
+            id: SharedString::from(item.id.clone()),
+            title: SharedString::from(item.title.clone()),
+            detail: SharedString::from(self.detail(item)),
+            kind: kind.index(),
+            kind_label: SharedString::from(kind.label()),
+            thumb: self.thumbs.get(&item.id).cloned().unwrap_or_default(),
+            has_thumb: self.thumbs.contains_key(&item.id),
+            commercial: item.license.commercial_ok,
+            needs_attribution: item.license.attribution_required,
+            attribution: SharedString::from(self.attribution(item)),
+            state: phase.code(),
+            progress,
+            action: SharedString::from(self.action_label(item, phase, progress)),
+        }
+    }
+
+    /// 状态变了才发布：整页、整行分开走，进度和缩略图只重画那一张卡。
     pub fn publish(&self, app: &App) {
         let global = app.global::<Assets>();
-        let revision = self.revision.get();
-        if self.published.get() == revision && global.get_kind() == self.kind.index() {
+        if global.get_kind() == self.kind.index() && !self.full.get() {
+            let rows: Vec<String> = self.rows.borrow_mut().drain().collect();
+            if rows.is_empty() {
+                return;
+            }
+            let model = self.cards.borrow().clone();
+            let Some(model) = model else {
+                return;
+            };
+            let index_of = self.index_of.borrow();
+            for id in rows {
+                let Some(&index) = index_of.get(&id) else {
+                    continue;
+                };
+                let Some(item) = self.items.get(index) else {
+                    continue;
+                };
+                if index < model.row_count() {
+                    model.set_row_data(index, self.card_data(item));
+                }
+            }
             return;
         }
+        self.rows.borrow_mut().clear();
         global.set_kind(self.kind.index());
         global.set_kinds(ModelRc::new(VecModel::from(self.kinds())));
         global.set_industry(self.industry as i32);
@@ -485,26 +681,17 @@ impl AssetsPane {
             String::new()
         };
         global.set_stats(SharedString::from(stats));
-        let mut cards = Vec::with_capacity(self.items.len());
-        for item in &self.items {
-            let phase = self.phase.get(&item.id).copied().unwrap_or(Phase::Idle);
-            let progress = self.progress.get(&item.id).copied().unwrap_or(0.0);
-            cards.push(AssetCardData {
-                id: SharedString::from(item.id.clone()),
-                title: SharedString::from(item.title.clone()),
-                detail: SharedString::from(self.detail(item)),
-                kind: kind_of(item).index(),
-                thumb: self.thumbs.get(&item.id).cloned().unwrap_or_default(),
-                has_thumb: self.thumbs.contains_key(&item.id),
-                commercial: item.license.commercial_ok,
-                attribution: SharedString::from(self.attribution(item)),
-                state: phase.code(),
-                progress,
-                action: SharedString::from(self.action_label(item, phase, progress)),
-            });
-        }
-        global.set_items(ModelRc::new(VecModel::from(cards)));
-        self.published.set(revision);
+        let cards: Vec<AssetCardData> = self.items.iter().map(|item| self.card_data(item)).collect();
+        let model = Rc::new(VecModel::from(cards));
+        global.set_items(ModelRc::from(model.clone()));
+        *self.cards.borrow_mut() = Some(model);
+        *self.index_of.borrow_mut() = self
+            .items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| (item.id.clone(), index))
+            .collect();
+        self.full.set(false);
     }
 
     fn detail(&self, item: &AssetItem) -> String {
@@ -532,7 +719,7 @@ impl AssetsPane {
             item.license.name.clone()
         };
         if item.license.attribution_required && !item.attribution.trim().is_empty() {
-            format!("{} · 需署名：{}", name, item.attribution)
+            format!("{} · {}：{}", name, t("assets.needsCredit"), item.attribution)
         } else if item.license.attribution_required {
             format!("{} · {}", name, t("assets.attribution"))
         } else {
@@ -558,6 +745,41 @@ impl AssetsPane {
         }
     }
 
+    /// 缩略图回来了：进内存、改这一行。
+    fn thumb_arrived(&mut self, id: String, result: Result<PathBuf, String>) {
+        self.thumb_running.set(self.thumb_running.get().saturating_sub(1));
+        self.thumb_waiting.borrow_mut().remove(&id);
+        // 换页之后才回来的旧图：不认识的 id 直接丢。
+        let known = self.items.iter().any(|item| item.id == id);
+        match result {
+            Ok(path) if known => {
+                if let Ok(image) = Image::load_from_path(&path) {
+                    if self.thumbs.len() >= THUMB_MEMORY_CAP {
+                        // 内存里图太多：清空后把可视范围重新要一遍（磁盘里有
+                        // 缓存，不会再走网络）。
+                        self.thumbs.clear();
+                        *self.thumbs_failed.borrow_mut() = HashSet::new();
+                        self.bump_full();
+                        let (first, last) = self.visible.get();
+                        self.request_thumbs(first, last);
+                    }
+                    self.thumbs.insert(id.clone(), image);
+                    self.bump_row(&id);
+                } else {
+                    self.thumbs_failed.borrow_mut().insert(id.clone());
+                }
+            }
+            Ok(_) => {}
+            Err(error) => {
+                log::debug!("assets: 缩略图 {id} 下载失败了：{error}");
+                if known {
+                    self.thumbs_failed.borrow_mut().insert(id);
+                }
+            }
+        }
+        self.pump_thumbs();
+    }
+
     pub fn update(&mut self, msg: AssetsMsg, studio: &mut Studio) {
         match msg {
             AssetsMsg::Shown(on) => {
@@ -571,8 +793,6 @@ impl AssetsPane {
                 if kind.index() != self.kind.index() {
                     self.kind = kind;
                     self.page = 1;
-                    self.items.clear();
-                    self.thumbs.clear();
                     self.load();
                 }
             }
@@ -594,7 +814,7 @@ impl AssetsPane {
             }
             AssetsMsg::QueryEdited(text) => {
                 self.query = text;
-                self.bump();
+                self.bump_full();
             }
             AssetsMsg::Search => {
                 self.page = 1;
@@ -602,7 +822,20 @@ impl AssetsPane {
             }
             AssetsMsg::LoadMore => self.load_more(),
             AssetsMsg::Action(id) => self.action(&id, studio),
-            AssetsMsg::Loaded(result) => {
+            AssetsMsg::Visible { first, last } => {
+                let first = first.max(0) as usize;
+                let last = last.max(0) as usize;
+                if last < first || (first, last) == self.visible.get() {
+                    return;
+                }
+                self.visible.set((first, last));
+                // 上下各多要一行，滚回去时不用等一下。
+                self.request_thumbs(first.saturating_sub(THUMB_FIRST / 6), last + THUMB_FIRST / 6);
+            }
+            AssetsMsg::Loaded(generation, result) => {
+                if generation != self.request {
+                    return;
+                }
                 self.loading = false;
                 match *result {
                     Ok(bundle) => {
@@ -613,49 +846,45 @@ impl AssetsPane {
                             self.categories = bundle.categories;
                         }
                         self.total = bundle.page.total;
-                        self.page = 1;
+                        self.page = bundle.page.page.max(1);
                         self.items = bundle.page.items;
                         self.message.clear();
-                        self.bump();
-                        self.fetch_thumbs();
+                        self.settle_page();
+                        self.bump_full();
                     }
                     Err(error) => {
                         self.message = error;
-                        self.bump();
+                        self.items.clear();
+                        self.bump_full();
                     }
                 }
             }
-            AssetsMsg::MoreLoaded(result) => {
+            AssetsMsg::MoreLoaded(generation, result) => {
+                if generation != self.request {
+                    return;
+                }
                 self.loading = false;
                 match *result {
                     Ok(page) => {
-                        self.page = page.page;
+                        self.page = page.page.max(1);
                         self.total = page.total;
                         self.items.extend(page.items);
-                        self.bump();
-                        self.fetch_thumbs();
+                        self.mark_cached();
+                        self.settle_page();
+                        self.bump_full();
                     }
                     Err(error) => {
                         self.message = error;
-                        self.bump();
+                        self.bump_full();
                     }
                 }
             }
-            AssetsMsg::Thumbs(done) => {
-                let mut changed = false;
-                for (id, path) in *done {
-                    if let Ok(image) = slint::Image::load_from_path(&path) {
-                        self.thumbs.insert(id, image);
-                        changed = true;
-                    }
-                }
-                if changed {
-                    self.bump();
-                }
-            }
+            AssetsMsg::Thumb { id, result } => self.thumb_arrived(id, result),
             AssetsMsg::Progress { id, fraction } => {
-                self.progress.insert(id, fraction.clamp(0.0, 1.0));
-                self.bump();
+                if self.phase.get(&id).copied() == Some(Phase::Downloading) {
+                    self.progress.insert(id.clone(), fraction.clamp(0.0, 1.0));
+                    self.bump_row(&id);
+                }
             }
             AssetsMsg::Downloaded { id, result } => {
                 let title = self
@@ -667,6 +896,7 @@ impl AssetsPane {
                 self.note_downloaded(&id, result);
                 if self.phase.get(&id).copied() == Some(Phase::Cached) {
                     self.message = tf("assets.downloaded", &[&title]);
+                    self.bump_full();
                 }
             }
         }

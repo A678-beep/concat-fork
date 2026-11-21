@@ -58,6 +58,15 @@ impl Studio {
         self.assets.publish(app);
     }
 
+    /// The library's assets page alone: a download's progress, or one of
+    /// its thumbnails, arrives on a worker and changes nothing else. The
+    /// page publishes only what changed - one card's row, and never the
+    /// whole grid - so a tick costs a repaint of the card rather than the
+    /// window. See `host::on_ui_assets`.
+    pub fn publish_assets(&self, app: &App) {
+        self.assets.publish(app);
+    }
+
     /// The project's saved state and the toast, and nothing else: what a
     /// save changes. The autosave publishes only this - a whole publish a
     /// second and a half after every edit was all cost (#622).

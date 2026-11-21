@@ -437,6 +437,15 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
             i18n::t("start.safeMode")
         };
         studio.notify(&notice, false);
+    } else if platform::draws_in_software() {
+        // 0.2.21: the window says how it is drawn. A fall back to the CPU is
+        // the first thing to rule out when the app feels slow, and the way
+        // back - Settings > General's GPU switch, or `--force-gpu` - is
+        // hard to find in a window that slow. The log says it too; see
+        // `platform::select_backend`.
+        log::warn!("start: the window is drawn in software; saying so and naming the way back");
+        let notice = i18n::t("start.softwareRender");
+        studio.warn(&notice);
     }
     studio.reload_packages(false);
     studio.watch_packages();
@@ -1892,6 +1901,18 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         assets.on_action(on_window!(|state, id: SharedString| {
             state.handle(Msg::Assets(AssetsMsg::Action(id.to_string())));
         }));
+        // 网格滚到哪了：只它要缩略图。这条不是用户做的改动，不整窗口
+        // 重发一次 - 缩略图下好后由 `host::on_ui_assets` 只刷素材库。
+        // A layout pass may run while a publish holds the studio; then the
+        // next row crossing says it again, and nothing is lost but a moment.
+        assets.on_visible_range(move |first: i32, last: i32| {
+            Shell::with(|shell, _app| {
+                let Ok(mut studio) = shell.studio.try_borrow_mut() else {
+                    return;
+                };
+                studio.handle(Msg::Assets(AssetsMsg::Visible { first, last }));
+            });
+        });
     }
 
     // ── the library's Audio page ──
@@ -3509,6 +3530,38 @@ pub fn draw_in_software() {
         log::warn!("start: drawing in software from now on, as --software asks");
         preferences.software_gpu = true;
         preferences.save(&dirs);
+    }
+}
+
+/// `concat --force-gpu`: draws on the GPU this launch and every one after
+/// it. Clears both the setting's switch and safe start's mark - a launch
+/// that died while starting leaves the next ones in software, and the slow
+/// window is exactly where Settings' switch is hard to reach. Whatever the
+/// driver does next decides: a launch that dies while starting puts the
+/// mark back by itself.
+pub fn draw_on_gpu() {
+    if !cfg!(any(windows, target_os = "linux", target_os = "macos")) {
+        log::warn!("start: --force-gpu asked for the GPU, but this platform always draws on it; nothing changed");
+        return;
+    }
+    let Ok(dirs) = concat_host::AppDirs::locate() else {
+        return;
+    };
+    // Safe start's mark: a launch that died while starting left it, and
+    // without clearing it the next `safe_start` reads the death again and
+    // turns the software rendering right back on.
+    concat_host::jobs::Tripwire::clear(&dirs.data.join("startup"));
+    let mut preferences = prefs::Preferences::load(&dirs);
+    let was = preferences.draws_in_software();
+    preferences.software_gpu = false;
+    preferences.software_after_crash = None;
+    preferences.save(&dirs);
+    if was {
+        log::warn!(
+            "start: --force-gpu cleared the software-rendering setting and safe start's mark; this launch draws on the GPU"
+        );
+    } else {
+        log::info!("start: --force-gpu asked for the GPU, and the settings already draw on it");
     }
 }
 

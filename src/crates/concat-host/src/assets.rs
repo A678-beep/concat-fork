@@ -499,11 +499,37 @@ pub fn cached(dirs: &AppDirs, id: &str) -> Option<PathBuf> {
     cached_file(&cache_dir(dirs).join("files"), id)
 }
 
+/// 已下载素材的 id 集合，一次读目录：一页加载完成时把所有卡片的状态一次
+/// 定好，已缓存的直接显示「插入时间轴」，不用再点一次下载。
+pub fn cached_ids(dirs: &AppDirs) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    let Ok(entries) = std::fs::read_dir(cache_dir(dirs).join("files")) else {
+        return ids;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext != "part")
+            && let Some(stem) = path.file_stem().and_then(|name| name.to_str())
+        {
+            ids.insert(stem.to_owned());
+        }
+    }
+    ids
+}
+
 /// 一个文件名安全的 id。
 fn safe(id: &str) -> String {
     id.chars()
         .map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' })
         .collect()
+}
+
+/// 一个 id 在缓存文件名里的写法；[`cached_ids`] 返回的集合按它比较。
+pub fn cache_stem(id: &str) -> String {
+    safe(id)
 }
 
 /// 查询参数里一个值的转义。

@@ -2902,8 +2902,12 @@ export component MediaPane inherits Rectangle {
                     text: I18n.t("mediaPane.noTemplatesYetMark");
                 }
 
-                // 素材库：搜索、网格、下载与插入时间轴。
-                if root.tab == 9: AssetPage { }
+                // 素材库：搜索、网格、下载与插入时间轴。滚到哪、可视多高
+                // 传进去，网格才能只画可视区域的卡片（0.2.21 卡顿修复）。
+                if root.tab == 9: AssetPage {
+                    scroll-top: pages.scrolled;
+                    viewport: pages.height;
+                }
             }
         }
     }

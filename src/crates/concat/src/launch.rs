@@ -6,7 +6,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-const USAGE: &str = "usage: concat [--project <PROJECT_DIRECTORY> | --software | --mcp [auto|window|headless] | --schema | --version | --smoke | --smoke-export <CLIP> | --whisper-cpu]";
+const USAGE: &str = "usage: concat [--project <PROJECT_DIRECTORY> | --software | --force-gpu | --mcp [auto|window|headless] | --schema | --version | --smoke | --smoke-export <CLIP> | --whisper-cpu]";
 
 /// What one run of the binary was asked to do.
 #[derive(Debug, PartialEq, Eq)]
@@ -18,6 +18,11 @@ pub enum Launch {
     /// draws the window as coloured squares, where Settings' GPU switch
     /// cannot be seen to be turned off (#389, #242, #449).
     Software,
+    /// The window drawn on the GPU, clearing Settings' software-rendering
+    /// switch and safe start's mark first: the way back for a machine left
+    /// slow by a start that died, where the slow window makes the GPU switch
+    /// impossible to find.
+    ForceGpu,
     /// Serve the Concat API to an AI agent as an MCP server on standard
     /// input and output, with no window: what an agent's configuration
     /// names (docs/MCP.md). The mode, when given: through the window's
@@ -66,6 +71,8 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Launch, String>
         Launch::Smoke
     } else if option == "--software" {
         Launch::Software
+    } else if option == "--force-gpu" {
+        Launch::ForceGpu
     } else if option == "--whisper-cpu" {
         Launch::WhisperCpu
     } else if option == "--mcp" {
@@ -132,6 +139,7 @@ mod tests {
         assert!(parse_strs(&["--smoke-export"]).is_err());
         assert!(parse_strs(&["--smoke-export", "clip.mp4", "extra"]).is_err());
         assert_eq!(parse_strs(&["--software"]).unwrap(), Launch::Software);
+        assert_eq!(parse_strs(&["--force-gpu"]).unwrap(), Launch::ForceGpu);
         assert_eq!(parse_strs(&["--whisper-cpu"]).unwrap(), Launch::WhisperCpu);
         for args in [
             vec!["--version", "--smoke"],

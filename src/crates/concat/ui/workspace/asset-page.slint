@@ -8,12 +8,16 @@ import { Button } from "../primitives/modal.slint";
 import { Field } from "../primitives/modal.slint";
 import { Select } from "../primitives/select.slint";
 
-// 星籁免费商用素材库（0.2.20）。
+// 星籁免费商用素材库（0.2.20 起）。
 //
 // 与「媒体」页同一块面板：左侧分类列选类型与行业，右侧工具条搜索，网格
-// 显示缩略图。每个卡片标「可商用」；需要署名的素材显示授权与 attribution。
-// 下载缓存在 `%APPDATA%\app.concat.editor\asset-cache`，缓存好了按钮变成
-// 「插入时间轴」。数据全部来自平台 `/assets/*` 真实接口，不用 mock。
+// 显示缩略图。每个卡片标「可商用」；需要署名的素材显示「需署名」与
+// attribution。下载缓存在 `%APPDATA%\app.concat.editor\asset-cache`，缓存好了
+// 按钮变成「插入时间轴」。数据全部来自平台 `/assets/*` 真实接口，不用 mock。
+//
+// 0.2.21 的卡顿修复在这里：网格只实例化可视区域里的卡片（虚拟化），
+// 滚动到哪一行就把 `visible-range(first, last)` 报给 Rust，只给这些卡片下载
+// 缩略图；加载中显示骨架屏而不是空白。
 
 export struct AssetCardData {
     id: string,
@@ -21,9 +25,13 @@ export struct AssetCardData {
     detail: string,
     /// 0 视频 / 1 图片 / 2 音乐 / 3 音效 / 4 字体
     kind: int,
+    /// 类型角标上的字：视频/图片/音乐/音效/字体。
+    kind-label: string,
     thumb: image,
     has-thumb: bool,
     commercial: bool,
+    /// 授权要求署名（CC BY 一类）。
+    needs-attribution: bool,
     /// 授权与署名说明；需要署名时带 CC BY 的 attribution。
     attribution: string,
     /// 0 未下载 / 1 下载中 / 2 已缓存 / 3 失败
@@ -58,6 +66,9 @@ export global Assets {
     callback load-more();
     callback action(id: string);
     callback shown(on: bool);
+    /// 网格可视区域：`first`..`last` 是 items 的下标（含）。滚动时才会变，
+    /// 用来只给看得见的卡片下载缩略图。
+    callback visible-range(first: int, last: int);
 }
 
 // 一张素材卡。
@@ -107,6 +118,44 @@ component AssetCard inherits Rectangle {
                 Text {
                     text: I18n.t("assets.commercial");
                     color: Theme.on-accent;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                    padding-left: 6px;
+                    padding-right: 6px;
+                }
+            }
+
+            // 需要署名的素材再压一个角标，免得只有一行小字才看得出。
+            if root.data.needs-attribution: Rectangle {
+                x: 6px;
+                y: root.data.commercial ? 28px : 6px;
+                height: 18px;
+                border-radius: Theme.r-xs;
+                background: Theme.warn;
+
+                Text {
+                    text: I18n.t("assets.needsCredit");
+                    color: Theme.fg;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                    padding-left: 6px;
+                    padding-right: 6px;
+                }
+            }
+
+            // 类型角标压在图左下角：视频/图片/音乐/音效/字体。
+            Rectangle {
+                x: 6px;
+                y: parent.height - self.height - 6px;
+                height: 18px;
+                border-radius: Theme.r-xs;
+                background: Theme.panel;
+
+                Text {
+                    text: root.data.kind-label;
+                    color: Theme.fg;
                     font-size: Theme.fs-xs;
                     vertical-alignment: center;
                     horizontal-alignment: center;
@@ -168,10 +217,71 @@ component AssetCard inherits Rectangle {
     }
 }
 
+// 加载时的骨架卡：和真卡一样高，网格不跳。
+component AssetSkeleton inherits Rectangle {
+    in property <length> thumb-height;
+
+    border-radius: Theme.r;
+    background: Theme.raised;
+    clip: true;
+
+    VerticalLayout {
+        spacing: 0;
+
+        Rectangle {
+            height: root.thumb-height;
+            background: Theme.well;
+        }
+
+        VerticalLayout {
+            padding: 6px;
+            padding-top: 6px;
+            spacing: 4px;
+
+            Rectangle { height: 9px; border-radius: 3px; background: Theme.well; }
+            Rectangle { height: 8px; border-radius: 3px; background: Theme.well; width: 55%; }
+            Rectangle { height: 8px; border-radius: 3px; background: Theme.well; width: 70%; }
+            Rectangle { height: 26px; border-radius: Theme.r-xs; background: Theme.well; }
+        }
+    }
+}
+
+// 加载中的骨架网格：两行假卡，位置和真网格同一套算术，加载完不跳。
+component AssetSkeletonGrid inherits Rectangle {
+    property <length> gap: 8px;
+    property <length> min-card: 158px;
+    property <int> cols: Math.max(1,
+        Math.floor((root.width + root.gap) / (root.min-card + root.gap)));
+    property <length> card-w: (root.width - (root.cols - 1) * root.gap) / root.cols;
+    property <length> thumb-h: root.card-w * 9 / 16;
+    property <length> card-h: root.thumb-h + 92px;
+
+    height: 2 * (root.card-h + root.gap) - root.gap;
+
+    for index in 2 * root.cols: AssetSkeleton {
+        x: Math.mod(index, root.cols) * (root.card-w + root.gap);
+        y: Math.floor(index / root.cols) * (root.card-h + root.gap);
+        width: root.card-w;
+        height: root.card-h;
+        thumb-height: root.thumb-h;
+    }
+}
+
 // 网格：Slint 没有 auto-fill grid，按列数算坐标（和媒体页同一套算术）。
+//
+// 虚拟化：只实例化可视行（上下各多一行）。`scroll-top` 是整页滚了多少，
+// `page-top` 是 AssetPage 的绝对 y，两者相减得到网格在页面里的位置，
+// 于是可视范围不用 Rust 参与就能算出来。
 component AssetGrid inherits Rectangle {
     in property <[AssetCardData]> items;
+    /// 页面可视高度。
+    in property <length> viewport;
+    /// 整页已经滚了多少（0 = 顶部）。
+    in property <length> scroll-top;
+    /// AssetPage 的绝对 y：算网格自己相对页面滚动了多少。
+    in property <length> page-top;
     callback action(id: string);
+    callback visible-range(first: int, last: int);
 
     property <length> gap: 8px;
     property <length> min-card: 158px;
@@ -180,24 +290,53 @@ component AssetGrid inherits Rectangle {
     property <length> card-w: (root.width - (root.cols - 1) * root.gap) / root.cols;
     property <length> thumb-h: root.card-w * 9 / 16;
     property <length> card-h: root.thumb-h + 92px;
+    property <length> row-h: root.card-h + root.gap;
     property <int> rows: Math.ceil(root.items.length / root.cols);
 
-    height: root.rows > 0 ? root.rows * (root.card-h + root.gap) - root.gap : 0px;
+    height: root.rows > 0 ? root.rows * root.row-h - root.gap : 0px;
 
-    for item[index] in root.items: AssetCard {
+    // 网格顶边相对页面内容顶边的位移，和页面滚动量一起算可视首行。
+    property <length> grid-top: root.absolute-position.y - root.page-top;
+    property <length> first-y: root.scroll-top - root.grid-top;
+    property <int> first-row: Math.max(0,
+        Math.min(root.rows - 1, Math.floor((root.first-y - root.row-h) / root.row-h)));
+    property <int> last-row: Math.max(root.first-row,
+        Math.min(root.rows - 1,
+            Math.floor((root.first-y + root.viewport) / root.row-h) + 1));
+    property <int> first-index: root.first-row * root.cols;
+    property <int> last-index: Math.min(root.items.length - 1,
+        (root.last-row + 1) * root.cols - 1);
+
+    // 可视范围变了才告诉 Rust：滚一整行才变一次，不是每个像素。
+    changed first-index => { root.visible-range(root.first-index, root.last-index); }
+    changed last-index => { root.visible-range(root.first-index, root.last-index); }
+
+    for item[index] in root.items: Rectangle {
         x: Math.mod(index, root.cols) * (root.card-w + root.gap);
-        y: Math.floor(index / root.cols) * (root.card-h + root.gap);
+        y: Math.floor(index / root.cols) * root.row-h;
         width: root.card-w;
         height: root.card-h;
-        thumb-height: root.thumb-h;
-        data: item;
-        act => { root.action(item.id); }
+        background: Colors.transparent;
+
+        // 真正的卡片只在可视区域里建：400+ 张也只画看得见的十几张。
+        if index >= root.first-index && index <= root.last-index: AssetCard {
+            width: 100%;
+            height: 100%;
+            thumb-height: root.thumb-h;
+            data: item;
+            act => { root.action(item.id); }
+        }
     }
 }
 
 // 素材库的一页：类型 tab、搜索、网格、加载更多、授权说明。
 export component AssetPage inherits VerticalLayout {
     spacing: 4px;
+
+    /// 页面滚到哪了，由 media-pane 的 PaneScroll 传进来；网格虚拟化用。
+    in property <length> scroll-top: 0px;
+    /// 页面可视高度。
+    in property <length> viewport: 0px;
 
     // ── 类型 tab ──
     Rectangle {
@@ -255,6 +394,9 @@ export component AssetPage inherits VerticalLayout {
         }
     }
 
+    // ── 加载中：骨架屏（只在还没有列表时；翻页时旧列表留着）──
+    if Assets.loading && Assets.items.length == 0: AssetSkeletonGrid { }
+
     if Assets.loading: Text {
         text: I18n.t("assets.loading");
         color: Theme.fg-muted;
@@ -293,7 +435,11 @@ export component AssetPage inherits VerticalLayout {
 
         AssetGrid {
             items: Assets.items;
+            viewport: root.viewport;
+            scroll-top: root.scroll-top;
+            page-top: root.absolute-position.y;
             action(id) => { Assets.action(id); }
+            visible-range(first, last) => { Assets.visible-range(first, last); }
         }
     }
 

@@ -39,6 +39,27 @@ use crate::gpu::Gpu;
 /// own; 0 follows the display. See [`apply_ui_scale`].
 static UI_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+/// The window renderer this launch got, as one line for the log, the
+/// startup notice and support: `wgpu · <adapter>` when the window and the
+/// monitor share a GPU device, `skia-software · …` when it draws on the
+/// CPU. Written once by [`select_backend`].
+static RENDERER: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Whether the window draws on the CPU this launch. Read by the startup
+/// notice; see `start.softwareRender` in the locale files.
+static SOFTWARE_RENDERER: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// How the window is drawn, or that the backend was never chosen.
+pub fn renderer() -> &'static str {
+    RENDERER.get().map(String::as_str).unwrap_or("not selected yet")
+}
+
+/// Whether the window draws on the CPU rather than the GPU.
+pub fn draws_in_software() -> bool {
+    SOFTWARE_RENDERER.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Remembers the interface scale [`apply_ui_scale`] applies: a percent of
 /// the display's own scale, or `None` for the display's.
 pub fn set_ui_scale(percent: Option<u32>) {
@@ -473,6 +494,21 @@ pub fn select_backend(
     } else if gpu.is_none() {
         log::warn!("gpu: wanted a GPU and found no adapter; the monitor composites on the CPU");
     }
+
+    // Which renderer the window actually got, said once and recorded: the
+    // one line a "why is this so slow" report needs, and what the startup
+    // notice reads. `--force-gpu` (0.2.21) is the way back when it says
+    // software.
+    let drawn = if software {
+        "skia-software · the CPU rasteriser".to_owned()
+    } else if let Some(gpu) = &gpu {
+        format!("wgpu · {}", crate::gpu::adapter_words(&gpu.adapter.get_info()))
+    } else {
+        "skia · the platform's own surface".to_owned()
+    };
+    log::info!("renderer: the window draws with {drawn}");
+    let _ = RENDERER.set(drawn);
+    SOFTWARE_RENDERER.store(software, std::sync::atomic::Ordering::Relaxed);
 
     let mut selector = slint::BackendSelector::new()
         .backend_name("winit".into())

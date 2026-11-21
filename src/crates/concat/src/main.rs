@@ -79,6 +79,10 @@ fn main() -> Result<(), slint::PlatformError> {
             concat::draw_in_software();
             concat::run_with_project(None).inspect_err(concat::report_startup_failure)
         }
+        Launch::ForceGpu => {
+            concat::draw_on_gpu();
+            concat::run_with_project(None).inspect_err(concat::report_startup_failure)
+        }
         // Logged and returned, never put up in a dialog: a smoke run is a
         // machine's, and a modal box with nobody to press OK would hang it
         // rather than fail it. Returning the error exits non-zero.

@@ -107,6 +107,9 @@ export component PaneScroll inherits Rectangle {
     property <length> overflow: Math.max(0px, content.preferred-height - root.height);
     property <length> offset;
     property <length> at: Math.max(-root.overflow, Math.min(0px, root.offset));
+    /// How far the content is scrolled down, always zero or more. Read by the
+    /// assets grid, which draws only the rows on screen (0.2.21).
+    out property <length> scrolled: -root.at;
     /// Where the column was when the finger landed, and where the finger did.
     property <length> press-at;
     property <length> press-y;

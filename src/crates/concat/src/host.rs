@@ -364,6 +364,24 @@ pub fn on_ui(body: impl FnOnce(&mut Studio, &App, &Models) + Send + 'static) {
     on_ui_gated(None, body);
 }
 
+/// [`on_ui`] for a report that changes one pane and nothing else - the
+/// assets page's thumbnails and download progress. A whole publish per
+/// tick rebuilt the timeline's lanes and every other pane's models, which
+/// on a software rasteriser was the assets page's own download appearing
+/// frozen while the grid was redrawn over and over; publish the one pane
+/// instead. The pane's `publish` is cheap when nothing of its own changed.
+pub fn on_ui_assets(body: impl FnOnce(&mut Studio, &App) + Send + 'static) {
+    let _ = slint::invoke_from_event_loop(move || {
+        Shell::with(|shell, app| {
+            {
+                let mut studio = shell.studio.borrow_mut();
+                body(&mut studio, &app);
+            }
+            shell.studio.borrow().publish_assets(&app);
+        });
+    });
+}
+
 /// [`on_ui`] for a report about the open project - a job's progress -
 /// made in `epoch` (see [`project_epoch`]): dropped once that project has
 /// closed, like a [`spawn_in_project`] result.
