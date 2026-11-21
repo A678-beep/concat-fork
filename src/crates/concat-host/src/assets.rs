@@ -100,6 +100,8 @@ pub struct AssetPage {
 /// 一个行业，带素材数。
 #[derive(Clone, Debug, Default)]
 pub struct Industry {
+    /// 平台代码（`catering` 之类）；老数据没有代码时为空，请求退回用名字。
+    pub code: String,
     pub name: String,
     pub count: i64,
 }
@@ -290,6 +292,7 @@ pub fn search(
     encode("type", kind);
     encode("industry", industry);
     encode("category", category);
+    let url = api(&path);
     let value = get(&path)?;
     let items_value = ["items", "list", "rows", "results"]
         .iter()
@@ -314,6 +317,27 @@ pub fn search(
                 .find_map(|key| value.get("data")?.get(*key)?.as_i64())
         })
         .unwrap_or(items.len() as i64);
+    // The request log 0.2.24 exists for: the exact URL (with q/type/industry/
+    // category/page/limit), the platform's total, and the industries the first
+    // rows actually carry - so a filter bug is provable from the log alone.
+    let first_industries: Vec<&str> = items
+        .iter()
+        .take(6)
+        .map(|item| item.industry.as_str())
+        .collect();
+    let mismatched = if industry.trim().is_empty() {
+        0
+    } else {
+        items
+            .iter()
+            .filter(|item| !item.industry.is_empty() && item.industry != industry.trim())
+            .count()
+    };
+    log::info!(
+        "assets: GET {url} · total {total} · items {} · first industries {:?} · mismatched {mismatched}",
+        items.len(),
+        first_industries
+    );
     Ok(AssetPage {
         items,
         total,
@@ -344,6 +368,7 @@ pub fn industries() -> Result<Vec<Industry>, String> {
     for row in rows {
         if let Some(name) = row.as_str() {
             out.push(Industry {
+                code: String::new(),
                 name: name.to_owned(),
                 count: 0,
             });
@@ -357,10 +382,18 @@ pub fn industries() -> Result<Vec<Industry>, String> {
             continue;
         };
         out.push(Industry {
+            code: row
+                .get("code")
+                .or_else(|| row.get("slug"))
+                .or_else(|| row.get("key"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
             name: name.to_owned(),
             count: row
                 .get("count")
                 .and_then(serde_json::Value::as_i64)
+                .or_else(|| row.get("total").and_then(serde_json::Value::as_i64))
                 .unwrap_or(0),
         });
     }

@@ -357,18 +357,22 @@ impl AssetsPane {
         .collect()
     }
 
-    /// 左侧「行业」一列：全部 + 平台返回的行业（带数量）。
+    /// 左侧「行业」一列：平台返回的行业（带数量）。
+    ///
+    /// 不含「全部」：media-pane.slint 自己画第一行「全部行业」，这里再放一个
+    /// 会让所有行整体错位——0.2.23 里点了「餐饮」实际查的是下一行的行业。
     fn industries(&self) -> Vec<SharedString> {
-        let mut rows = vec![SharedString::from(t("assets.allIndustries"))];
-        for industry in &self.industries {
-            let label = if industry.count > 0 {
-                format!("{} ({})", industry.name, industry.count)
-            } else {
-                industry.name.clone()
-            };
-            rows.push(SharedString::from(label));
-        }
-        rows
+        self.industries
+            .iter()
+            .map(|industry| {
+                let label = if industry.count > 0 {
+                    format!("{} ({})", industry.name, industry.count)
+                } else {
+                    industry.name.clone()
+                };
+                SharedString::from(label)
+            })
+            .collect()
     }
 
     /// 分类下拉：全部 + 平台返回的分类。
@@ -380,6 +384,7 @@ impl AssetsPane {
         rows
     }
 
+    /// 选中行业的显示名（也是返回结果防御性过滤用的值）。
     fn industry_name(&self) -> String {
         if self.industry == 0 {
             String::new()
@@ -387,6 +392,25 @@ impl AssetsPane {
             self.industries
                 .get(self.industry - 1)
                 .map(|industry| industry.name.clone())
+                .unwrap_or_default()
+        }
+    }
+
+    /// 请求里带的行业参数：优先后端给的 code（`catering`），没有代码就用
+    /// 中文名（平台两个都认）。
+    fn industry_param(&self) -> String {
+        if self.industry == 0 {
+            String::new()
+        } else {
+            self.industries
+                .get(self.industry - 1)
+                .map(|industry| {
+                    if industry.code.trim().is_empty() {
+                        industry.name.clone()
+                    } else {
+                        industry.code.clone()
+                    }
+                })
                 .unwrap_or_default()
         }
     }
@@ -416,7 +440,7 @@ impl AssetsPane {
         self.bump_full();
         let query = self.query.clone();
         let kind = self.kind.param().to_owned();
-        let industry = self.industry_name();
+        let industry = self.industry_param();
         let category = self.category_name();
         crate::host::spawn(
             move || -> Result<Bundle, String> {
@@ -449,7 +473,7 @@ impl AssetsPane {
         self.bump_full();
         let query = self.query.clone();
         let kind = self.kind.param().to_owned();
-        let industry = self.industry_name();
+        let industry = self.industry_param();
         let category = self.category_name();
         let page = self.page + 1;
         crate::host::spawn(
@@ -461,6 +485,26 @@ impl AssetsPane {
                 )));
             },
         );
+    }
+
+    /// 防御性过滤：返回结果里行业和当前选中行业不一致的不渲染。
+    ///
+    /// 正常时一条都不会掉；平台给某条素材打了别家行业的标签时就靠这里兜底，
+    /// 日志记下丢了多少条，方便回头修平台的标签。
+    fn drop_foreign_items(&mut self) {
+        let wanted = self.industry_name();
+        if wanted.is_empty() {
+            return;
+        }
+        let before = self.items.len();
+        self.items
+            .retain(|item| item.industry.is_empty() || item.industry == wanted);
+        let dropped = before - self.items.len();
+        if dropped > 0 {
+            log::warn!(
+                "assets: dropped {dropped} row(s) whose industry is not {wanted:?} (first page had {before})"
+            );
+        }
     }
 
     /// 一页回来之后：卡片状态按本机缓存先定好，缩略图按可视范围排队。
@@ -750,10 +794,17 @@ impl AssetsPane {
         global.set_loading(self.loading);
         global.set_message(SharedString::from(self.message.clone()));
         let stats = if self.total > 0 {
-            tf(
-                "assets.stats",
-                &[&self.items.len().to_string(), &self.total.to_string()],
-            )
+            if self.industry > 0 {
+                tf(
+                    "assets.statsIndustry",
+                    &[&self.total.to_string(), &self.items.len().to_string()],
+                )
+            } else {
+                tf(
+                    "assets.stats",
+                    &[&self.items.len().to_string(), &self.total.to_string()],
+                )
+            }
         } else {
             String::new()
         };
@@ -1246,7 +1297,16 @@ impl AssetsPane {
                 let index = index.max(0) as usize;
                 if index <= self.industries.len() && index != self.industry {
                     self.industry = index;
+                    // 换行业 = 新查询：页码回 1、旧请求作废（request 号在 load
+                    // 里 +1，旧结果回来时 generation 对不上会直接丢掉）。
                     self.page = 1;
+                    self.visible.set((0, THUMB_FIRST - 1));
+                    log::info!(
+                        "assets: industry changed to {:?} (name {:?}, code {:?})",
+                        index,
+                        self.industry_name(),
+                        self.industry_param()
+                    );
                     self.load();
                 }
             }
@@ -1294,6 +1354,7 @@ impl AssetsPane {
                         self.total = bundle.page.total;
                         self.page = bundle.page.page.max(1);
                         self.items = bundle.page.items;
+                        self.drop_foreign_items();
                         self.message.clear();
                         self.settle_page();
                         self.bump_full();
@@ -1315,6 +1376,7 @@ impl AssetsPane {
                         self.page = page.page.max(1);
                         self.total = page.total;
                         self.items.extend(page.items);
+                        self.drop_foreign_items();
                         self.mark_cached();
                         self.settle_page();
                         self.bump_full();
