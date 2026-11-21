@@ -103,9 +103,17 @@ impl PlaybackEvents for Events {
     fn position(&self, _seconds: f64) {}
 
     fn error(&self, message: String) {
+        // The engine's line is English for the log; the window shows the one
+        // case a desk meets with no speakers or no default output, where the
+        // fix is "plug something in" and Play still works (silently).
+        let shown = if message.starts_with("audio output unavailable") {
+            crate::i18n::t("playback.noAudioDevice")
+        } else {
+            message
+        };
         let _ = slint::invoke_from_event_loop(move || {
             Shell::with(|shell, app| {
-                shell.studio.borrow_mut().notify(&message, true);
+                shell.studio.borrow_mut().notify(&shown, true);
                 shell.studio.borrow().publish(&app, &shell.models);
             });
         });

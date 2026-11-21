@@ -576,6 +576,37 @@ impl Shared {
         self.position_micros.load(Ordering::Relaxed) as f64 / 1_000_000.0
     }
 
+    /// Runs the clock from the wall while no device is playing. The
+    /// transport is the audio device's clock; a machine with no sound card
+    /// (or whose output is unavailable) has no callback to move it, and
+    /// before 0.2.23 that left Play doing nothing at all - the picture and
+    /// the timecode sat still. `duration` is how long to wait before trying
+    /// the device again; a seek while waiting re-bases the clock, so
+    /// scrubbing still lands where the person put the playhead.
+    fn run_silently(&self, duration: std::time::Duration) {
+        let begin = std::time::Instant::now();
+        let mut base_at = std::time::Instant::now();
+        let mut base_position = self.position();
+        while begin.elapsed() < duration {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            if !self.playing.load(Ordering::Relaxed) {
+                base_position = self.position();
+                base_at = std::time::Instant::now();
+                continue;
+            }
+            let expected = base_position + base_at.elapsed().as_secs_f64();
+            let actual = self.position();
+            // A seek from the window lands as a different position; follow
+            // it rather than dragging the playhead back to our own count.
+            if (actual - expected).abs() > 0.3 {
+                base_position = actual;
+                base_at = std::time::Instant::now();
+                continue;
+            }
+            self.stamp(expected);
+        }
+    }
+
     /// The clock between callbacks: where the last one left it plus the
     /// time since, while playing, so a reader polling faster than the
     /// device's buffers sees time move smoothly and not in buffer steps.
@@ -1513,7 +1544,7 @@ fn supervise_stream(
                 if !reported_missing {
                     report(
                         events.as_ref(),
-                        format!("audio output unavailable: {error}; will keep trying"),
+                        format!("audio output unavailable: {error}; playback runs silently and the device is retried"),
                     );
                     reported_missing = true;
                 }
@@ -1535,7 +1566,11 @@ fn supervise_stream(
                         }
                     }
                 }
-                std::thread::sleep(backoff);
+                // No device means no callback to move the transport; run
+                // it from the wall so Play still plays the picture. The
+                // device is tried again after a couple of seconds at most,
+                // so plugging headphones in brings the sound back quickly.
+                shared.run_silently(backoff.min(std::time::Duration::from_secs(2)));
                 backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
             }
         }

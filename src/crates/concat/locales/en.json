@@ -1252,5 +1252,7 @@
   "assets.previewPreparing": "Preparing preview...",
   "assets.previewAudio": "Previewing - move away to stop",
   "assets.previewFont": "Font preview",
-  "assets.previewUnavailable": "This asset cannot be previewed; download it first"
+  "assets.previewUnavailable": "This asset cannot be previewed; download it first",
+  "playback.noAudioDevice": "No audio output device: the sound is missing but playback runs on silently (picture and timecode keep moving); plug a device in and the sound comes back on its own.",
+  "assets.previewNoAudio": "No audio output device to audition with"
 }

@@ -209,6 +209,11 @@ pub enum AssetsMsg {
         generation: u64,
         result: Result<Vec<u8>, String>,
     },
+    /// 光标已经离开、但预览是趁离开前那一下准备出来的：露一小会儿就收。
+    PreviewExpire {
+        id: String,
+        generation: u64,
+    },
 }
 
 /// 一张卡的悬停预览。
@@ -271,6 +276,9 @@ pub struct AssetsPane {
     audio_preview: RefCell<Option<AudioPreview>>,
     /// 已注册进窗口字体集合的素材字体：id -> family。
     font_families: RefCell<HashMap<String, String>>,
+    /// 光标在预览准备途中离开了：让这次预览做完、露一小会儿再收，而不是
+    /// 把刚花 1–2 秒取回来的片段扔掉（指针从卡片边缘滑过时不该闪一下）。
+    hover_ended: Cell<bool>,
 }
 
 impl Default for AssetsPane {
@@ -308,6 +316,7 @@ impl Default for AssetsPane {
             previews: RefCell::new(HashMap::new()),
             audio_preview: RefCell::new(None),
             font_families: RefCell::new(HashMap::new()),
+            hover_ended: Cell::new(false),
         }
     }
 }
@@ -853,6 +862,7 @@ impl AssetsPane {
 
     /// 换页/换分类/关面板：停试听、清掉所有预览，旧 worker 的结果作废。
     fn clear_previews(&self) {
+        self.hover_ended.set(false);
         self.preview_generation
             .set(self.preview_generation.get().wrapping_add(1));
         self.preview_id.borrow_mut().clear();
@@ -867,6 +877,16 @@ impl AssetsPane {
     /// 同一时刻最多一个 worker、最多一个声音（任务卡要求限并发）。
     fn hover(&mut self, id: String, on: bool) {
         if !on {
+            // 预览还在准备时离开：别把已经花时间取回来的片段扔掉，让结果
+            // 出来露一小会儿（见 PreviewExpire 与 hover_ended 的注释）。
+            if self.preview_busy.get() && self.preview_id.borrow().as_str() == id {
+                self.hover_ended.set(true);
+                if let Some(player) = self.audio_preview.borrow().as_ref() {
+                    player.stop();
+                }
+                return;
+            }
+            self.hover_ended.set(false);
             self.preview_generation
                 .set(self.preview_generation.get().wrapping_add(1));
             if self.preview_id.borrow().as_str() == id {
@@ -892,6 +912,7 @@ impl AssetsPane {
             }
             return;
         }
+        self.hover_ended.set(false);
         // 同一张卡还留着上次的解码结果：直接再显示/再试听，不走网络。
         let cached = {
             let previews = self.previews.borrow();
@@ -925,8 +946,7 @@ impl AssetsPane {
             return;
         }
         let media_kind = kind_of(&item);
-        let generation = self.preview_generation.get().wrapping_add(1);
-        self.preview_generation.set(generation);
+        let generation = self.preview_generation.get();
         *self.preview_id.borrow_mut() = id.clone();
         self.previews.borrow_mut().insert(
             id.clone(),
@@ -1008,6 +1028,41 @@ impl AssetsPane {
         }
     }
 
+    /// 预览结果已经露出来了，但光标早走了（`hover_ended`）：1.8 秒后收掉。
+    fn expire_later(&self, id: &str, generation: u64) {
+        if !self.hover_ended.get() {
+            return;
+        }
+        let id = id.to_owned();
+        std::thread::Builder::new()
+            .name("concat-asset-expire".into())
+            .spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(1800));
+                crate::host::on_ui_assets(move |studio, _| {
+                    studio.handle(crate::panes::Msg::Assets(AssetsMsg::PreviewExpire {
+                        id,
+                        generation,
+                    }));
+                });
+            })
+            .ok();
+    }
+
+    fn preview_expire(&mut self, id: String, generation: u64) {
+        if generation != self.preview_generation.get() || !self.hover_ended.get() {
+            return;
+        }
+        self.hover_ended.set(false);
+        if let Some(player) = self.audio_preview.borrow().as_ref() {
+            player.stop();
+        }
+        self.previews.borrow_mut().remove(&id);
+        if self.preview_id.borrow().as_str() == id {
+            self.preview_id.borrow_mut().clear();
+        }
+        self.bump_row(&id);
+    }
+
     /// 预览结果是不是还给这张卡（移开/换卡/换页后回来的一律丢掉）。
     fn preview_current(&self, id: &str, generation: u64) -> bool {
         generation == self.preview_generation.get() && self.preview_id.borrow().as_str() == id
@@ -1018,6 +1073,19 @@ impl AssetsPane {
             id.to_owned(),
             CardPreview {
                 state: 5,
+                ..Default::default()
+            },
+        );
+        self.bump_row(id);
+    }
+
+    /// 试听准备不了：这台机器没有可用的音频输出设备（见任务卡「试听」，
+    /// 卡片上如实说明，而不是假装在放）。6 是卡片上的「没有音频输出设备」。
+    fn fail_preview_no_audio(&mut self, id: &str) {
+        self.previews.borrow_mut().insert(
+            id.to_owned(),
+            CardPreview {
+                state: 6,
                 ..Default::default()
             },
         );
@@ -1044,6 +1112,11 @@ impl AssetsPane {
                     self.fail_preview(&id);
                     return;
                 }
+                log::info!(
+                    "assets: hover preview video {id}: {} frames from the Range clip",
+                    frames.len()
+                );
+                self.expire_later(&id, generation);
                 self.previews.borrow_mut().insert(
                     id.clone(),
                     CardPreview {
@@ -1055,7 +1128,7 @@ impl AssetsPane {
                 self.bump_row(&id);
             }
             Err(error) => {
-                log::debug!("assets: preview {id} failed: {error}");
+                log::warn!("assets: preview video {id} failed: {error}");
                 self.fail_preview(&id);
             }
         }
@@ -1078,14 +1151,19 @@ impl AssetsPane {
                         Ok(player) => *self.audio_preview.borrow_mut() = Some(player),
                         Err(error) => {
                             log::warn!("assets: 试听没有输出设备：{error}");
-                            self.fail_preview(&id);
+                            self.fail_preview_no_audio(&id);
                             return;
                         }
                     }
                 }
+                log::info!(
+                    "assets: hover preview audio {id} ready: {} samples at {rate} Hz, {channels} ch",
+                    pcm.len()
+                );
                 if let Some(player) = self.audio_preview.borrow().as_ref() {
                     player.play(pcm, rate, channels);
                 }
+                self.expire_later(&id, generation);
                 self.previews.borrow_mut().insert(
                     id.clone(),
                     CardPreview {
@@ -1096,7 +1174,7 @@ impl AssetsPane {
                 self.bump_row(&id);
             }
             Err(error) => {
-                log::debug!("assets: audio preview {id} failed: {error}");
+                log::warn!("assets: audio preview {id} failed: {error}");
                 self.fail_preview(&id);
             }
         }
@@ -1121,6 +1199,8 @@ impl AssetsPane {
                 };
                 match family {
                     Some(family) => {
+                        log::info!("assets: hover preview font {id} registered as {family}");
+                        self.expire_later(&id, generation);
                         self.font_families
                             .borrow_mut()
                             .insert(id.clone(), family.clone());
@@ -1138,7 +1218,7 @@ impl AssetsPane {
                 }
             }
             Err(error) => {
-                log::debug!("assets: font preview {id} failed: {error}");
+                log::warn!("assets: font preview {id} failed: {error}");
                 self.fail_preview(&id);
             }
         }
@@ -1281,6 +1361,9 @@ impl AssetsPane {
                 generation,
                 result,
             } => self.font_arrived(id, generation, result),
+            AssetsMsg::PreviewExpire { id, generation } => {
+                self.preview_expire(id, generation)
+            }
         }
     }
 }

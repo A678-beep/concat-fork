@@ -1252,5 +1252,7 @@
   "assets.previewPreparing": "正在准备预览…",
   "assets.previewAudio": "试听中 · 移开停止",
   "assets.previewFont": "字体预览",
-  "assets.previewUnavailable": "这个素材预览不了，可先下载"
+  "assets.previewUnavailable": "这个素材预览不了，可先下载",
+  "playback.noAudioDevice": "没有可用的音频输出设备：声音听不到，但播放会静音前进（画面和时间码照常走）；接上设备后会自动恢复声音。",
+  "assets.previewNoAudio": "没有音频输出设备，无法试听"
 }

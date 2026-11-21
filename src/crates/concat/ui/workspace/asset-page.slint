@@ -240,7 +240,8 @@ component AssetCard inherits Rectangle {
             }
 
             // 悬停预览状态：准备中 / 试听中 / 预览不了，压在图右下角。
-            if root.data.preview-state == 1 || root.data.preview-state == 3 || root.data.preview-state == 5: Rectangle {
+            if root.data.preview-state == 1 || root.data.preview-state == 3
+                || root.data.preview-state == 5 || root.data.preview-state == 6: Rectangle {
                 x: parent.width - self.width - 6px;
                 y: parent.height - self.height - 6px;
                 height: 18px;
@@ -250,6 +251,7 @@ component AssetCard inherits Rectangle {
                 Text {
                     text: root.data.preview-state == 1 ? I18n.t("assets.previewPreparing")
                         : root.data.preview-state == 3 ? I18n.t("assets.previewAudio")
+                        : root.data.preview-state == 6 ? I18n.t("assets.previewNoAudio")
                         : I18n.t("assets.previewUnavailable");
                     color: Theme.fg;
                     font-size: Theme.fs-xs;
