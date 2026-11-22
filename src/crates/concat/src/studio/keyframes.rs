@@ -2080,6 +2080,44 @@ impl Studio {
         sync(&models.ai_studio_shots, self.ai_studio.shot_rows());
         sync(&models.ai_studio_slots, self.ai_studio.slot_rows());
         sync(&models.ai_studio_versions, self.ai_studio.version_rows());
+        // AI 短剧（0.3.1）：面板状态与四列（分集、分镜、成片库、历史）。后端
+        // 状态只在打开面板时探一次，启动路径上没有任何网络工作。
+        let signed_in = self
+            .account
+            .as_ref()
+            .is_some_and(|account| !account.token.trim().is_empty());
+        let account_line = match self.account.as_ref() {
+            Some(account) => format!(
+                "已登录：{} · {}",
+                account.display_name(),
+                account.plan_label()
+            ),
+            None => "未登录：云端能力需先登录星籁账号".to_owned(),
+        };
+        set_changed(
+            app.get_ai_drama(),
+            self.ai_drama.data(signed_in, &account_line),
+            |a, b| a == b,
+            |data| app.set_ai_drama(data),
+        );
+        sync(&models.ai_drama_episodes, self.ai_drama.episode_rows());
+        sync(&models.ai_drama_scenes, self.ai_drama.scene_rows());
+        sync(&models.ai_drama_characters, self.ai_drama.character_rows());
+        sync(&models.ai_drama_outputs, self.ai_drama.output_rows());
+        sync(&models.ai_drama_history, self.ai_drama.history_rows());
+        // 左侧 AI 助手：状态与对话行。上下文按剪映助手的口径带上当前草稿与选中片段。
+        let assistant_context = format!(
+            "上下文：草稿《{}》· 选中 {} 个片段",
+            self.project_name,
+            self.selection.len()
+        );
+        set_changed(
+            app.get_assistant(),
+            self.assistant.data(signed_in, &account_line, &assistant_context),
+            |a, b| a == b,
+            |data| app.set_assistant(data),
+        );
+        sync(&models.assistant_messages, self.assistant.message_rows());
         // 星籁账号：登录状态是 Studio 的一份，登录/退出/过期都在这里落屏。
         // 首屏右上角的账号 chip 与 AI 面板底部的账号行读这两组属性。
         let account = self.account.as_ref();
@@ -2916,6 +2954,36 @@ impl Studio {
                     &keymap::label(&self.prefs, "next-edit"),
                     true,
                 ),
+                // 0.3.1 布局预设（剪映 11.9 的「布局模式」里我们做 3 个常用的）。
+                rule(),
+                row(
+                    "layout-default",
+                    "布局：默认（素材 + 监视器 / 时间线）".to_owned(),
+                    Glyph::Frame,
+                    "",
+                    true,
+                ),
+                row(
+                    "layout-media",
+                    "布局：素材优先".to_owned(),
+                    Glyph::Film,
+                    "",
+                    true,
+                ),
+                row(
+                    "layout-portrait",
+                    "布局：竖屏创作（右）".to_owned(),
+                    Glyph::Image,
+                    "",
+                    true,
+                ),
+                row(
+                    "layout-reset",
+                    "重置当前布局".to_owned(),
+                    Glyph::Reset,
+                    "",
+                    true,
+                ),
             ],
             // 星籁 AI：本地优先的配音、照片数字人、本地插件与算力向导。
             3 => vec![
@@ -2991,6 +3059,116 @@ impl Studio {
                     "ai-studio-open",
                     "打开 AI 工作室（上次那一页）".to_owned(),
                     Glyph::Sparkle,
+                    "",
+                    true,
+                ),
+                rule(),
+                row(
+                    "ai-drama-open",
+                    "AI 短剧 · 多集剧本 → 分镜 → 逐集成片".to_owned(),
+                    Glyph::Film,
+                    "",
+                    true,
+                ),
+            ],
+            // 星籁 AI 短剧（0.3.1）：顶级入口。桌面内完成整条闭环；网页版只是
+            // 后端与备用入口。
+            5 => vec![
+                row(
+                    "ai-drama-open",
+                    "打开 AI 短剧（设定 / 剧本 / 成片）".to_owned(),
+                    Glyph::Film,
+                    "",
+                    true,
+                ),
+                row(
+                    "ai-drama-script",
+                    "新建短剧：先写分集剧本".to_owned(),
+                    Glyph::TextMark,
+                    "",
+                    true,
+                ),
+                row(
+                    "ai-drama-mine",
+                    "我的短剧（历史 / 成片库）".to_owned(),
+                    Glyph::Folder,
+                    "",
+                    true,
+                ),
+                rule(),
+                row(
+                    "ai-drama-web",
+                    "网页版 AI 短剧（备用）".to_owned(),
+                    Glyph::Sparkle,
+                    "",
+                    true,
+                ),
+            ],
+            // 帮助：剪映 11.9 把菜单压到 7 项，把很多事塞进面板；我们补的是
+            // 用户真会去找的那几件（设置/诊断/缓存/快捷键/关于/开源许可）。
+            6 => vec![
+                row(
+                    "help-guides",
+                    "使用教程（在线）".to_owned(),
+                    Glyph::Book,
+                    "",
+                    true,
+                ),
+                row(
+                    "help-shortcuts",
+                    "键盘快捷键…".to_owned(),
+                    Glyph::Keyboard,
+                    "",
+                    true,
+                ),
+                row(
+                    "help-diagnostics",
+                    "启动诊断…".to_owned(),
+                    Glyph::Bug,
+                    "",
+                    true,
+                ),
+                rule(),
+                row(
+                    "help-settings",
+                    "全局设置…".to_owned(),
+                    Glyph::Settings,
+                    "",
+                    true,
+                ),
+                row(
+                    "help-clear-cache",
+                    "清理缓存".to_owned(),
+                    Glyph::Trash,
+                    "",
+                    true,
+                ),
+                row(
+                    "help-log",
+                    "查看运行日志…".to_owned(),
+                    Glyph::Folder,
+                    "",
+                    true,
+                ),
+                rule(),
+                row(
+                    "help-updates",
+                    "检查更新…".to_owned(),
+                    Glyph::Import,
+                    "",
+                    true,
+                ),
+                row(
+                    "help-about",
+                    "关于星籁剪辑…".to_owned(),
+                    Glyph::Info,
+                    "",
+                    true,
+                ),
+                row(
+                    "help-licences",
+                    "开源许可与第三方声明…".to_owned(),
+                    Glyph::Info,
                     "",
                     true,
                 ),

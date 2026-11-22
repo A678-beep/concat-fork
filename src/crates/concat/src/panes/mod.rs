@@ -16,8 +16,12 @@
 
 pub mod ai;
 pub mod ai_studio;
+/// 星籁 AI 短剧（0.3.1）：分集剧本 / 分镜 / 逐集成片。
+pub mod aidrama;
 pub mod ai_video;
 pub mod assets;
+/// 左侧 AI 助手常驻栏（0.3.1，简版对话 + 快捷指令）。
+pub mod assistant;
 pub mod captions;
 pub mod export;
 pub mod glide;
@@ -40,6 +44,10 @@ pub enum Msg {
     Ai(ai::AiMsg),
     /// 到 AI 工作室（一键成片 / 动态解说 / 爆款复刻）。
     AiStudio(ai_studio::AiStudioMsg),
+    /// 到 AI 短剧（分集剧本 / 分镜 / 逐集成片）。
+    AiDrama(aidrama::AiDramaMsg),
+    /// 到左侧 AI 助手栏。
+    Assistant(assistant::AssistantMsg),
     /// 到素材库面板。
     Assets(assets::AssetsMsg),
     /// To the export sheet.

@@ -175,6 +175,16 @@ impl Studio {
         }
     }
 
+    /// 0.3.1 布局预设：换掉宽屏那套排布。窄窗（compact）时当前显示的是紧凑
+    /// dock，换的是收着的那套，等窗口变宽自然生效；宽窗时直接换当前这套。
+    pub fn set_wide_dock(&mut self, dock: crate::dock::Dock) {
+        if self.compact {
+            self.dock_aside = dock;
+        } else {
+            self.dock = dock;
+        }
+    }
+
     pub fn dock_layout(&self) -> DockLayout {
         let mut out = DockLayout::default();
         let (width, height) = self.workspace;

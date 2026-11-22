@@ -148,6 +148,12 @@ export global Editor {
     /// a package written or dropped in while the app runs shows up without
     /// a restart, and one that will not load says why.
     callback library-reload-packages();
+    /// 智能包装页（0.3.1）：打开 AI 一键成片（包装随成片一起生成）。
+    callback library-open-smart-pack();
+    /// 数字人页（0.3.1）：打开 AI 面板的数字人页。
+    callback library-open-digital-human();
+    /// 插件页（0.3.1）：打开 AI 面板的本地插件页。
+    callback library-open-plugins();
 
     // ── the inspector ──
     in-out property <SelectedClipData> selected-clip;

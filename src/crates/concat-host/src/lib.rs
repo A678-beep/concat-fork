@@ -24,7 +24,11 @@ pub mod account;
 pub mod ai_models;
 /// 星籁 AI 工作室：一键成片 / 动态解说片 / 爆款复刻（平台接口 + 成片下载）。
 pub mod ai_studio;
+/// 星籁 AI 短剧（0.3.1）：分集剧本 / 分镜 / 逐集成片（平台接口 + 本地模板兜底）。
+pub mod aidrama;
 pub mod assets;
+/// 剪映助手同款的常驻 AI 助手（文本）：`/xiaolai/chat` 一句话一问。
+pub mod assistant;
 /// 素材库悬停试听：一个只播一小段的小播放器（不影响时间线的混音）。
 pub mod audio_preview;
 /// 星籁 AI 生视频：平台 aivideo 接口、长视频续写拼接、本地模型预留。

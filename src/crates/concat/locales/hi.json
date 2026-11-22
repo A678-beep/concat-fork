@@ -1086,5 +1086,11 @@
   "voices.styles": "स्टाइल",
   "voices.stylesHint": "स्टाइल यानी इफ़ेक्ट वाली आवाज़। उसमें लिखने के लिए कोई एक चुनें: इफ़ेक्ट स्पीच क्लिप पर लगते हैं, जहाँ आप उन्हें बदल सकते हैं।",
   "voices.voices": "आवाज़ें",
-  "voices.yours": "आपकी आवाज़ें"
+  "voices.yours": "आपकी आवाज़ें",
+  "configPane.aiEffects": "AI effects",
+  "mediaPane.digitalHuman": "Digital human",
+  "mediaPane.plugins": "Plugins",
+  "mediaPane.smartPack": "Smart packaging",
+  "mediaPane.subtitles": "Subtitles",
+  "titleBar.help": "Help"
 }

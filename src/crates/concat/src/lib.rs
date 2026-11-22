@@ -758,6 +758,12 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         app.set_ai_studio_shots(ModelRc::from(models.ai_studio_shots.clone()));
         app.set_ai_studio_slots(ModelRc::from(models.ai_studio_slots.clone()));
         app.set_ai_studio_versions(ModelRc::from(models.ai_studio_versions.clone()));
+        app.set_ai_drama_episodes(ModelRc::from(models.ai_drama_episodes.clone()));
+        app.set_ai_drama_scenes(ModelRc::from(models.ai_drama_scenes.clone()));
+        app.set_ai_drama_characters(ModelRc::from(models.ai_drama_characters.clone()));
+        app.set_ai_drama_outputs(ModelRc::from(models.ai_drama_outputs.clone()));
+        app.set_ai_drama_history(ModelRc::from(models.ai_drama_history.clone()));
+        app.set_assistant_messages(ModelRc::from(models.assistant_messages.clone()));
         app.set_app_menu_items(ModelRc::from(models.bar.clone()));
         app.set_transcribers(ModelRc::from(models.transcribers.clone()));
         app.set_voices(ModelRc::from(models.voices.clone()));
@@ -1299,6 +1305,44 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
             ));
         }
     ));
+    // AI 短剧（0.3.1）：整个工作台（设定/剧本/分镜/成片）汇成一条动作。
+    app.on_ai_drama_action(on_window!(
+        |state, action: SharedString, index: i32, text: SharedString| {
+            state.handle(Msg::AiDrama(
+                crate::panes::aidrama::AiDramaMsg::Action {
+                    action: action.to_string(),
+                    index,
+                    text: text.to_string(),
+                },
+            ));
+        }
+    ));
+    // 左侧 AI 助手常驻栏（0.3.1）：开关、输入、发送、快捷指令。
+    app.on_assistant_toggle(on_window!(|state| {
+        state.handle(Msg::Assistant(
+            crate::panes::assistant::AssistantMsg::Toggle,
+        ));
+    }));
+    app.on_assistant_input(on_window!(|state, text: SharedString| {
+        state.handle(Msg::Assistant(
+            crate::panes::assistant::AssistantMsg::Input(text.to_string()),
+        ));
+    }));
+    app.on_assistant_send(on_window!(|state, text: SharedString| {
+        state.handle(Msg::Assistant(
+            crate::panes::assistant::AssistantMsg::Send(text.to_string()),
+        ));
+    }));
+    app.on_assistant_quick(on_window!(|state, command: SharedString| {
+        state.handle(Msg::Assistant(
+            crate::panes::assistant::AssistantMsg::Quick(command.to_string()),
+        ));
+    }));
+    app.on_assistant_mode(on_window!(|state, index: i32| {
+        state.handle(Msg::Assistant(
+            crate::panes::assistant::AssistantMsg::Mode(index),
+        ));
+    }));
 
     // ── the workspace's arrangement ──
     editor.on_workspace_resized(on_dock!(|state, width: f32, height: f32| {
@@ -1521,6 +1565,19 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     editor.on_library_import_lut(Studio::import_lut);
     editor.on_library_reload_packages(on_window!(|state| {
         state.reload_packages(true);
+    }));
+    // 智能包装 / 数字人 / 插件（0.3.1）：三个新 tab 的空态按钮都通向已有能力，
+    // 不新建第二个入口；打开的是 AI 面板 / AI 工作室的对应页。
+    editor.on_library_open_smart_pack(on_window!(|state| {
+        state.handle(Msg::AiStudio(
+            crate::panes::ai_studio::AiStudioMsg::Open(0),
+        ));
+    }));
+    editor.on_library_open_digital_human(on_window!(|state| {
+        state.handle(Msg::Ai(crate::panes::ai::AiMsg::OpenTab(1)));
+    }));
+    editor.on_library_open_plugins(on_window!(|state| {
+        state.handle(Msg::Ai(crate::panes::ai::AiMsg::OpenTab(2)));
     }));
 
     // ── the inspector's effect stacks ──
@@ -3197,6 +3254,16 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                         "sort-kind" => state.handle(Msg::Media(MediaMsg::SortChanged(2))),
                         "zoom-in" => state.handle(Msg::Timeline(TimelineMsg::ZoomIn)),
                         "zoom-out" => state.handle(Msg::Timeline(TimelineMsg::ZoomOut)),
+                        // 0.3.1 布局预设：三套常用的 + 重置回默认。
+                        "layout-default" | "layout-reset" => {
+                            state.set_wide_dock(crate::dock::default_dock());
+                        }
+                        "layout-media" => {
+                            state.set_wide_dock(crate::dock::media_first_dock());
+                        }
+                        "layout-portrait" => {
+                            state.set_wide_dock(crate::dock::portrait_right_dock());
+                        }
                         "start" => {
                             state.pause();
                             state.seek(0.0);
@@ -3244,6 +3311,50 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                         "ai-studio-open" => {
                             let tab = state.ai_studio.tab;
                             state.handle(Msg::AiStudio(AiStudioMsg::Open(tab)))
+                        }
+                        // AI 短剧（0.3.1）：顶级入口，桌面内完成整条闭环。
+                        "ai-drama-open" => state.handle(Msg::AiDrama(
+                            crate::panes::aidrama::AiDramaMsg::Open(0),
+                        )),
+                        "ai-drama-script" => state.handle(Msg::AiDrama(
+                            crate::panes::aidrama::AiDramaMsg::Open(0),
+                        )),
+                        "ai-drama-mine" => state.handle(Msg::AiDrama(
+                            crate::panes::aidrama::AiDramaMsg::Open(3),
+                        )),
+                        "ai-drama-web" => {
+                            let _ = opener::open(concat_host::aidrama::DRAMA_WEB);
+                        }
+                        // 帮助菜单：设置/诊断/缓存/快捷键/关于/开源许可。
+                        "help-guides" => {
+                            if let Some(url) = crate::panes::start::link("guides") {
+                                let _ = opener::open(url.as_str());
+                            }
+                        }
+                        "help-shortcuts" => {
+                            state.handle(Msg::Settings(SettingsMsg::Open));
+                            state.handle(Msg::Settings(SettingsMsg::PageChanged(
+                                crate::panes::settings::SHORTCUTS_PAGE,
+                            )));
+                        }
+                        "help-diagnostics" | "help-about" => {
+                            state.handle(Msg::Settings(SettingsMsg::Open));
+                            state.handle(Msg::Settings(SettingsMsg::PageChanged(5)));
+                        }
+                        "help-licences" => {
+                            state.handle(Msg::Settings(SettingsMsg::Open));
+                            state.handle(Msg::Settings(SettingsMsg::PageChanged(8)));
+                        }
+                        "help-updates" => {
+                            state.handle(Msg::Settings(SettingsMsg::Open));
+                            state.handle(Msg::Settings(SettingsMsg::PageChanged(6)));
+                        }
+                        "help-settings" => {
+                            state.handle(Msg::Settings(SettingsMsg::Open));
+                        }
+                        "help-clear-cache" => state.clear_project_cache(),
+                        "help-log" => {
+                            state.handle(Msg::Settings(SettingsMsg::ShowLog));
                         }
                         "ai-wizard" => {
                             state.ai.wizard_open = true;

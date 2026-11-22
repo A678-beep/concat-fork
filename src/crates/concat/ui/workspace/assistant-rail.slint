@@ -1,0 +1,310 @@
+﻿// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 XingLai contributors
+
+// 左侧「AI 助手」常驻栏（0.3.1，简版）。
+//
+// 剪映 11.9 把「剪映助手」提升成与素材同级的常驻入口，这里给一个桌面简版：
+// 收起时是窗口左边缘的一条窄栏（点开），展开后是一句一句的对话 + 四条快捷
+// 指令。它只给建议：不自动改时间线、不替人花积分；生成类动作都交给 AI 工作室 /
+// AI 短剧面板让人确认。空态即引导——第一次展开就有一句人话说明能做什么。
+
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { Tip } from "../primitives/tooltip.slint";
+import { Button, Field } from "../primitives/modal.slint";
+import { Select } from "../primitives/select.slint";
+import { PaneScroll } from "pane.slint";
+
+/// AI 助手的状态，由 Rust 写好。
+export struct AssistantData {
+    open: bool,
+    busy: bool,
+    input: string,
+    note: string,
+    account-line: string,
+    signed-in: bool,
+    /// 快捷指令（几条固定的 + 一条常用问题）。
+    quick: [string],
+    /// 工作模式（图片生成 / 视频生成 / 视频编辑 / 智能粗剪 / 视频包装）。
+    mode: int,
+    modes: [string],
+    /// 上下文：当前草稿与选中片段，剪映助手同类的上下文提示。
+    context: string,
+    /// 技能 chips：一句一句的常用请求。
+    skills: [string],
+}
+
+export component AssistantRail inherits Rectangle {
+    in property <AssistantData> data;
+    /// 对话行（"你：…" / "小来：…"）。
+    in property <[string]> messages;
+
+    callback toggle();
+    callback send(text: string);
+    callback quick(command: string);
+    callback input-edited(text: string);
+    callback mode-changed(index: int);
+
+    width: root.data.open ? 300px : 44px;
+    background: Theme.panel;
+    clip: true;
+
+    // 收起：一条窄栏，点开。宽度写死，展开宽度由根上那个三元表达式给。
+    if !root.data.open: VerticalLayout {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 8px;
+
+        VerticalLayout {
+            alignment: center;
+            HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 30px;
+                    height: 30px;
+                    border-radius: Theme.r;
+                    background: touch.has-hover ? Theme.field : Colors.transparent;
+
+                    Icon {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        glyph: Glyph.sparkle;
+                        size: 16px;
+                        tint: Theme.accent;
+                    }
+
+                    touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.toggle(); }
+                    }
+                    Tip {
+                        text: "AI 助手（建议类）：一句一问";
+                        active: touch.has-hover;
+                    }
+                }
+            }
+        }
+
+        Rectangle { height: 1px; background: Theme.line; }
+
+        Text {
+            horizontal-alignment: center;
+            text: "AI\n助\n手";
+            color: Theme.fg-dim;
+            font-size: Theme.fs-xs;
+            wrap: word-wrap;
+        }
+
+        Rectangle { vertical-stretch: 1; }
+    }
+
+    // 展开：标题 + 说明 + 对话 + 快捷指令 + 输入。
+    if root.data.open: VerticalLayout {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        spacing: 0px;
+
+        // ── 标题 ──
+        Rectangle {
+            height: 52px;
+
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Theme.line;
+            }
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 8px;
+                spacing: 6px;
+
+                Icon {
+                    glyph: Glyph.sparkle;
+                    size: 14px;
+                    tint: Theme.accent;
+                }
+
+                Text {
+                    text: "AI 助手";
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    font-weight: Theme.weight-title;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "建议类";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Rectangle {
+                    width: 24px;
+                    height: 24px;
+                    border-radius: Theme.r-sm;
+                    background: collapse.has-hover ? Theme.field : Colors.transparent;
+
+                    Icon {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        glyph: Glyph.chevron-left;
+                        size: 12px;
+                        tint: Theme.fg-muted;
+                    }
+
+                    collapse := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.toggle(); }
+                    }
+                    Tip {
+                        text: "收起助手";
+                        active: collapse.has-hover;
+                    }
+                }
+            }
+        }
+
+        // ── 常驻说明 ──
+        Text {
+            padding-left: 12px;
+            padding-right: 12px;
+            padding-top: 8px;
+            width: parent.width;
+            text: root.data.note;
+            color: Theme.fg-dim;
+            font-size: Theme.fs-xs;
+            wrap: word-wrap;
+        }
+
+        // ── 上下文 + 工作模式（剪映助手的「模式」下拉） ──
+        VerticalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            padding-top: 6px;
+            spacing: 4px;
+
+            Text {
+                width: parent.width;
+                text: root.data.context;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                wrap: word-wrap;
+            }
+
+            Select {
+                width: parent.width;
+                options: root.data.modes;
+                current: root.data.mode;
+                changed(index) => { root.mode-changed(index); }
+            }
+        }
+
+        // ── 对话 ──
+        PaneScroll {
+            vertical-stretch: 1;
+            horizontal-stretch: 1;
+
+            VerticalLayout {
+                padding: 10px;
+                spacing: 6px;
+                alignment: start;
+
+                for line in root.messages: Rectangle {
+                    width: parent.width;
+                    height: bubble.preferred-height + 12px;
+                    border-radius: Theme.r;
+                    background: Theme.field;
+
+                    bubble := Text {
+                        x: 9px;
+                        y: 6px;
+                        width: parent.width - 18px;
+                        text: line;
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+
+        // ── 快捷指令 ──
+        Rectangle {
+            height: 1px;
+            background: Theme.line;
+        }
+
+        VerticalLayout {
+            padding: 8px;
+            spacing: 6px;
+
+            Text { text: "快捷指令"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+
+            for command in root.data.quick: Button {
+                label: command;
+                ghost: true;
+                block: true;
+                enabled: !root.data.busy;
+                clicked => { root.quick(command); }
+            }
+
+            // 技能 chips：点一下就是问一句（不直接执行，避免替人花积分）。
+            Text { text: "技能（点一下问我）"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+            for skill in root.data.skills: Button {
+                label: skill;
+                ghost: true;
+                block: true;
+                enabled: !root.data.busy;
+                clicked => { root.quick(skill); }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.line;
+        }
+
+        // ── 输入 ──
+        VerticalLayout {
+            padding: 8px;
+            spacing: 6px;
+
+            HorizontalLayout {
+                spacing: 6px;
+
+                Field {
+                    horizontal-stretch: 1;
+                    value: root.data.input;
+                    placeholder: root.data.signed-in ? "问小来一句…" : "未登录也能问（匿名口径）";
+                    edited(text) => { root.input-edited(text); }
+                }
+
+                Button {
+                    label: root.data.busy ? "…" : "发送";
+                    primary: true;
+                    enabled: !root.data.busy && root.data.input != "";
+                    clicked => { root.send(root.data.input); }
+                }
+            }
+
+            Text {
+                width: parent.width;
+                text: root.data.busy ? "小来在回…" : root.data.account-line;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                overflow: elide;
+            }
+        }
+    }
+}
+

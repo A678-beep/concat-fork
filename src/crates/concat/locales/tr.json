@@ -1086,5 +1086,11 @@
   "voices.styles": "Stiller",
   "voices.stylesHint": "Stil, efekt uygulanmış bir sestir. Onunla yazmak için birini seçin: efektler konuşma klibine eklenir, orada değiştirebilirsiniz.",
   "voices.voices": "Ses tonları",
-  "voices.yours": "Sizin sesleriniz"
+  "voices.yours": "Sizin sesleriniz",
+  "configPane.aiEffects": "AI effects",
+  "mediaPane.digitalHuman": "Digital human",
+  "mediaPane.plugins": "Plugins",
+  "mediaPane.smartPack": "Smart packaging",
+  "mediaPane.subtitles": "Subtitles",
+  "titleBar.help": "Help"
 }

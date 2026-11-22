@@ -818,6 +818,14 @@ pub struct Models {
     pub ai_studio_shots: Rc<VecModel<SharedString>>,
     pub ai_studio_slots: Rc<VecModel<SharedString>>,
     pub ai_studio_versions: Rc<VecModel<SharedString>>,
+    /// AI 短剧（0.3.1）：分集、分镜、成片库、历史。
+    pub ai_drama_episodes: Rc<VecModel<SharedString>>,
+    pub ai_drama_scenes: Rc<VecModel<SharedString>>,
+    pub ai_drama_characters: Rc<VecModel<SharedString>>,
+    pub ai_drama_outputs: Rc<VecModel<SharedString>>,
+    pub ai_drama_history: Rc<VecModel<SharedString>>,
+    /// 左侧 AI 助手的对话。
+    pub assistant_messages: Rc<VecModel<SharedString>>,
     pub speech_sample_waves: Rc<VecModel<SharedString>>,
     pub speech_sample_details: Rc<VecModel<SharedString>>,
     /// The Audio page's shelves.
@@ -912,6 +920,12 @@ impl Models {
             ai_studio_shots: Rc::new(VecModel::default()),
             ai_studio_slots: Rc::new(VecModel::default()),
             ai_studio_versions: Rc::new(VecModel::default()),
+            ai_drama_episodes: Rc::new(VecModel::default()),
+            ai_drama_scenes: Rc::new(VecModel::default()),
+            ai_drama_characters: Rc::new(VecModel::default()),
+            ai_drama_outputs: Rc::new(VecModel::default()),
+            ai_drama_history: Rc::new(VecModel::default()),
+            assistant_messages: Rc::new(VecModel::default()),
             speech_sample_waves: Rc::new(VecModel::default()),
             speech_sample_details: Rc::new(VecModel::default()),
             sounds_mine: Rc::new(VecModel::default()),
@@ -1268,6 +1282,10 @@ pub struct Studio {
     pub ai: crate::panes::ai::AiPane,
     /// AI 工作室：一键成片 / 动态解说 / 爆款复刻，懒加载（打开面板才取清单）。
     pub ai_studio: crate::panes::ai_studio::AiStudioPane,
+    /// AI 短剧：分集剧本 / 分镜 / 逐集成片，懒加载（打开面板才探后端）。
+    pub ai_drama: crate::panes::aidrama::AiDramaPane,
+    /// 左侧 AI 助手常驻栏：建议类对话 + 快捷指令。
+    pub assistant: crate::panes::assistant::AssistantPane,
     /// 星籁 AI 账号：本机登录着的那一份，登录/退出/过期都更新它，发布时
     /// 落到首屏右上角与 AI 面板底部。见 concat_host::account。
     pub account: Option<concat_host::account::Account>,
@@ -3211,6 +3229,8 @@ impl Studio {
             voiceover: crate::panes::voiceover::VoiceoverPane::default(),
             ai,
             ai_studio: crate::panes::ai_studio::AiStudioPane::default(),
+            ai_drama: crate::panes::aidrama::AiDramaPane::default(),
+            assistant: crate::panes::assistant::AssistantPane::default(),
             account: concat_host::account::load(),
             account_sheet: false,
             text_presets,

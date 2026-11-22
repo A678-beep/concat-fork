@@ -1086,5 +1086,11 @@
   "voices.styles": "สไตล์",
   "voices.stylesHint": "สไตล์คือเสียงพูดที่ใส่เอฟเฟกต์ เลือกหนึ่งสไตล์เพื่อเขียนด้วยเสียงนั้น เอฟเฟกต์จะอยู่บนคลิปเสียงพูด ซึ่งคุณเปลี่ยนได้",
   "voices.voices": "เสียงพูด",
-  "voices.yours": "เสียงพูดของคุณ"
+  "voices.yours": "เสียงพูดของคุณ",
+  "configPane.aiEffects": "AI effects",
+  "mediaPane.digitalHuman": "Digital human",
+  "mediaPane.plugins": "Plugins",
+  "mediaPane.smartPack": "Smart packaging",
+  "mediaPane.subtitles": "Subtitles",
+  "titleBar.help": "Help"
 }

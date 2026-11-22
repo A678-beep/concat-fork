@@ -1086,5 +1086,11 @@
   "voices.styles": "סגנונות",
   "voices.stylesHint": "סגנון הוא קול עם אפקטים. בחרו אחד כדי לכתוב בו: האפקטים נוספים לקליפ הדיבור, ושם אפשר לשנות אותם.",
   "voices.voices": "קולות",
-  "voices.yours": "הקולות שלכם"
+  "voices.yours": "הקולות שלכם",
+  "configPane.aiEffects": "AI effects",
+  "mediaPane.digitalHuman": "Digital human",
+  "mediaPane.plugins": "Plugins",
+  "mediaPane.smartPack": "Smart packaging",
+  "mediaPane.subtitles": "Subtitles",
+  "titleBar.help": "Help"
 }

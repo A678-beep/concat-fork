@@ -57,6 +57,8 @@ import { InteropDialog } from "dialogs/interop.slint";
 import { AiData, AiDialog, AiPluginItem, AiVoiceItem, AiWizard } from "dialogs/ai.slint";
 import { AiVideoData } from "dialogs/ai-video.slint";
 import { AiStudioData, AiStudioDialog } from "dialogs/ai-studio.slint";
+import { AiDramaData, AiDramaDialog } from "dialogs/aidrama.slint";
+import { AssistantData, AssistantRail } from "workspace/assistant-rail.slint";
 import { CaptionsDialog, CaptionsSheetData } from "dialogs/captions.slint";
 import { SpeechDialog, SpeechSheetData } from "dialogs/speech.slint";
 import { NewVoiceData, NewVoiceDialog } from "dialogs/new-voice.slint";
@@ -382,6 +384,23 @@ export component App inherits Window {
     in property <[string]> ai-studio-slots;
     in property <[string]> ai-studio-versions;
     callback ai-studio-action(action: string, index: int, text: string);
+    // AI 短剧（0.3.1）：多集剧本 / 分镜 / 逐集成片。桌面为主，网页仅备用。
+    // 面板懒加载：后端状态只在打开时探一次，启动路径上没有它的网络工作。
+    in property <AiDramaData> ai-drama;
+    in property <[string]> ai-drama-episodes;
+    in property <[string]> ai-drama-scenes;
+    in property <[string]> ai-drama-characters;
+    in property <[string]> ai-drama-outputs;
+    in property <[string]> ai-drama-history;
+    callback ai-drama-action(action: string, index: int, text: string);
+    // 左侧 AI 助手常驻栏（0.3.1，简版）：建议类对话 + 快捷指令。
+    in property <AssistantData> assistant;
+    in property <[string]> assistant-messages;
+    callback assistant-toggle();
+    callback assistant-send(text: string);
+    callback assistant-quick(command: string);
+    callback assistant-input(text: string);
+    callback assistant-mode(index: int);
     in property <[AiVoiceItem]> ai-voices;
     in property <[string]> ai-voice-names;
     in property <[AiPluginItem]> ai-plugins;
@@ -433,7 +452,7 @@ export component App inherits Window {
     property <bool> sheet-up: root.start.composing || root.export.open || root.settings.open
         || root.project-sheet.open || root.new-voice.open || root.relink.open
         || root.confirm.open || root.ai.open || root.ai-studio.open
-        || root.ai.wizard-open || root.account-sheet;
+        || root.ai-drama.open || root.ai.wizard-open || root.account-sheet;
     /// Which floating tool card is in front: "captions" or "speech". The
     /// one opened or grabbed last; Escape closes it first.
     property <string> front-tool: "captions";
@@ -950,12 +969,25 @@ export component App inherits Window {
                 link(name) => { root.start-link(name); }
             }
 
-            // Everything the workspace shows now reads the Editor global, so
-            // nothing is passed to it: it is a box with four seats in it, and
-            // the views inside those seats reach the state directly. See
-            // editor.slint.
-            if !root.on-start && !root.phone: Workspace {
+            // 星籁 0.3.1：剪映 11.9 的「助手常驻」结构——左侧一条 AI 助手栏，
+            // 收起时只有一条窄边，点开是对话 + 快捷指令。它只给建议：不自动改
+            // 时间线，生成类动作交给 AI 工作室 / AI 短剧让人确认。
+            if !root.on-start && !root.phone: HorizontalLayout {
                 vertical-stretch: 1;
+                spacing: 0px;
+
+                AssistantRail {
+                    vertical-stretch: 1;
+                    data: root.assistant;
+                    messages: root.assistant-messages;
+                    toggle => { root.assistant-toggle(); }
+                    send(text) => { root.assistant-send(text); }
+                    quick(command) => { root.assistant-quick(command); }
+                    input-edited(text) => { root.assistant-input(text); }
+                    mode-changed(index) => { root.assistant-mode(index); }
+                }
+
+                Workspace { horizontal-stretch: 1; }
             }
 
             // The phone's editor reads the same global; only the shell round
@@ -1457,6 +1489,31 @@ export component App inherits Window {
         }
 
         closed => { root.ai-studio-action("close", 0, ""); }
+    }
+
+    // AI 短剧（0.3.1）：桌面内的多集短剧工作台。设定 → 剧本（可逐集逐镜编辑）
+    // → 分镜配素材 → 逐集/整剧成片 → 插入时间轴 / 导出剧本 JSON。
+    AiDramaDialog {
+        inset-top: root.safe-area-insets.top;
+        inset-bottom: root.safe-area-insets.bottom;
+        inset-left: root.safe-area-insets.left;
+        inset-right: root.safe-area-insets.right;
+        x: 0;
+        y: root.sheets-top;
+        width: root.width;
+        height: root.height - root.sheets-top;
+        data: root.ai-drama;
+        episodes: root.ai-drama-episodes;
+        scenes: root.ai-drama-scenes;
+        characters: root.ai-drama-characters;
+        outputs: root.ai-drama-outputs;
+        history: root.ai-drama-history;
+
+        action(action, index, text) => {
+            root.ai-drama-action(action, index, text);
+        }
+
+        closed => { root.ai-drama-action("close", 0, ""); }
     }
 
     // 鏄熺眮璐﹀彿鐧诲綍鍗★細AI 闈㈡澘閲岀殑銆屽幓鐧诲綍銆嶃€佷互鍙婁簯绔湭鐧诲綍鏃剁殑寮曞閮藉紑

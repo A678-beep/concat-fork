@@ -1086,5 +1086,11 @@
   "voices.styles": "স্টাইল",
   "voices.stylesHint": "স্টাইল মানে ইফেক্টসহ একটি কণ্ঠ। কোনোটি দিয়ে লিখতে সেটি বেছে নিন: ইফেক্টগুলো স্পিচ ক্লিপে যায়, সেখানে বদলানো যায়।",
   "voices.voices": "কণ্ঠ",
-  "voices.yours": "আপনার কণ্ঠ"
+  "voices.yours": "আপনার কণ্ঠ",
+  "configPane.aiEffects": "AI effects",
+  "mediaPane.digitalHuman": "Digital human",
+  "mediaPane.plugins": "Plugins",
+  "mediaPane.smartPack": "Smart packaging",
+  "mediaPane.subtitles": "Subtitles",
+  "titleBar.help": "Help"
 }

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+﻿// SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
 
 import { I18n } from "../i18n.slint";
@@ -329,23 +329,23 @@ export component ConfigPane inherits Rectangle {
     property <[string]> tabs-shown;
     pure function strip-labels() -> [string] {
         return root.selected.batch-volume ? [I18n.t("common.audio")]
-        : root.is-text ? (root.has-chain ? [I18n.t("common.text"), I18n.t("common.effects")]
+        : root.is-text ? (root.has-chain ? [I18n.t("common.text"), "AI 效果"]
             : [I18n.t("common.text")])
         : root.is-layer ? [I18n.t("configPane.filter")]
         : root.is-sound-layer ? [I18n.t("common.audio")]
         : root.is-shape ? [I18n.t("configPane.vectorImage")]
-        : root.is-image ? (root.has-chain ? [I18n.t("common.video"), I18n.t("common.effects")]
-            : [I18n.t("common.video")])
+        : root.is-image ? (root.has-chain ? ["画面", "AI 效果"]
+            : ["画面"])
         : root.is-audio ? [I18n.t("common.audio")]
-        : !root.selected.has-sound ? (root.has-chain ? [I18n.t("common.video"), I18n.t("common.effects")]
-            : [I18n.t("common.video")])
-        : root.has-chain ? [I18n.t("common.video"), I18n.t("common.audio"), I18n.t("common.effects")]
-            : [I18n.t("common.video"), I18n.t("common.audio")];
+        : !root.selected.has-sound ? (root.has-chain ? ["画面", "AI 效果"]
+            : ["画面"])
+        : root.has-chain ? ["画面", I18n.t("common.audio"), "AI 效果"]
+            : ["画面", I18n.t("common.audio")];
     }
     property <string> strip-key: root.tabs.length + ":" + root.tabs[0] + ":"
         + (root.tabs.length > 1 ? root.tabs[1] : "") + ":"
         + (root.tabs.length > 2 ? root.tabs[2] : "") + ":"
-        + (root.is-shape ? "shape" : "") + ":" + I18n.t("common.video");
+        + (root.is-shape ? "shape" : "") + ":" + "画面";
     changed strip-key => { root.tabs-shown = root.strip-labels(); }
     /// A one-segment segmented control is a label wearing a costume, so a lone
     /// tab renders as the panel's plain heading instead.
@@ -408,17 +408,21 @@ export component ConfigPane inherits Rectangle {
         : root.heading == "Text" ? [Glyph.text-mark, Glyph.circle-play]
         : [Glyph.filter, Glyph.sliders, Glyph.sparkle];
     /// The sections as the dropdown shows them; see `tabs-shown`.
+    ///
+    /// 0.3.1：按剪映 11.9 的分组口径把右侧面板说清楚——「基础」（变换/裁剪/
+    /// 蒙版）、「AI 效果」（AI 超分/画质修复/抠像类增强）、「调节」、「动画」。
+    /// 面板仍是原来那四块，只改标签与顺序的口径，不改能力。
     property <[string]> sections-shown: root.heading == "Video"
             ? (root.is-shape ? [I18n.t("shapePanel.shape"), I18n.t("configPane.basic"), I18n.t("motion.animate")]
-                : [I18n.t("configPane.basic"), I18n.t("common.enhance"), I18n.t("common.adjust"),
+                : [I18n.t("configPane.basic"), I18n.t("configPane.aiEffects"), I18n.t("common.adjust"),
                     I18n.t("motion.animate")])
         : root.heading == "Audio"
             ? (root.selected.batch-volume ? [I18n.t("configPane.basic")]
                 : root.is-sound-layer ? [I18n.t("common.layer"), I18n.t("configPane.audioEffects")]
                 : [I18n.t("configPane.basic"), I18n.t("configPane.audioEffects")])
-        : root.heading == "Effects" ? [I18n.t("common.effects")]
+        : root.heading == "Effects" ? ["AI 效果"]
         : root.heading == "Text" ? [I18n.t("common.text"), I18n.t("motion.animate")]
-        : [I18n.t("common.layer"), I18n.t("common.adjust"), I18n.t("common.effects")];
+        : [I18n.t("common.layer"), I18n.t("common.adjust"), "AI 效果"];
 
     // Each tab remembers its own section, so flipping to Audio and back
     // lands on the colour panel you were adjusting. Assigned, never bound,
@@ -911,7 +915,7 @@ export component ConfigPane inherits Rectangle {
                 // layer on the lanes, edited in its own panel.
                 if root.showing == "Effects": PresetStack {
                     noun: I18n.t("common.effect");
-                    library-title: I18n.t("common.effects");
+                    library-title: "AI 效果";
                     library: false;
                     empty-note: I18n.t("configPane.noEffectClipYet");
                     shelf: 1;

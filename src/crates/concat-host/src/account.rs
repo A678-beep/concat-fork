@@ -243,6 +243,172 @@ pub(crate) fn api_call(
     read_response(&raw)
 }
 
+/// 二进制下载：同一条 OpenSSL 直连，GET 一个接口把正文写进 `dest`。给整剧
+/// zip（`/aidrama/download/{id}`，带 Bearer）用。返回落盘字节数。
+#[cfg(windows)]
+pub(crate) fn api_download(
+    url: &str,
+    token: Option<&str>,
+    dest: &std::path::Path,
+    read: Duration,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<u64, String> {
+    use std::io::{Read, Write};
+    use std::net::ToSocketAddrs;
+
+    use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
+
+    let (host, port, path) = split_url(url)?;
+
+    let mut builder = SslConnector::builder(SslMethod::tls())
+        .map_err(|error| format!("TLS 初始化失败：{error}"))?;
+    builder.set_verify(SslVerifyMode::PEER);
+    let mut store = openssl::x509::store::X509StoreBuilder::new()
+        .map_err(|error| format!("证书库初始化失败：{error}"))?;
+    let system = rustls_native_certs::load_native_certs();
+    for cert in system.certs {
+        if let Ok(x509) = openssl::x509::X509::from_der(&cert) {
+            let _ = store.add_cert(x509);
+        }
+    }
+    builder.set_cert_store(store.build());
+    let connector = builder.build();
+
+    let addresses = (host.as_str(), port)
+        .to_socket_addrs()
+        .map_err(|error| format!("地址解析失败（网络或 DNS）：{error}"))?;
+    let mut refusal = String::new();
+    let mut socket = None;
+    for address in addresses {
+        match std::net::TcpStream::connect_timeout(&address, CONNECT) {
+            Ok(stream) => {
+                socket = Some(stream);
+                break;
+            }
+            Err(error) => refusal = error.to_string(),
+        }
+    }
+    let socket = socket.ok_or_else(|| {
+        format!("连不上星籁服务（{host}:{port}）：{refusal}；请检查网络")
+    })?;
+    socket.set_read_timeout(Some(read)).ok();
+    socket.set_write_timeout(Some(read)).ok();
+    let mut stream = connector
+        .connect(host.as_str(), socket)
+        .map_err(|error| format!("与星籁服务的 TLS 握手失败（{host}）：{error}"))?;
+
+    let mut request = format!(
+        "GET {path} HTTP/1.1\r\n\
+         Host: {host}\r\n\
+         Accept: */*\r\n\
+         User-Agent: XingLaiCut/{}\r\n",
+        env!("CARGO_PKG_VERSION"),
+    );
+    if let Some(token) = token {
+        request.push_str(&format!("Authorization: Bearer {token}\r\n"));
+    }
+    request.push_str("Connection: close\r\n\r\n");
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| format!("请求发不出去：{error}"))?;
+
+    let mut raw = Vec::new();
+    let mut buffer = [0u8; 65536];
+    loop {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err("已取消下载".to_owned());
+        }
+        match stream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => {
+                raw.extend_from_slice(&buffer[..read]);
+                if raw.len() > 512 * 1024 * 1024 {
+                    return Err("下载的整剧包超过 512MB，已停止".to_owned());
+                }
+            }
+            Err(error) => return Err(format!("下载收不全（连接被中途关闭）：{error}")),
+        }
+    }
+    let split = raw
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .ok_or_else(|| "服务器的回复不完整".to_owned())?;
+    let head = String::from_utf8_lossy(&raw[..split]).into_owned();
+    let body = &raw[split + 4..];
+    let status = head
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse::<u16>().ok())
+        .unwrap_or(0);
+    let chunked = head.lines().any(|line| {
+        let lower = line.to_ascii_lowercase();
+        lower.starts_with("transfer-encoding:") && lower.contains("chunked")
+    });
+    if !(200..300).contains(&status) {
+        let text = String::from_utf8_lossy(body);
+        let value = serde_json::from_str::<serde_json::Value>(&text).ok();
+        let message = value
+            .as_ref()
+            .and_then(|value| value.get("hint"))
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| {
+                value
+                    .as_ref()
+                    .and_then(|value| value.get("error"))
+                    .and_then(serde_json::Value::as_str)
+            })
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("整剧下载失败（HTTP {status}）"));
+        return Err(message);
+    }
+    let bytes = if chunked {
+        decode_chunk_bytes(body)
+    } else {
+        body.to_vec()
+    };
+    std::fs::write(dest, &bytes).map_err(|error| format!("存不下整剧包：{error}"))?;
+    Ok(bytes.len() as u64)
+}
+
+/// 别的平台：短剧整剧下载只在 Windows 桌面版上做（平台的 TLS 形状要求）。
+#[cfg(not(windows))]
+pub(crate) fn api_download(
+    _url: &str,
+    _token: Option<&str>,
+    _dest: &std::path::Path,
+    _read: Duration,
+    _cancel: &std::sync::atomic::AtomicBool,
+) -> Result<u64, String> {
+    Err("短剧整剧下载只在 Windows 桌面版可用".to_owned())
+}
+
+/// 二进制正文的 chunked 解码。
+#[cfg(windows)]
+fn decode_chunk_bytes(body: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < body.len() {
+        let Some(line_end) = body[at..].windows(2).position(|window| window == b"\r\n") else {
+            break;
+        };
+        let size = std::str::from_utf8(&body[at..at + line_end])
+            .ok()
+            .and_then(|line| usize::from_str_radix(line.trim(), 16).ok())
+            .unwrap_or(0);
+        at += line_end + 2;
+        if size == 0 || at + size > body.len() {
+            break;
+        }
+        out.extend_from_slice(&body[at..at + size]);
+        at += size;
+        if body[at..].starts_with(b"\r\n") {
+            at += 2;
+        }
+    }
+    out
+}
+
 /// 别的平台：工程云同步只在 Windows 桌面版上做（平台的 TLS 形状要求）。
 #[cfg(not(windows))]
 pub(crate) fn api_call(

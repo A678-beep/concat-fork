@@ -283,6 +283,43 @@ pub fn default_dock() -> Dock {
     }
 }
 
+/// 素材优先（0.3.1 布局预设）：素材库占左边一整列，监视器与时间线在右边
+/// 上下分；适合先挑素材再剪的工作方式。剪映 11.9 的「素材优先」同义。
+pub fn media_first_dock() -> Dock {
+    Dock::Split {
+        columns: true,
+        ratio: 0.42,
+        first: Dock::leaf(PaneKind::Media),
+        second: Box::new(Dock::Split {
+            columns: false,
+            ratio: 0.56,
+            first: Dock::leaf(PaneKind::Preview),
+            second: Dock::leaf(PaneKind::Timeline),
+        }),
+    }
+}
+
+/// 竖屏创作右（0.3.1 布局预设）：监视器竖屏习惯的排法——预览在上、素材与
+/// 时间线在下，右侧留给检查器；适合 9:16 短剧/口播。
+pub fn portrait_right_dock() -> Dock {
+    Dock::Split {
+        columns: true,
+        ratio: 0.72,
+        first: Box::new(Dock::Split {
+            columns: false,
+            ratio: 0.58,
+            first: Dock::leaf(PaneKind::Preview),
+            second: Dock::leaf(PaneKind::Timeline),
+        }),
+        second: Box::new(Dock::Split {
+            columns: false,
+            ratio: 0.42,
+            first: Dock::leaf(PaneKind::Media),
+            second: Dock::leaf(PaneKind::Inspector),
+        }),
+    }
+}
+
 /// A dock as the settings file keeps it between runs: the same tree, with
 /// each view by name, so a view renamed or added later fails one layout
 /// and never the whole file.

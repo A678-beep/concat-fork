@@ -549,6 +549,16 @@ impl Studio {
                 pane.update(msg, self);
                 self.ai_studio = pane;
             }
+            crate::panes::Msg::AiDrama(msg) => {
+                let mut pane = std::mem::take(&mut self.ai_drama);
+                pane.update(msg, self);
+                self.ai_drama = pane;
+            }
+            crate::panes::Msg::Assistant(msg) => {
+                let mut pane = std::mem::take(&mut self.assistant);
+                pane.update(msg, self);
+                self.assistant = pane;
+            }
             crate::panes::Msg::Export(msg) => {
                 let mut pane = std::mem::take(&mut self.export);
                 pane.update(msg, self);

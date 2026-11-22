@@ -344,6 +344,38 @@ export component TitleBar inherits Rectangle {
             }
         }
 
+        // 星籁 AI 短剧（0.3.1）：顶级入口，一进就是完整工作台。名字是产品
+        // 名，不翻译；放在 AI 工作室旁边，是这版最显眼的位置。
+        if !root.minimal && !root.covered: drama-menu := MenuLabel {
+            label: "AI 短剧";
+            current: root.menu == 5;
+            clicked => {
+                root.menu-opened(5, drama-menu.absolute-position.x - root.absolute-position.x, false);
+            }
+            property <int> asked: root.keyboard-token;
+            changed asked => {
+                if (root.keyboard-menu == 5) {
+                    root.menu-opened(5, drama-menu.absolute-position.x - root.absolute-position.x, true);
+                }
+            }
+        }
+
+        // 帮助：设置/诊断/缓存/快捷键/关于/开源许可。剪映 11.9 把菜单压到 7
+        // 项，我们补的是「用户要找但剪映塞进面板」的那几件，不改信息架构。
+        if !root.minimal && !root.covered: help-menu := MenuLabel {
+            label: I18n.t("titleBar.help");
+            current: root.menu == 6;
+            clicked => {
+                root.menu-opened(6, help-menu.absolute-position.x - root.absolute-position.x, false);
+            }
+            property <int> asked: root.keyboard-token;
+            changed asked => {
+                if (root.keyboard-menu == 6) {
+                    root.menu-opened(6, help-menu.absolute-position.x - root.absolute-position.x, true);
+                }
+            }
+        }
+
         Rectangle { horizontal-stretch: 1; }
 
         // Beside Settings, because it is the same sort of thing: neither one

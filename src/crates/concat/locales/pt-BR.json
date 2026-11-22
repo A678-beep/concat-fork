@@ -1086,5 +1086,11 @@
   "voices.styles": "Estilos",
   "voices.stylesHint": "Um estilo é uma voz com efeitos. Escolha um para escrever com ele: os efeitos vão para o clipe de fala, onde você pode mudá-los.",
   "voices.voices": "Vozes",
-  "voices.yours": "Suas vozes"
+  "voices.yours": "Suas vozes",
+  "configPane.aiEffects": "AI effects",
+  "mediaPane.digitalHuman": "Digital human",
+  "mediaPane.plugins": "Plugins",
+  "mediaPane.smartPack": "Smart packaging",
+  "mediaPane.subtitles": "Subtitles",
+  "titleBar.help": "Help"
 }

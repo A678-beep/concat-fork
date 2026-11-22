@@ -1086,5 +1086,11 @@
   "voices.styles": "الأنماط",
   "voices.stylesHint": "النمط صوت عليه مؤثرات. اختر واحدًا لتكتب به: توضع المؤثرات على مقطع الكلام، حيث يمكنك تغييرها.",
   "voices.voices": "الأصوات البشرية",
-  "voices.yours": "أصواتك"
+  "voices.yours": "أصواتك",
+  "configPane.aiEffects": "AI effects",
+  "mediaPane.digitalHuman": "Digital human",
+  "mediaPane.plugins": "Plugins",
+  "mediaPane.smartPack": "Smart packaging",
+  "mediaPane.subtitles": "Subtitles",
+  "titleBar.help": "Help"
 }
