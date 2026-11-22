@@ -2055,6 +2055,31 @@ impl Studio {
         );
         sync(&models.ai_video_models, self.ai.video_models());
         sync(&models.ai_video_local, self.ai.video_local_rows());
+        // AI 工作室（0.3.0）：面板状态与三页的列表。清单只在打开面板时取，
+        // 这里同步的是已取回来的那一份，启动路径上没有任何网络工作。
+        set_changed(
+            app.get_ai_studio(),
+            self.ai_studio.data(
+                self.account
+                    .as_ref()
+                    .is_some_and(|account| !account.token.trim().is_empty()),
+                &match self.account.as_ref() {
+                    Some(account) => format!(
+                        "已登录：{} · {}",
+                        account.display_name(),
+                        account.plan_label()
+                    ),
+                    None => "未登录：云端能力需先登录星籁账号".to_owned(),
+                },
+            ),
+            |a, b| a == b,
+            |data| app.set_ai_studio(data),
+        );
+        sync(&models.ai_studio_persons, self.ai_studio.person_rows());
+        sync(&models.ai_studio_pages, self.ai_studio.page_rows());
+        sync(&models.ai_studio_shots, self.ai_studio.shot_rows());
+        sync(&models.ai_studio_slots, self.ai_studio.slot_rows());
+        sync(&models.ai_studio_versions, self.ai_studio.version_rows());
         // 星籁账号：登录状态是 Studio 的一份，登录/退出/过期都在这里落屏。
         // 首屏右上角的账号 chip 与 AI 面板底部的账号行读这两组属性。
         let account = self.account.as_ref();
@@ -2934,6 +2959,38 @@ impl Studio {
                     "ai-settings",
                     "AI 运行方式…".to_owned(),
                     Glyph::Settings,
+                    "",
+                    true,
+                ),
+            ],
+            // AI 工作室（0.3.0）：把网页平台的三个 AI 剪辑能力搬进桌面。
+            4 => vec![
+                row(
+                    "ai-studio-autoedit",
+                    "AI 一键成片 · 文案/一句需求 → 成片".to_owned(),
+                    Glyph::Film,
+                    "",
+                    true,
+                ),
+                row(
+                    "ai-studio-explainer",
+                    "动态解说片 · 主题 → 演示级解说".to_owned(),
+                    Glyph::Sparkle,
+                    "",
+                    true,
+                ),
+                row(
+                    "ai-studio-replicate",
+                    "爆款复刻 · 参考视频 → 拆解复刻".to_owned(),
+                    Glyph::Slot,
+                    "",
+                    true,
+                ),
+                rule(),
+                row(
+                    "ai-studio-open",
+                    "打开 AI 工作室（上次那一页）".to_owned(),
+                    Glyph::Sparkle,
                     "",
                     true,
                 ),

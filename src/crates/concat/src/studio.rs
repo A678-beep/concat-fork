@@ -812,6 +812,12 @@ pub struct Models {
     /// AI 生视频页的模型下拉与本地模型行。
     pub ai_video_models: Rc<VecModel<SharedString>>,
     pub ai_video_local: Rc<VecModel<SharedString>>,
+    /// AI 工作室：云端数字人形象、解说脚本页、复刻镜头 / 槽位 / 时长版本。
+    pub ai_studio_persons: Rc<VecModel<SharedString>>,
+    pub ai_studio_pages: Rc<VecModel<SharedString>>,
+    pub ai_studio_shots: Rc<VecModel<SharedString>>,
+    pub ai_studio_slots: Rc<VecModel<SharedString>>,
+    pub ai_studio_versions: Rc<VecModel<SharedString>>,
     pub speech_sample_waves: Rc<VecModel<SharedString>>,
     pub speech_sample_details: Rc<VecModel<SharedString>>,
     /// The Audio page's shelves.
@@ -901,6 +907,11 @@ impl Models {
             ai_plugins: Rc::new(VecModel::default()),
             ai_video_models: Rc::new(VecModel::default()),
             ai_video_local: Rc::new(VecModel::default()),
+            ai_studio_persons: Rc::new(VecModel::default()),
+            ai_studio_pages: Rc::new(VecModel::default()),
+            ai_studio_shots: Rc::new(VecModel::default()),
+            ai_studio_slots: Rc::new(VecModel::default()),
+            ai_studio_versions: Rc::new(VecModel::default()),
             speech_sample_waves: Rc::new(VecModel::default()),
             speech_sample_details: Rc::new(VecModel::default()),
             sounds_mine: Rc::new(VecModel::default()),
@@ -1255,6 +1266,8 @@ pub struct Studio {
     pub voiceover: crate::panes::voiceover::VoiceoverPane,
     /// 星籁 AI：算力选择、本地插件、配音/数字人面板。
     pub ai: crate::panes::ai::AiPane,
+    /// AI 工作室：一键成片 / 动态解说 / 爆款复刻，懒加载（打开面板才取清单）。
+    pub ai_studio: crate::panes::ai_studio::AiStudioPane,
     /// 星籁 AI 账号：本机登录着的那一份，登录/退出/过期都更新它，发布时
     /// 落到首屏右上角与 AI 面板底部。见 concat_host::account。
     pub account: Option<concat_host::account::Account>,
@@ -3197,6 +3210,7 @@ impl Studio {
             meters: crate::meters::MeterFeed::default(),
             voiceover: crate::panes::voiceover::VoiceoverPane::default(),
             ai,
+            ai_studio: crate::panes::ai_studio::AiStudioPane::default(),
             account: concat_host::account::load(),
             account_sheet: false,
             text_presets,

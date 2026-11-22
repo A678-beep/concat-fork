@@ -56,6 +56,7 @@ import { CloudData, CloudDialog, CloudItem } from "dialogs/cloud.slint";
 import { InteropDialog } from "dialogs/interop.slint";
 import { AiData, AiDialog, AiPluginItem, AiVoiceItem, AiWizard } from "dialogs/ai.slint";
 import { AiVideoData } from "dialogs/ai-video.slint";
+import { AiStudioData, AiStudioDialog } from "dialogs/ai-studio.slint";
 import { CaptionsDialog, CaptionsSheetData } from "dialogs/captions.slint";
 import { SpeechDialog, SpeechSheetData } from "dialogs/speech.slint";
 import { NewVoiceData, NewVoiceDialog } from "dialogs/new-voice.slint";
@@ -372,6 +373,15 @@ export component App inherits Window {
     in property <AiVideoData> ai-video;
     in property <[string]> ai-video-models;
     in property <[string]> ai-video-locals;
+    // AI 工作室（0.3.0）：一键成片 / 动态解说 / 爆款复刻。面板懒加载：
+    // 清单只在打开时取，启动路径上没有它的网络工作。
+    in property <AiStudioData> ai-studio;
+    in property <[string]> ai-studio-persons;
+    in property <[string]> ai-studio-pages;
+    in property <[string]> ai-studio-shots;
+    in property <[string]> ai-studio-slots;
+    in property <[string]> ai-studio-versions;
+    callback ai-studio-action(action: string, index: int, text: string);
     in property <[AiVoiceItem]> ai-voices;
     in property <[string]> ai-voice-names;
     in property <[AiPluginItem]> ai-plugins;
@@ -422,7 +432,8 @@ export component App inherits Window {
     /// then, and nothing that acts on what the sheet covers.
     property <bool> sheet-up: root.start.composing || root.export.open || root.settings.open
         || root.project-sheet.open || root.new-voice.open || root.relink.open
-        || root.confirm.open || root.ai.open || root.ai.wizard-open || root.account-sheet;
+        || root.confirm.open || root.ai.open || root.ai-studio.open
+        || root.ai.wizard-open || root.account-sheet;
     /// Which floating tool card is in front: "captions" or "speech". The
     /// one opened or grabbed last; Escape closes it first.
     property <string> front-tool: "captions";
@@ -1421,6 +1432,31 @@ export component App inherits Window {
         confirm-no => { root.ai-confirm-no(); }
         login => { root.ai-login(); }
         video-action(action, index, text) => { root.ai-video-action(action, index, text); }
+    }
+
+    // AI 工作室（0.3.0）：AI 菜单里的「AI 一键成片 / 动态解说片 / 爆款复刻」
+    // 三行都落在这一张表上。清单与列表由 Rust 在打开面板后取回。
+    AiStudioDialog {
+        inset-top: root.safe-area-insets.top;
+        inset-bottom: root.safe-area-insets.bottom;
+        inset-left: root.safe-area-insets.left;
+        inset-right: root.safe-area-insets.right;
+        x: 0;
+        y: root.sheets-top;
+        width: root.width;
+        height: root.height - root.sheets-top;
+        data: root.ai-studio;
+        persons: root.ai-studio-persons;
+        pages: root.ai-studio-pages;
+        shots: root.ai-studio-shots;
+        slots: root.ai-studio-slots;
+        versions: root.ai-studio-versions;
+
+        action(action, index, text) => {
+            root.ai-studio-action(action, index, text);
+        }
+
+        closed => { root.ai-studio-action("close", 0, ""); }
     }
 
     // 鏄熺眮璐﹀彿鐧诲綍鍗★細AI 闈㈡澘閲岀殑銆屽幓鐧诲綍銆嶃€佷互鍙婁簯绔湭鐧诲綍鏃剁殑寮曞閮藉紑

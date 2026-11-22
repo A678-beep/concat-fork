@@ -110,6 +110,7 @@ use dock::{Dock, SEAT_MIN_GRAB, SEAT_MIN_H, SEAT_MIN_W};
 use host::{Host, Shell};
 use panes::Msg;
 use panes::ai::AiMsg;
+use panes::ai_studio::AiStudioMsg;
 use panes::captions::CaptionsMsg;
 use panes::export::ExportMsg;
 use panes::media_bin::MediaMsg;
@@ -752,6 +753,11 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         app.set_ai_plugins(ModelRc::from(models.ai_plugins.clone()));
         app.set_ai_video_models(ModelRc::from(models.ai_video_models.clone()));
         app.set_ai_video_locals(ModelRc::from(models.ai_video_local.clone()));
+        app.set_ai_studio_persons(ModelRc::from(models.ai_studio_persons.clone()));
+        app.set_ai_studio_pages(ModelRc::from(models.ai_studio_pages.clone()));
+        app.set_ai_studio_shots(ModelRc::from(models.ai_studio_shots.clone()));
+        app.set_ai_studio_slots(ModelRc::from(models.ai_studio_slots.clone()));
+        app.set_ai_studio_versions(ModelRc::from(models.ai_studio_versions.clone()));
         app.set_app_menu_items(ModelRc::from(models.bar.clone()));
         app.set_transcribers(ModelRc::from(models.transcribers.clone()));
         app.set_voices(ModelRc::from(models.voices.clone()));
@@ -1279,6 +1285,18 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                     text: text.to_string(),
                 },
             )));
+        }
+    ));
+    // AI 工作室（0.3.0）：三个网页 AI 剪辑能力都在这一条动作上了。
+    app.on_ai_studio_action(on_window!(
+        |state, action: SharedString, index: i32, text: SharedString| {
+            state.handle(Msg::AiStudio(
+                crate::panes::ai_studio::AiStudioMsg::Action {
+                    action: action.to_string(),
+                    index,
+                    text: text.to_string(),
+                },
+            ));
         }
     ));
 
@@ -3213,6 +3231,20 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                         "ai-avatar" => state.handle(Msg::Ai(AiMsg::OpenTab(1))),
                         "ai-plugins" => state.handle(Msg::Ai(AiMsg::OpenTab(2))),
                         "ai-video" => state.handle(Msg::Ai(AiMsg::OpenTab(3))),
+                        // AI 工作室：三个网页能力各一页；「打开」回到上次那一页。
+                        "ai-studio-autoedit" => {
+                            state.handle(Msg::AiStudio(AiStudioMsg::Open(0)))
+                        }
+                        "ai-studio-explainer" => {
+                            state.handle(Msg::AiStudio(AiStudioMsg::Open(1)))
+                        }
+                        "ai-studio-replicate" => {
+                            state.handle(Msg::AiStudio(AiStudioMsg::Open(2)))
+                        }
+                        "ai-studio-open" => {
+                            let tab = state.ai_studio.tab;
+                            state.handle(Msg::AiStudio(AiStudioMsg::Open(tab)))
+                        }
                         "ai-wizard" => {
                             state.ai.wizard_open = true;
                         }

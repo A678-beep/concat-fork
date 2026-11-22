@@ -15,6 +15,7 @@
 //! export sheet is the first, and the shape the rest follow.
 
 pub mod ai;
+pub mod ai_studio;
 pub mod ai_video;
 pub mod assets;
 pub mod captions;
@@ -37,6 +38,8 @@ pub mod voiceover;
 pub enum Msg {
     /// 到 AI 面板（本地插件、云端兜底、算力向导）。
     Ai(ai::AiMsg),
+    /// 到 AI 工作室（一键成片 / 动态解说 / 爆款复刻）。
+    AiStudio(ai_studio::AiStudioMsg),
     /// 到素材库面板。
     Assets(assets::AssetsMsg),
     /// To the export sheet.

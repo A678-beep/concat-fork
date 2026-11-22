@@ -22,6 +22,8 @@
 pub mod account;
 /// 本地 AI 模型目录：效果、大小、显存内存要求、本机适不适合。
 pub mod ai_models;
+/// 星籁 AI 工作室：一键成片 / 动态解说片 / 爆款复刻（平台接口 + 成片下载）。
+pub mod ai_studio;
 pub mod assets;
 /// 素材库悬停试听：一个只播一小段的小播放器（不影响时间线的混音）。
 pub mod audio_preview;

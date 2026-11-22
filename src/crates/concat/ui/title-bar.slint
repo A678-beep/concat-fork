@@ -328,6 +328,22 @@ export component TitleBar inherits Rectangle {
             }
         }
 
+        // 星籁 AI 工作室：把网页平台的 AI 剪辑能力搬进桌面。名字是产品名，
+        // 不翻译；三个能力各一行。
+        if !root.minimal && !root.covered: studio-menu := MenuLabel {
+            label: "AI 工作室";
+            current: root.menu == 4;
+            clicked => {
+                root.menu-opened(4, studio-menu.absolute-position.x - root.absolute-position.x, false);
+            }
+            property <int> asked: root.keyboard-token;
+            changed asked => {
+                if (root.keyboard-menu == 4) {
+                    root.menu-opened(4, studio-menu.absolute-position.x - root.absolute-position.x, true);
+                }
+            }
+        }
+
         Rectangle { horizontal-stretch: 1; }
 
         // Beside Settings, because it is the same sort of thing: neither one

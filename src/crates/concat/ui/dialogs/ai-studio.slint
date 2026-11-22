@@ -1,0 +1,790 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 XingLai contributors
+
+// 星籁 AI 工作室（0.3.0）：把网页平台的三个 AI 剪辑能力搬进桌面。
+//
+//   1. AI 一键成片：文案/一句需求 → 分镜 → 配音 + 画面 → 成片 → 插入时间轴
+//   2. 动态解说片：主题 → 平台脚本（只读预览 + 可改标题）→ 4 套风格渲染 → 插入
+//   3. 爆款复刻：本地参考视频 → 上传拆解 → 自动配站内商用素材 → 复刻成片 → 插入
+//
+// 面板不在启动路径上：清单在打开时才取（见 panes/ai_studio.rs）。所有交互
+// 汇成一条 `action(action, index, text)` 交给 Rust，这里不判断能不能生成。
+
+import { Theme } from "../theme/theme.slint";
+import { Glyph } from "../icons.slint";
+import { Button, Field, Modal, Progress } from "../primitives/modal.slint";
+import { SegmentedControl } from "../primitives/segmented-control.slint";
+import { Select } from "../primitives/select.slint";
+
+/// AI 工作室的状态。字段由 Rust 写好；面板只读（输入框由回调写回 Rust）。
+export struct AiStudioData {
+    open: bool,
+    /// 0 一键成片、1 动态解说、2 爆款复刻。
+    tab: int,
+    busy: bool,
+    progress: float,
+    stage: string,
+    message: string,
+    account-line: string,
+    signed-in: bool,
+    /// 平台说这是内部账号（管理员）免扣积分。
+    admin-exempt: bool,
+    /// 平台返回的积分预估一行。
+    estimate-line: string,
+    // ── 一键成片 ──
+    ae-text: string,
+    /// 比例 0 9:16、1 16:9。
+    ae-aspect: int,
+    /// 时长档 0 10 秒、1 15 秒、2 30 秒、3 60 秒。
+    ae-duration: int,
+    ae-voice: int,
+    /// 出镜 0 无、1 云端数字人。
+    ae-presenter: int,
+    ae-person: int,
+    has-persons: bool,
+    ae-cost: string,
+    ae-hint: string,
+    // ── 动态解说 ──
+    ex-topic: string,
+    ex-title: string,
+    ex-duration: int,
+    /// 比例 0 16:9、1 9:16。
+    ex-aspect: int,
+    ex-style: int,
+    /// 0 1080p、1 720p。
+    ex-resolution: int,
+    ex-voice: int,
+    ex-tts: bool,
+    /// 0 表单、1 脚本预览。
+    ex-step: int,
+    has-script: bool,
+    ex-est: string,
+    ex-note: string,
+    ex-cost: string,
+    ex-web: string,
+    // ── 爆款复刻 ──
+    rp-file: string,
+    has-file: bool,
+    has-analysis: bool,
+    rp-summary: string,
+    rp-copy: string,
+    rp-version: int,
+    rp-slots: int,
+    rp-has-materials: bool,
+    rp-materials: string,
+    rp-cost: string,
+    rp-hint: string,
+    rp-web: string,
+    // ── 成片 ──
+    has-output: bool,
+    last: string,
+    output-name: string,
+    output-credits: string,
+}
+
+/// 一行小字说明。
+component Note inherits Text {
+    color: Theme.fg-dim;
+    font-size: Theme.fs-xs;
+    wrap: word-wrap;
+}
+
+/// 多行输入框：贴着主题色的底，输入时描边亮起来。
+component AreaText inherits Rectangle {
+    in property <string> value;
+    in property <string> placeholder;
+    /// 输入框的高度。
+    in property <length> box-height: 68px;
+    callback edited(text: string);
+
+    property <string> draft;
+    init => { root.draft = root.value; }
+    changed value => { if (!input.has-focus) { root.draft = root.value; } }
+
+    min-height: root.box-height;
+    max-height: root.box-height;
+    background: Theme.field;
+    border-radius: Theme.r;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Colors.transparent;
+    clip: true;
+
+    input := TextInput {
+        x: 9px;
+        y: 7px;
+        width: parent.width - 18px;
+        height: parent.height - 14px;
+        text <=> root.draft;
+        edited => { root.edited(self.text); }
+        color: Theme.fg;
+        font-size: Theme.fs;
+        single-line: false;
+        wrap: word-wrap;
+        selection-background-color: Theme.accent;
+        selection-foreground-color: Theme.on-accent;
+    }
+
+    if root.draft == "" && !input.has-focus: Text {
+        x: 9px;
+        y: 7px;
+        width: parent.width - 18px;
+        text: root.placeholder;
+        color: Theme.fg-dim;
+        font-size: Theme.fs;
+        wrap: word-wrap;
+    }
+}
+
+/// 一条成片的结果行 + 三个按钮。
+component OutputRow inherits VerticalLayout {
+    in property <AiStudioData> data;
+    callback action(action: string, index: int, text: string);
+
+    spacing: 6px;
+
+    Text {
+        text: root.data.last;
+        color: Theme.fg;
+        font-size: Theme.fs-sm;
+        wrap: word-wrap;
+    }
+
+    if root.data.output-credits != "": Text {
+        text: root.data.output-credits;
+        color: Theme.fg-dim;
+        font-size: Theme.fs-xs;
+        wrap: word-wrap;
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+
+        Button {
+            label: "插入到播放头";
+            primary: true;
+            enabled: !root.data.busy;
+            clicked => { root.action("insert", 0, ""); }
+        }
+
+        Button {
+            label: "打开成片文件夹";
+            ghost: true;
+            clicked => { root.action("open-folder", 0, ""); }
+        }
+    }
+}
+
+export component AiStudioDialog inherits Modal {
+    in property <AiStudioData> data;
+    /// 云端数字人形象下拉。
+    in property <[string]> persons;
+    /// 解说脚本逐页预览。
+    in property <[string]> pages;
+    /// 参考视频拆出的镜头。
+    in property <[string]> shots;
+    /// 复刻模板槽位。
+    in property <[string]> slots;
+    /// 复刻成片时长版本。
+    in property <[string]> versions;
+
+    /// 面板上的每个动作：`action` 名字 + 下拉下标 + 文本。
+    callback action(action: string, index: int, text: string);
+
+    open: root.data.open;
+    title: "AI 工作室";
+    glyph: Glyph.sparkle;
+    surface-width: 840px;
+    surface-height: 700px;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+
+        // ── 账号 / 平台状态 ──
+        HorizontalLayout {
+            spacing: 8px;
+
+            Text {
+                text: root.data.account-line;
+                color: root.data.signed-in ? Theme.fg-muted : Theme.warn;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+
+            if root.data.admin-exempt: Text {
+                text: "内部账号 · 免扣积分";
+                color: Theme.accent;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+            }
+
+            if !root.data.signed-in: Button {
+                label: "去登录";
+                primary: true;
+                clicked => { root.action("login", 0, ""); }
+            }
+
+            Button {
+                label: "刷新平台清单";
+                ghost: true;
+                enabled: !root.data.busy;
+                clicked => { root.action("refresh", 0, ""); }
+            }
+        }
+
+        Text {
+            text: "由星籁平台代调 AI：桌面端不保存任何 API Key，登录态与网页工作台同一份；按平台返回的积分扣费，内部账号免扣。";
+            color: Theme.fg-dim;
+            font-size: Theme.fs-xs;
+            wrap: word-wrap;
+        }
+
+        // ── 三个能力 ──
+        SegmentedControl {
+            height: 30px;
+            tabs: true;
+            options: ["一键成片", "动态解说片", "爆款复刻"];
+            current: root.data.tab;
+            changed(index) => { root.action("tab", index, ""); }
+        }
+
+        // ═══════ 1. 一键成片 ═══════
+        if root.data.tab == 0: VerticalLayout {
+            spacing: 8px;
+
+            Text {
+                text: "写一句需求或粘贴一段口播文案，AI 生成分镜、配音与画面，直接出片。";
+                color: Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+
+            AreaText {
+                value: root.data.ae-text;
+                placeholder: "例：帮我做一条 15 秒的门店宣传片，主打「当天上门、明码标价」，语气亲切，结尾引导到店咨询。";
+                box-height: 78px;
+                edited(text) => { root.action("ae-text", 0, text); }
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+
+                VerticalLayout {
+                    spacing: 2px;
+                    Text { text: "比例"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                    Select {
+                        width: 100px;
+                        options: ["9:16 竖屏", "16:9 横屏"];
+                        current: root.data.ae-aspect;
+                        changed(index) => { root.action("ae-aspect", index, ""); }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 2px;
+                    Text { text: "时长"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                    Select {
+                        width: 110px;
+                        options: ["10 秒", "15 秒", "30 秒", "60 秒"];
+                        current: root.data.ae-duration;
+                        changed(index) => { root.action("ae-duration", index, ""); }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+                    Text { text: "音色"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                    Select {
+                        horizontal-stretch: 1;
+                        options: ["女声·亲切自然", "男声·稳重专业", "女声·活泼种草", "男声·青年", "男声·成熟"];
+                        current: root.data.ae-voice;
+                        changed(index) => { root.action("ae-voice", index, ""); }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 2px;
+                    Text { text: "数字人形象（云端）"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                    Select {
+                        width: 150px;
+                        options: ["无出镜（纯画面）", "云端数字人（蝉镜）"];
+                        current: root.data.ae-presenter;
+                        changed(index) => { root.action("ae-presenter", index, ""); }
+                    }
+                }
+            }
+
+            if root.data.ae-presenter == 1: HorizontalLayout {
+                spacing: 8px;
+
+                VerticalLayout {
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+                    Text { text: "云端形象"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                    Select {
+                        horizontal-stretch: 1;
+                        options: root.persons;
+                        current: root.data.ae-person;
+                        changed(index) => { root.action("ae-person", index, ""); }
+                    }
+                }
+
+                if !root.data.has-persons: Text {
+                    text: "平台没有返回形象：可先用「无出镜」，或到网页工作台配置数字人形象。";
+                    color: Theme.warn;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            Text {
+                text: root.data.ae-cost;
+                color: root.data.admin-exempt ? Theme.accent : Theme.warn;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+
+            if root.data.ae-hint != "": Note { text: root.data.ae-hint; }
+
+            HorizontalLayout {
+                spacing: 8px;
+
+                Button {
+                    label: root.data.busy ? "生成中…" : "生成成片";
+                    primary: true;
+                    large: true;
+                    enabled: !root.data.busy;
+                    clicked => { root.action("ae-generate", 0, ""); }
+                }
+
+                if root.data.busy: Button {
+                    label: "取消";
+                    danger: true;
+                    clicked => { root.action("cancel", 0, ""); }
+                }
+
+                Button {
+                    label: "打开成片文件夹";
+                    ghost: true;
+                    clicked => { root.action("open-folder", 0, ""); }
+                }
+
+                Button {
+                    label: "网页版入口";
+                    ghost: true;
+                    clicked => { root.action("web-autoedit", 0, ""); }
+                }
+            }
+        }
+
+        // ═══════ 2. 动态解说片 ═══════
+        if root.data.tab == 1: VerticalLayout {
+            spacing: 8px;
+
+            if root.data.ex-step == 0: VerticalLayout {
+                spacing: 8px;
+
+                Text {
+                    text: "给一个主题，平台生成 7–14 页脚本并逐帧渲染成发布会/科普级解说片。";
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+
+                Field {
+                    placeholder: "主题，例：AI 如何重塑餐饮 / 星籁剪辑 3.0 新品发布";
+                    value: root.data.ex-topic;
+                    max-length: 80;
+                    edited(text) => { root.action("ex-topic", 0, text); }
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+
+                    VerticalLayout {
+                        spacing: 2px;
+                        Text { text: "比例"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                        Select {
+                            width: 100px;
+                            options: ["16:9 横屏", "9:16 竖屏"];
+                            current: root.data.ex-aspect;
+                            changed(index) => { root.action("ex-aspect", index, ""); }
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 2px;
+                        Text { text: "时长"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                        Select {
+                            width: 100px;
+                            options: ["30 秒", "40 秒", "60 秒"];
+                            current: root.data.ex-duration;
+                            changed(index) => { root.action("ex-duration", index, ""); }
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 2px;
+                        horizontal-stretch: 1;
+                        Text { text: "风格"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                        Select {
+                            horizontal-stretch: 1;
+                            options: ["科技蓝", "中国龙 · 赤金", "极简白", "青绿"];
+                            current: root.data.ex-style;
+                            changed(index) => { root.action("ex-style", index, ""); }
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 2px;
+                        Text { text: "分辨率"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                        Select {
+                            width: 120px;
+                            options: ["1080p 高清", "720p 预览"];
+                            current: root.data.ex-resolution;
+                            changed(index) => { root.action("ex-resolution", index, ""); }
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 2px;
+                        Text { text: "配音"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                        Select {
+                            width: 150px;
+                            options: ["男声 · 青年", "男声 · 沉稳", "女声 · 温柔", "女声 · 活泼"];
+                            current: root.data.ex-voice;
+                            changed(index) => { root.action("ex-voice", index, ""); }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    Button {
+                        label: root.data.ex-tts ? "配音：开" : "配音：关";
+                        primary: root.data.ex-tts;
+                        ghost: !root.data.ex-tts;
+                        clicked => { root.action("ex-tts", 0, ""); }
+                    }
+
+                    Text {
+                        text: root.data.ex-tts ? "成片带 AI 配音与字幕" : "成片无声（只有字幕与动效）";
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Text {
+                    text: root.data.ex-cost;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+
+                Note { text: root.data.ex-note; }
+
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    Button {
+                        label: root.data.busy ? "生成脚本中…" : "生成脚本";
+                        primary: true;
+                        large: true;
+                        enabled: !root.data.busy;
+                        clicked => { root.action("ex-script", 0, ""); }
+                    }
+
+                    if root.data.busy: Button {
+                        label: "取消";
+                        danger: true;
+                        clicked => { root.action("cancel", 0, ""); }
+                    }
+
+                    Button {
+                        label: "网页版入口";
+                        ghost: true;
+                        clicked => { root.action("web-explainer", 0, ""); }
+                    }
+                }
+            }
+
+            if root.data.ex-step == 1: VerticalLayout {
+                spacing: 8px;
+
+                Text {
+                    text: root.data.ex-est;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: "标题（可以改；逐页文字本轮为只读预览，渲染用平台生成的脚本）";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                Field {
+                    value: root.data.ex-title;
+                    max-length: 40;
+                    edited(text) => { root.action("ex-title", 0, text); }
+                }
+
+                Text {
+                    text: "脚本预览";
+                    color: Theme.fg;
+                    font-size: Theme.fs-sm;
+                }
+
+                for line in root.pages: Text {
+                    text: line;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                if root.data.ex-note != "": Note { text: root.data.ex-note; }
+
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    Button {
+                        label: root.data.busy ? "渲染中…" : "渲染成片";
+                        primary: true;
+                        large: true;
+                        enabled: !root.data.busy;
+                        clicked => { root.action("ex-render", 0, ""); }
+                    }
+
+                    if root.data.busy: Button {
+                        label: "取消";
+                        danger: true;
+                        clicked => { root.action("cancel", 0, ""); }
+                    }
+
+                    Button {
+                        label: "返回修改主题";
+                        ghost: true;
+                        enabled: !root.data.busy;
+                        clicked => { root.action("ex-back", 0, ""); }
+                    }
+                }
+            }
+        }
+
+        // ═══════ 3. 爆款复刻 ═══════
+        if root.data.tab == 2: VerticalLayout {
+            spacing: 8px;
+
+            Text {
+                text: "选一条本地参考视频，平台拆解镜头节奏、文案结构与复刻模板；再用站内商用素材重新出片，不搬运原片画面。";
+                color: Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+
+                Button {
+                    label: root.data.has-file ? "重新选择参考视频" : "选择本地参考视频";
+                    primary: !root.data.has-file;
+                    enabled: !root.data.busy;
+                    clicked => { root.action("rp-pick", 0, ""); }
+                }
+
+                Text {
+                    text: root.data.has-file ? root.data.rp-file : "还没有选参考视频（mp4 / mov / webm，最长 3 分钟）";
+                    color: root.data.has-file ? Theme.fg : Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+
+                Button {
+                    label: root.data.busy ? "拆解中…" : "上传并拆解";
+                    enabled: !root.data.busy && root.data.has-file;
+                    clicked => { root.action("rp-analyze", 0, ""); }
+                }
+            }
+
+            if root.data.has-analysis: VerticalLayout {
+                spacing: 6px;
+
+                Text {
+                    text: root.data.rp-summary;
+                    color: Theme.fg;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+
+                if root.data.rp-copy != "": Text {
+                    text: root.data.rp-copy;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: "镜头列表";
+                    color: Theme.fg;
+                    font-size: Theme.fs-sm;
+                }
+
+                for line in root.shots: Text {
+                    text: line;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+
+                    VerticalLayout {
+                        spacing: 2px;
+                        Text { text: "成片时长版本"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                        Select {
+                            width: 130px;
+                            options: root.versions;
+                            current: root.data.rp-version;
+                            changed(index) => { root.action("rp-version", index, ""); }
+                        }
+                    }
+
+                    Text {
+                        text: "模板槽位 " + root.data.rp-slots + " 个" + (root.data.rp-has-materials ? " · " + root.data.rp-materials : " · 提交时自动匹配站内商用素材");
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                }
+
+                if root.data.rp-slots > 0: VerticalLayout {
+                    spacing: 2px;
+
+                    Text { text: "复刻模板（槽位）"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+
+                    for line in root.slots: Text {
+                        text: line;
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-xs;
+                        wrap: word-wrap;
+                    }
+                }
+
+                Text {
+                    text: root.data.rp-cost;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    Button {
+                        label: root.data.busy ? "生成中…" : "一键匹配素材并生成";
+                        primary: true;
+                        large: true;
+                        enabled: !root.data.busy;
+                        clicked => { root.action("rp-build", 0, ""); }
+                    }
+
+                    if root.data.busy: Button {
+                        label: "取消";
+                        danger: true;
+                        clicked => { root.action("cancel", 0, ""); }
+                    }
+
+                    Button {
+                        label: "网页版精调";
+                        ghost: true;
+                        clicked => { root.action("rp-web", 0, ""); }
+                    }
+                }
+            }
+
+            Note { text: root.data.rp-hint; }
+
+            if !root.data.has-analysis: HorizontalLayout {
+                spacing: 8px;
+
+                Button {
+                    label: "在浏览器里完成复刻";
+                    ghost: true;
+                    clicked => { root.action("rp-web", 0, ""); }
+                }
+
+                Text {
+                    text: "接口不可用时的兜底：网页版有完整的素材挑选与逐镜头编辑。";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+
+        // ── 进度（三页共用）──
+        if root.data.busy: VerticalLayout {
+            spacing: 4px;
+
+            Progress {
+                value: root.data.progress;
+                live: true;
+            }
+
+            Text {
+                text: root.data.stage;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+        }
+
+        if root.data.message != "": Text {
+            text: root.data.message;
+            color: Theme.fg-muted;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        if root.data.estimate-line != "": Note { text: "平台预估：" + root.data.estimate-line; }
+
+        // ── 上一次成片 ──
+        if root.data.has-output: OutputRow {
+            data: root.data;
+            action(action, index, text) => { root.action(action, index, text); }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Text {
+                text: "成片保存到 %APPDATA%\\app.concat.editor\\ai-output；下载完自动导入素材库并放到播放头。";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+
+            Button {
+                label: "关闭";
+                clicked => { root.action("close", 0, ""); }
+            }
+        }
+    }
+}

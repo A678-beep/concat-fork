@@ -61,6 +61,12 @@ pub struct Account {
     pub plan_name: String,
     /// 套餐到期日，平台给的 `2026-12-17 19:02:38`。
     pub plan_expire_at: String,
+    /// 平台角色：普通用户是空或 `user`，内部账号是 `admin`。
+    #[serde(default)]
+    pub role: String,
+    /// 内部账号：AI 工作室等云端能力免扣积分（平台只记成本）。
+    #[serde(default)]
+    pub is_admin: bool,
     /// 请求带着走的令牌。
     pub token: String,
 }
@@ -376,6 +382,12 @@ pub fn account_from_json(text: &str) -> Result<Account, String> {
         plan: field("plan"),
         plan_name: field("plan_name"),
         plan_expire_at: field("plan_expire_at"),
+        role: field("role"),
+        is_admin: user
+            .get("is_admin")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+            || field("role").eq_ignore_ascii_case("admin"),
         token: token.to_owned(),
     })
 }
