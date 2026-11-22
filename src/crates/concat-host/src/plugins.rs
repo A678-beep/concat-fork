@@ -30,8 +30,9 @@ pub const MANIFEST_URL: &str = "https://xinglaiai.com/ai-nav/api/ai-plugins/mani
 
 /// 官方插件包都在这里，清单取不到时用；清单里的 `url` 优先。
 ///
-/// `launched` 是「服务器上真的有这个包吗」的兜底：0.2.14 起 Wav2Lip 与
-/// SadTalker 两个本地数字人都上线了，四项都可下载。
+/// `launched` 是「服务器上真的有这个包吗」的兜底。Wav2Lip 上游只允许
+/// 个人/研究/非商业用途（仓库无许可证文件），自 0.2.26 起不再分发：
+/// 这里置 false，服务端清单也把 size 置 0，界面显示「即将上线」且不发请求。
 pub const OFFICIAL: [Official; 4] = [
     Official {
         id: "piper",
@@ -45,7 +46,8 @@ pub const OFFICIAL: [Official; 4] = [
         url: "https://xinglaiai.com/ai-nav/api/ai-plugins/wav2lip.zip",
         size: WAV2LIP_SIZE,
         sha256: WAV2LIP_SHA256,
-        launched: true,
+        // Wav2Lip 仅限非商业用途，已下架（许可审计 2026-11-22）。
+        launched: false,
     },
     Official {
         id: "sadtalker",
@@ -1007,19 +1009,18 @@ mod tests {
         assert!(!coming_soon("not-official").online());
     }
 
-    /// 兜底表里四个包都上线了：Piper、语音克隆、Wav2Lip、SadTalker。
+    /// 兜底表：Piper、语音克隆、SadTalker 上线；Wav2Lip 因非商用许可已下架。
     #[test]
     fn the_official_table_says_what_is_launched() {
         assert!(official("piper").unwrap().launched);
-        assert!(official("wav2lip").unwrap().launched);
+        assert!(!official("wav2lip").unwrap().launched);
         assert!(official("sadtalker").unwrap().launched);
         assert!(official("voice-clone").unwrap().launched);
         let fallback = package_status(None, "voice-clone");
         assert!(fallback.online());
         assert_eq!(fallback.size, 177_134_608);
         let avatar = package_status(None, "wav2lip");
-        assert!(avatar.online());
-        assert!(avatar.size > 0);
+        assert!(!avatar.online(), "Wav2Lip is no longer distributed");
         let sad = package_status(None, "sadtalker");
         assert!(sad.online());
         assert!(sad.size > 0);

@@ -825,6 +825,8 @@
   "speech.pickSampleVoice": "选择一段含有人声的样本",
   "speech.picture": "图片…",
   "speech.piperNotInstalled": "本地中文音色需要先安装 Piper 插件：AI 面板 › 本地插件 › 安装。",
+  "speech.piperSuspended": "中文 · 暂停分发（授权合规审查中）· 请改用云端中文音色",
+  "speech.piperSuspendedNote": "本地中文配音暂停分发（授权合规审查中）：Piper 插件正在做授权审查，请改用云端中文音色（需登录，会上传文字）。",
   "speech.portuguese": "葡萄牙语",
   "speech.readingTheSample": "正在读取声音录音",
   "speech.readsVoiceHeardClip": "用时间线上所选片段中的声音朗读",

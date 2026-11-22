@@ -37,6 +37,17 @@ const CLOUD_COST: &str = "云端：需登录星籁账号，按套餐额度扣费
 /// 本地数字人的效果预期，界面上常驻。
 const AVATAR_LIMIT: &str = "Wav2Lip 只动嘴，SadTalker 会点头/眨眼但仍不是真人；清晰度都取决于照片，效果不如云端数字人（Hedra 级），但完全离线、不花钱、素材不出本机。";
 
+/// 0.2.26 授权合规整改：本地 AI 插件暂停分发（服务端 manifest 已清空）。
+///
+/// 审查完成前，模型中心的下载入口显示 [`SUSPENDED_TAG`] 与
+/// [`SUSPENDED_DOWNLOAD`]，不发请求；本地配音/本地数字人入口保留，但明确
+/// 提示改用云端，点了不会静默失败。
+const PLUGINS_SUSPENDED: bool = true;
+const SUSPENDED_TAG: &str = "暂停分发（授权合规审查中）";
+const SUSPENDED_DOWNLOAD: &str = "本地 AI 插件暂停分发（授权合规审查中）：Wav2Lip、Piper、ZipVoice 语音克隆、SadTalker 正在做授权合规审查，审查完成前请使用云端配音 / 云端数字人。";
+const SUSPENDED_VOICE: &str = "本地配音暂停分发（授权合规审查中）：Piper / ZipVoice 插件正在做授权合规审查；需要现在就配音，请把运行方式切到「仅云端」，用云端配音（需登录，会上传文字）。";
+const SUSPENDED_AVATAR: &str = "本地数字人暂停分发（授权合规审查中）：Wav2Lip / SadTalker 插件正在做授权合规审查；需要现在就做数字人，请把运行方式切到「仅云端」，用云端数字人（需登录，会上传照片与配音）。";
+
 /// 配音文字上限，与界面一致。
 const MAX_TEXT: usize = 2000;
 
@@ -581,6 +592,9 @@ impl AiPane {
             .map(Hardware::reason)
             .unwrap_or_else(|| "本机硬件还没有检测".to_owned());
         match effective {
+            AiMode::Local if PLUGINS_SUSPENDED => {
+                format!("{mode}：{hardware}；本地 AI 插件暂停分发（授权合规审查中），请改用云端。")
+            }
             AiMode::Local => format!("{mode}：{hardware}"),
             _ => format!("{mode}：{hardware}；云端需要登录，素材会上传，每次生成前确认。"),
         }
@@ -599,6 +613,9 @@ impl AiPane {
 
     /// 现在这条状态该说什么。
     fn hint(&self) -> String {
+        if PLUGINS_SUSPENDED && matches!(self.effective(), AiMode::Local) {
+            return SUSPENDED_VOICE.to_owned();
+        }
         match self.effective() {
             AiMode::Local if self.piper.is_none() && self.clone.is_none() => {
                 if self.engine_issue.is_empty() {
@@ -627,6 +644,9 @@ impl AiPane {
 
     /// 本地数字人的状态：选中的引擎装没装、能不能跑、下一步该做什么。
     fn digital_status(&self) -> String {
+        if PLUGINS_SUSPENDED {
+            return SUSPENDED_AVATAR.to_owned();
+        }
         if self.digital_engine == 1 {
             if let Some(engine) = self.sadtalker.as_ref() {
                 match engine.ready() {
@@ -866,6 +886,13 @@ impl AiPane {
                 }
             } else if builtin {
                 "已内置 · 首次使用自动下载".to_owned()
+            } else if PLUGINS_SUSPENDED {
+                // 授权合规审查：已装的不说成「可用」，没装的不给下载按钮。
+                if installed.is_some() {
+                    format!("已安装 · {SUSPENDED_TAG}")
+                } else {
+                    SUSPENDED_TAG.to_owned()
+                }
             } else if let Some(plugin) = installed {
                 if plugin.complete {
                     if voices > 0 {
@@ -881,7 +908,12 @@ impl AiPane {
             } else {
                 "即将上线".to_owned()
             };
-            let downloadable = !cloud && !builtin && installed.is_none() && package.online() && fit_ok;
+            let downloadable = !cloud
+                && !builtin
+                && !PLUGINS_SUSPENDED
+                && installed.is_none()
+                && package.online()
+                && fit_ok;
             rows.push(AiPluginItem {
                 id: spec.id.into(),
                 name: spec.name.into(),
@@ -900,7 +932,12 @@ impl AiPane {
                 fit: fit_label.into(),
                 fit_ok,
                 status: state.into(),
-                note: spec.note.into(),
+                note: if PLUGINS_SUSPENDED && !cloud && !builtin {
+                    SUSPENDED_DOWNLOAD.into()
+                } else {
+                    spec.note.into()
+                },
+                suspended: PLUGINS_SUSPENDED && !cloud && !builtin,
                 path: installed
                     .map(|plugin| plugin.folder.display().to_string())
                     .unwrap_or_default()
@@ -940,6 +977,7 @@ impl AiPane {
                 }
                 .into(),
                 note: "导入的插件".into(),
+                suspended: false,
                 path: plugin.folder.display().to_string().into(),
                 installed: true,
                 downloadable: false,
@@ -1296,6 +1334,11 @@ impl AiPane {
         if self.busy {
             return;
         }
+        if PLUGINS_SUSPENDED && matches!(self.effective(), AiMode::Local) {
+            self.message = SUSPENDED_VOICE.to_owned();
+            self.alert(studio, "本地配音暂停分发（授权合规审查中），请切到「仅云端」使用云端配音。");
+            return;
+        }
         if self.text.trim().is_empty() {
             self.message = "请先输入要配音的文字".to_owned();
             return;
@@ -1591,6 +1634,14 @@ impl AiPane {
         if self.busy {
             return;
         }
+        if PLUGINS_SUSPENDED && matches!(self.effective(), AiMode::Local) {
+            self.message = SUSPENDED_AVATAR.to_owned();
+            self.alert(
+                studio,
+                "本地数字人暂停分发（授权合规审查中），请切到「仅云端」使用云端数字人。",
+            );
+            return;
+        }
         if matches!(self.effective(), AiMode::Local) {
             self.digital_local(studio);
         } else {
@@ -1852,6 +1903,12 @@ impl AiPane {
     /// 也先按清单再确认一遍，不发注定 404 的请求。
     fn download_plugin(&mut self, studio: &mut Studio, id: &str) {
         if self.busy {
+            return;
+        }
+        if PLUGINS_SUSPENDED {
+            self.message = SUSPENDED_DOWNLOAD.to_owned();
+            self.tab = 2;
+            self.alert(studio, "本地 AI 插件暂停分发（授权合规审查中），暂时不能下载。");
             return;
         }
         let package = plugins::package_status(self.packages.as_ref(), id);

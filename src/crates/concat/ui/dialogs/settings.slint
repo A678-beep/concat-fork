@@ -2100,7 +2100,7 @@ export component SettingsDialog inherits Sheet {
                         spacing: 8px;
 
                         Text {
-                            text: "① 本机安装目录里的 LICENSE 与 THIRD_PARTY_NOTICES.md：许可证全文与第三方组件声明；\n② 源码仓库 github.com/A678-beep/concat-fork 里与本机版本对应的分支或标签；\n③ 发邮件到 dev@xinglaiai.com 索取对应版本的完整源码（含构建说明），我们会免费提供。";
+                            text: "① 本机安装目录里的 LICENSE、THIRD_PARTY_NOTICES.md、LICENSES/ 与 SOURCE_OFFER.md：许可证全文、第三方组件声明、FFmpeg 对应源码要约；\n② 源码仓库 github.com/A678-beep/concat-fork 里与本机版本对应的分支或标签；\n③ 发邮件到 dev@xinglaiai.com 索取对应版本的完整源码（含构建说明），我们会免费提供。";
                             color: Theme.fg-muted;
                             font-size: Theme.fs-sm;
                             wrap: word-wrap;
@@ -2135,10 +2135,17 @@ export component SettingsDialog inherits Sheet {
 
                 DialogSection {
                     title: "第三方开源组件";
-                    hint: "完整版权与许可证文本见安装目录的 THIRD_PARTY_NOTICES.md。";
+                    hint: "完整版权与许可证文本见安装目录的 THIRD_PARTY_NOTICES.md、LICENSES/ 与 SOURCE_OFFER.md。";
 
                     Text {
-                        text: "Slint（界面，GPL-3.0/商业双许可）· wgpu（渲染，MIT/Apache-2.0）· FFmpeg（编解码，LGPL-2.1+）· ONNX Runtime（本地推理，MIT）· Rust 标准库与生态（MIT/Apache-2.0）· 本地模型与字体各有其许可。";
+                        text: "Slint（界面，GPL-3.0-only 选项；另有 Royalty-free/商业授权，本产品选择 GPLv3 并与 AGPL 依 GPLv3 §13 结合）· wgpu/winit（渲染与窗口，MIT/Apache-2.0）· FFmpeg 8.1 共享库（LGPL-3.0-or-later，BtbN 构建，无 x264/x265）· ONNX Runtime 1.28.0（推理，MIT）· Rust 依赖约 806 个 crate（MIT/Apache-2.0/BSD 等，清单见 LICENSES/cargo-licenses.csv）· 字体（OFL 1.1 / Apache-2.0）。";
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+
+                    Text {
+                        text: "本地 AI 插件与模型（按需下载，不随安装包），各自许可见 AI_PLUGINS_NOTICES.md：Piper 配音（引擎 MIT；espeak-ng GPL-3.0-or-later；中文音色数据集许可待确认）· SadTalker 数字人（代码 Apache-2.0；权重商用授权待法务确认）· ZipVoice 语音克隆（sherpa-onnx / ZipVoice 均为 Apache-2.0）· whisper.cpp（MIT）· 抠像模型 MediaPipe/IS-Net/SlimSAM（Apache-2.0）与 RVM（GPL-3.0，按需下载）。原 Wav2Lip 插件为非商用许可，已停止分发。";
                         color: Theme.fg-muted;
                         font-size: Theme.fs-sm;
                         wrap: word-wrap;

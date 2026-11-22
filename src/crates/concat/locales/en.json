@@ -825,6 +825,8 @@
   "speech.pickSampleVoice": "Pick a sample with a voice in it",
   "speech.picture": "Picture…",
   "speech.piperNotInstalled": "The local Chinese voice needs the Piper plugin: AI panel › Local plugins › Install.",
+  "speech.piperSuspended": "Chinese · distribution suspended pending licence review · use a cloud Chinese voice",
+  "speech.piperSuspendedNote": "Local Chinese voice is suspended pending licence review of the Piper plugin. Use a cloud Chinese voice instead (sign-in required; the text is uploaded).",
   "speech.portuguese": "Portuguese",
   "speech.readingTheSample": "Reading the voice recording",
   "speech.readsVoiceHeardClip": "Reads in the voice heard in the clip selected on the timeline",

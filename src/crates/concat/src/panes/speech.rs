@@ -55,6 +55,10 @@ const SPEEDS: (f32, f32) = (0.5, 2.0);
 /// 也能一次读完；云端同理按段请求。超长时给一句友好的中文提示。
 const MAX_READ_CHARS: usize = 2000;
 
+/// 0.2.26 授权合规整改：本地中文音色（Piper 插件）暂停分发，审查完成前
+/// 保留入口但标注「暂停分发」并引导改用云端中文音色，点了不静默失败。
+const PIPER_SUSPENDED: bool = true;
+
 /// A style a voice can be read in: a few of the audio effects Concat ships,
 /// laid on the speech clip once it lands, where they stay as ordinary
 /// effects to change or take off. Original looks of the effects alone -
@@ -678,6 +682,12 @@ impl SpeechPane {
             self.run_cloud(studio);
             return;
         }
+        if PIPER_SUSPENDED && self.family == Family::Piper {
+            // 授权合规审查：本地中文音色暂停分发，明确告诉人改用云端，
+            // 不走到「模型没装」那种含糊的失败里。
+            self.message = t("speech.piperSuspendedNote");
+            return;
+        }
         let sources = self.sources(studio);
         let Some(source) = sources.get(self.model).cloned() else {
             self.message = t("speech.downloadVoiceModelFirst");
@@ -844,12 +854,14 @@ impl SpeechPane {
                 Family::Piper | Family::Cloud => {}
             }
         }
-        let piper_ready = piper_available(&studio.host.dirs);
+        let piper_ready = !PIPER_SUSPENDED && piper_available(&studio.host.dirs);
         out.push(Source {
             model_id: PIPER_ID.to_owned(),
             family: Family::Piper,
             label: t("speech.modelPiper"),
-            detail: if piper_ready {
+            detail: if PIPER_SUSPENDED {
+                t("speech.piperSuspended")
+            } else if piper_ready {
                 t("speech.modelPiperDetail")
             } else {
                 t("speech.modelPiperMissing")
@@ -1315,7 +1327,11 @@ impl SpeechPane {
             String::new()
         };
         let local_note = if self.family == Family::Piper {
-            t("speech.localNote")
+            if PIPER_SUSPENDED {
+                t("speech.piperSuspendedNote")
+            } else {
+                t("speech.localNote")
+            }
         } else {
             String::new()
         };

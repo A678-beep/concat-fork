@@ -65,6 +65,10 @@ pub struct License {
     pub name: String,
     pub commercial_ok: bool,
     pub attribution_required: bool,
+    /// 给用户看的授权说明（平台的中文 note）。
+    pub note: String,
+    /// 授权全文地址。
+    pub url: String,
 }
 
 /// 一条素材。
@@ -73,7 +77,16 @@ pub struct AssetItem {
     pub id: String,
     /// video / image / music / sfx / font
     pub kind: String,
+    /// 类型中文名（`type_zh`），平台没给时留空。
+    pub type_zh: String,
+    /// 平台标题；Pixabay 条目多为英文关键词串，卡片上不直接显示。
     pub title: String,
+    /// 平台给的中文标题；目前多为空，以后有了优先用。
+    pub title_zh: String,
+    /// 中文标签（`tags_zh`），可直接上卡片。
+    pub tags_zh: Vec<String>,
+    /// 中文子类标签（`sub_tags`，如「中餐」「婴儿护理」）。
+    pub sub_tags: Vec<String>,
     pub duration: f64,
     pub width: u32,
     pub height: u32,
@@ -83,9 +96,20 @@ pub struct AssetItem {
     pub attribution: String,
     /// 素材文件地址（按类型的 url 字段之一），下载前用。
     pub file_url: String,
-    /// 行业名，平台给的。
+    /// 行业名，平台给的（如「餐饮」「眼科」）。
     pub industry: String,
+    /// 中文分类名（`category_zh`，如「美食餐饮」）。
+    pub category_zh: String,
+    /// 分类键（英文，如 `food`），只在没有中文名时兜底。
     pub category: String,
+    /// 来源显示名（`Pixabay` / `ccMixter` / `官方字体源` …）。
+    pub source_name: String,
+    /// 来源键（`pixabay` / `fonts/官方字体源…`），没有显示名时的兜底。
+    pub source: String,
+    /// 作者，需要署名时用。
+    pub author: String,
+    /// 分辨率档位（`HD` / `FHD` …），没有时用宽高。
+    pub resolution: String,
 }
 
 /// 一页搜索结果。
@@ -154,6 +178,29 @@ fn item_of(value: &serde_json::Value) -> Option<AssetItem> {
             .unwrap_or_default()
             .to_owned()
     };
+    // 一些字段既可能是字符串数组，也可能是一句用「/」分开的话；统一成数组。
+    let strings = |key: &str| -> Vec<String> {
+        let Some(raw) = value.get(key) else {
+            return Vec::new();
+        };
+        match raw {
+            serde_json::Value::Array(rows) => rows
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .flat_map(|row| row.split('/'))
+                .map(str::trim)
+                .filter(|row| !row.is_empty())
+                .map(str::to_owned)
+                .collect(),
+            serde_json::Value::String(raw) => raw
+                .split('/')
+                .map(str::trim)
+                .filter(|row| !row.is_empty())
+                .map(str::to_owned)
+                .collect(),
+            _ => Vec::new(),
+        }
+    };
     let number = |key: &str| {
         value
             .get(key)
@@ -175,6 +222,8 @@ fn item_of(value: &serde_json::Value) -> Option<AssetItem> {
                 name: text.clone(),
                 commercial_ok: !upper.contains("NC") && !text.contains("非商用"),
                 attribution_required: upper.contains("BY"),
+                note: String::new(),
+                url: String::new(),
             }
         }
         _ => License {
@@ -196,6 +245,16 @@ fn item_of(value: &serde_json::Value) -> Option<AssetItem> {
                 .get("attribution_required")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false),
+            note: license_value
+                .get("note")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            url: license_value
+                .get("url")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
         },
     };
     // 文件地址：平台按类型给不同的字段名，取第一个非空的。
@@ -249,11 +308,15 @@ fn item_of(value: &serde_json::Value) -> Option<AssetItem> {
     Some(AssetItem {
         id,
         kind,
+        type_zh: text("type_zh"),
         title: if !text("title").is_empty() {
             text("title")
         } else {
             text("name")
         },
+        title_zh: text("title_zh"),
+        tags_zh: strings("tags_zh"),
+        sub_tags: strings("sub_tags"),
         duration,
         width: int_of(value, "width"),
         height: int_of(value, "height"),
@@ -262,7 +325,12 @@ fn item_of(value: &serde_json::Value) -> Option<AssetItem> {
         attribution: text("attribution"),
         file_url,
         industry: text("industry"),
+        category_zh: text("category_zh"),
         category: text("category"),
+        source_name: text("source_name"),
+        source: text("source"),
+        author: text("author"),
+        resolution: text("resolution"),
     })
 }
 
@@ -664,5 +732,46 @@ mod tests {
     #[test]
     fn an_id_becomes_a_file_name() {
         assert_eq!(safe("im/12 34"), "im_12_34");
+    }
+
+    #[test]
+    fn the_chinese_fields_of_the_platform_are_read() {
+        let value = serde_json::json!({
+            "id": 145,
+            "type": "video",
+            "type_zh": "视频",
+            "title": "lunch / meal / people / tea cup",
+            "title_zh": "",
+            "tags_zh": ["厨房", "番茄"],
+            "sub_tags": ["中餐/家常菜"],
+            "industry": "餐饮",
+            "category": "food",
+            "category_zh": "美食餐饮",
+            "source": "pixabay",
+            "source_name": "Pixabay",
+            "author": "Coverr-Free-Footage",
+            "resolution": "HD",
+            "duration": 13.64,
+            "width": 1280,
+            "height": 720,
+            "license": {
+                "code": "pixabay",
+                "name": "Pixabay Content License",
+                "commercial_ok": true,
+                "attribution_required": false,
+                "note": "可免费用于商业项目、无需署名",
+                "url": "https://pixabay.com/service/license-summary/"
+            }
+        });
+        let item = item_of(&value).expect("a platform row parses");
+        assert_eq!(item.industry, "餐饮");
+        assert_eq!(item.category_zh, "美食餐饮");
+        assert_eq!(item.source_name, "Pixabay");
+        assert_eq!(item.resolution, "HD");
+        assert_eq!(item.tags_zh, ["厨房", "番茄"]);
+        // sub_tags 里的一句「中餐/家常菜」拆成两个标签。
+        assert_eq!(item.sub_tags, ["中餐", "家常菜"]);
+        assert_eq!(item.license.note, "可免费用于商业项目、无需署名");
+        assert_eq!(item.license.url, "https://pixabay.com/service/license-summary/");
     }
 }

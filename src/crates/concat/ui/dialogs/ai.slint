@@ -46,10 +46,12 @@ export struct AiPluginItem {
     fit: string,
     /// 本机跑得动。
     fit-ok: bool,
-    /// 已安装 / 可下载 / 即将上线 / 云端 · 需登录。
+    /// 已安装 / 可下载 / 即将上线 / 暂停分发（授权合规审查中） / 云端 · 需登录。
     status: string,
     /// 限制或补充说明。
     note: string,
+    /// 授权合规审查中，本地插件暂停分发：下载按钮不出现，状态用警示色。
+    suspended: bool,
     /// 装在哪。
     path: string,
     installed: bool,
@@ -648,7 +650,7 @@ component ModelPage inherits VerticalLayout {
         first: true;
         ruled: false;
         title: "本地模型中心";
-        hint: "本地模型文件大也不要紧：谁想用就下哪个，不想用就走云端（默认关闭、需登录、按次确认）。";
+        hint: "本地 AI 插件暂停分发（授权合规审查中）：Wav2Lip、Piper、ZipVoice、SadTalker 正在做授权合规审查，审查完成前请使用云端配音 / 云端数字人。";
 
         HorizontalLayout {
             spacing: 8px;
@@ -663,7 +665,7 @@ component ModelPage inherits VerticalLayout {
             Rectangle { horizontal-stretch: 1; }
 
             Text {
-                text: "「即将上线」的条目点了不会发请求";
+                text: "「暂停分发（授权合规审查中）」的条目不可下载，点了不会发请求";
                 color: Theme.fg-dim;
                 font-size: Theme.fs-sm;
                 vertical-alignment: center;
@@ -715,7 +717,8 @@ component ModelPage inherits VerticalLayout {
 
                         Text {
                             text: model.status;
-                            color: model.installed ? Theme.fg-muted
+                            color: model.suspended ? #fbbf24
+                                : model.installed ? Theme.fg-muted
                                 : model.downloadable ? Theme.accent : Theme.fg-dim;
                             font-size: Theme.fs-sm;
                             vertical-alignment: center;

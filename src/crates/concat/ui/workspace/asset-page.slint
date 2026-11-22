@@ -11,9 +11,12 @@ import { Select } from "../primitives/select.slint";
 // 星籁免费商用素材库（0.2.20 起）。
 //
 // 与「媒体」页同一块面板：左侧分类列选类型与行业，右侧工具条搜索，网格
-// 显示缩略图。每个卡片标「可商用」；需要署名的素材显示「需署名」与
-// attribution。下载缓存在 `%APPDATA%\app.concat.editor\asset-cache`，缓存好了
-// 按钮变成「插入时间轴」。数据全部来自平台 `/assets/*` 真实接口，不用 mock。
+// 显示缩略图。0.2.26 起卡片只显示中文信息：缩略图占主视觉，下面一行中文
+// 标题（行业 · 子类标签）、一行「类型 · 分辨率/时长」和来源小字；「可商用」
+// 是右上角半透明小角标，「需署名」是中性色小角标，来源与许可全称只在悬停
+// 时露出来。平台英文标题不上卡片。下载缓存在
+// `%APPDATA%\app.concat.editor\asset-cache`，缓存好了按钮变成「插入时间轴」。
+// 数据全部来自平台 `/assets/*` 真实接口，不用 mock。
 //
 // 0.2.21 的卡顿修复在这里：网格只实例化可视区域里的卡片（虚拟化），
 // 滚动到哪一行就把 `visible-range(first, last)` 报给 Rust，只给这些卡片下载
@@ -21,8 +24,16 @@ import { Select } from "../primitives/select.slint";
 
 export struct AssetCardData {
     id: string,
+    /// 卡片主标题：中文（行业 · 子类标签 / 分类 / 字体名），绝不放平台英文标题。
     title: string,
+    /// 副信息一行：类型 · 分辨率/时长。
     detail: string,
+    /// 来源小字：Pixabay / ccMixter / 官方字体源 …（只做小字，不抢主视觉）。
+    source: string,
+    /// 悬停才露出的中文标签行。
+    tags: string,
+    /// 悬停才露出的来源与许可全称：`Pixabay · Pixabay Content License`。
+    license: string,
     /// 0 视频 / 1 图片 / 2 音乐 / 3 音效 / 4 字体
     kind: int,
     /// 类型角标上的字：视频/图片/音乐/音效/字体。
@@ -32,8 +43,6 @@ export struct AssetCardData {
     commercial: bool,
     /// 授权要求署名（CC BY 一类）。
     needs-attribution: bool,
-    /// 授权与署名说明；需要署名时带 CC BY 的 attribution。
-    attribution: string,
     /// 0 未下载 / 1 下载中 / 2 已缓存 / 3 失败
     state: int,
     progress: float,
@@ -88,6 +97,28 @@ component HoverArea inherits TouchArea {
     changed now-hover => { root.hover(root.now-hover); }
 }
 
+// 缩略图上的一枚小徽标：小字号、半透明底，跟着字宽走，不会铺成一条色带。
+component TinyTag inherits Rectangle {
+    in property <string> label;
+    in property <color> ink: Theme.fg-muted;
+    in property <color> ground: Theme.scrim;
+
+    height: 16px;
+    width: tag.preferred-width + 12px;
+    border-radius: 4px;
+    background: root.ground;
+
+    tag := Text {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        text: root.label;
+        color: root.ink;
+        font-size: 9px;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+}
+
 // 一张素材卡。
 component AssetCard inherits Rectangle {
     in property <AssetCardData> data;
@@ -100,6 +131,8 @@ component AssetCard inherits Rectangle {
 
     /// 视频预览循环到第几帧。
     property <int> preview-index: 0;
+    /// 整卡悬停：缩略图和信息区各有一个 TouchArea，合起来算。
+    property <bool> hot: thumb-hover.has-hover || info-hover.has-hover;
     hover-timer := Timer {
         interval: 400ms;
         running: false;
@@ -113,9 +146,22 @@ component AssetCard inherits Rectangle {
         }
     }
 
-    border-radius: Theme.r;
+    border-radius: Theme.r-lg;
     background: Theme.raised;
+    border-width: 1px;
+    border-color: root.hot ? Theme.line-strong : Theme.line;
+    drop-shadow-blur: root.hot ? 18px : 10px;
+    drop-shadow-offset-y: root.hot ? 4px : 2px;
+    drop-shadow-color: #00000059;
     clip: true;
+    animate border-color, drop-shadow-blur, drop-shadow-offset-y { duration: 120ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+
+    // 信息区的悬停垫在按钮下面：鼠标停在标题/副信息上也整卡高亮。
+    info-hover := TouchArea {
+        y: root.thumb-height;
+        width: parent.width;
+        height: parent.height - root.thumb-height;
+    }
 
     VerticalLayout {
         spacing: 0;
@@ -130,7 +176,8 @@ component AssetCard inherits Rectangle {
                 width: 100%;
                 height: 100%;
                 source: root.data.thumb;
-                image-fit: cover;
+                // 16:9 的图正好铺满；9:16 的图两边留黑边，不裁掉主体。
+                image-fit: contain;
             }
 
             // 悬停预览：视频放后台解好的 3–5 秒循环帧；字体用该字体渲染示例。
@@ -138,7 +185,7 @@ component AssetCard inherits Rectangle {
                 width: 100%;
                 height: 100%;
                 source: root.data.preview-frames[Math.min(root.preview-index, root.data.preview-frames.length - 1)];
-                image-fit: cover;
+                image-fit: contain;
             }
 
             if root.data.preview-state == 4: Rectangle {
@@ -173,98 +220,92 @@ component AssetCard inherits Rectangle {
                 }
             }
 
-            if !root.data.has-thumb: VerticalLayout {
+            if !root.data.has-thumb && root.data.preview-state != 4: VerticalLayout {
                 alignment: center;
-                Text {
-                    text: "…";
-                    color: Theme.fg-dim;
-                    horizontal-alignment: center;
+                Icon {
+                    glyph: root.data.kind == 1 ? Glyph.image
+                        : root.data.kind == 2 ? Glyph.music
+                        : root.data.kind == 3 ? Glyph.music
+                        : root.data.kind == 4 ? Glyph.text-mark
+                        : Glyph.film;
+                    size: 22px;
+                    tint: Theme.fg-dim;
                 }
             }
 
-            // 授权角标压在图左上角。
-            if root.data.commercial: Rectangle {
-                x: 6px;
-                y: 6px;
-                height: 18px;
-                border-radius: Theme.r-xs;
-                background: Theme.accent;
+            // 合规角标：右上角，小字号、半透明，不再是一条大绿杠。
+            HorizontalLayout {
+                x: parent.width - self.preferred-width - 8px;
+                y: 8px;
+                width: self.preferred-width;
+                height: 16px;
+                spacing: 4px;
 
-                Text {
-                    text: I18n.t("assets.commercial");
-                    color: Theme.on-accent;
-                    font-size: Theme.fs-xs;
-                    vertical-alignment: center;
-                    horizontal-alignment: center;
-                    padding-left: 6px;
-                    padding-right: 6px;
+                if root.data.needs-attribution: TinyTag {
+                    label: I18n.t("assets.needsCredit");
+                    ink: Theme.fg;
+                }
+                if root.data.commercial: TinyTag {
+                    label: I18n.t("assets.commercial");
+                    ink: Theme.accent;
                 }
             }
 
-            // 需要署名的素材再压一个角标，免得只有一行小字才看得出。
-            if root.data.needs-attribution: Rectangle {
-                x: 6px;
-                y: root.data.commercial ? 28px : 6px;
-                height: 18px;
-                border-radius: Theme.r-xs;
-                background: Theme.warn;
-
-                Text {
-                    text: I18n.t("assets.needsCredit");
-                    color: Theme.fg;
-                    font-size: Theme.fs-xs;
-                    vertical-alignment: center;
-                    horizontal-alignment: center;
-                    padding-left: 6px;
-                    padding-right: 6px;
-                }
-            }
-
-            // 类型角标压在图左下角：视频/图片/音乐/音效/字体。
-            Rectangle {
-                x: 6px;
-                y: parent.height - self.height - 6px;
-                height: 18px;
-                border-radius: Theme.r-xs;
-                background: Theme.panel;
-
-                Text {
-                    text: root.data.kind-label;
-                    color: Theme.fg;
-                    font-size: Theme.fs-xs;
-                    vertical-alignment: center;
-                    horizontal-alignment: center;
-                    padding-left: 6px;
-                    padding-right: 6px;
-                }
-            }
-
-            // 悬停预览状态：准备中 / 试听中 / 预览不了，压在图右下角。
+            // 悬停预览状态：左上角的小字，和合规角标分开。
             if root.data.preview-state == 1 || root.data.preview-state == 3
-                || root.data.preview-state == 5 || root.data.preview-state == 6: Rectangle {
-                x: parent.width - self.width - 6px;
-                y: parent.height - self.height - 6px;
-                height: 18px;
-                border-radius: Theme.r-xs;
-                background: Theme.accent-soft;
+                || root.data.preview-state == 5 || root.data.preview-state == 6: TinyTag {
+                x: 8px;
+                y: 8px;
+                label: root.data.preview-state == 1 ? I18n.t("assets.previewPreparing")
+                    : root.data.preview-state == 3 ? I18n.t("assets.previewAudio")
+                    : root.data.preview-state == 6 ? I18n.t("assets.previewNoAudio")
+                    : I18n.t("assets.previewUnavailable");
+                ink: Theme.fg;
+            }
 
-                Text {
-                    text: root.data.preview-state == 1 ? I18n.t("assets.previewPreparing")
-                        : root.data.preview-state == 3 ? I18n.t("assets.previewAudio")
-                        : root.data.preview-state == 6 ? I18n.t("assets.previewNoAudio")
-                        : I18n.t("assets.previewUnavailable");
-                    color: Theme.fg;
-                    font-size: Theme.fs-xs;
-                    vertical-alignment: center;
-                    horizontal-alignment: center;
-                    padding-left: 6px;
-                    padding-right: 6px;
+            // 下载进度贴着缩略图底边，不占卡片高度，也不整块变色。
+            if root.data.state == 1: Rectangle {
+                y: parent.height - self.height;
+                height: 3px;
+                background: #000000a0;
+
+                Rectangle {
+                    width: parent.width * Math.min(1.0, Math.max(0.0, root.data.progress));
+                    height: parent.height;
+                    background: Theme.accent;
+                }
+            }
+
+            // 悬停：中文标签 + 来源/许可全称。许可全称不在主视觉上。
+            if thumb-hover.has-hover && (root.data.tags != "" || root.data.license != ""): Rectangle {
+                y: parent.height - self.height;
+                height: 34px;
+                background: #000000b8;
+
+                VerticalLayout {
+                    x: 8px;
+                    y: 4px;
+                    width: parent.width - 16px;
+                    spacing: 0;
+
+                    if root.data.tags != "": Text {
+                        text: root.data.tags;
+                        color: Theme.on-scrim;
+                        font-size: Theme.fs-xs;
+                        overflow: elide;
+                    }
+                    if root.data.license != "": Text {
+                        text: root.data.license;
+                        color: Theme.on-scrim.with-alpha(0.72);
+                        font-size: Theme.fs-xs;
+                        overflow: elide;
+                    }
                 }
             }
 
             // 悬停感知盖在缩略图上：停留 400ms 起预览，移开就停；试听中
             // 点一下画面也可以停（任务卡允许点击暂停）。
-            HoverArea {
+            thumb-hover := HoverArea {
                 hover(on) => {
                     if (on) {
                         hover-timer.running = true;
@@ -280,50 +321,46 @@ component AssetCard inherits Rectangle {
         }
 
         VerticalLayout {
-            padding: 6px;
-            padding-top: 4px;
-            spacing: 2px;
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 8px;
+            padding-bottom: 8px;
+            spacing: 5px;
 
             Text {
                 text: root.data.title;
                 color: Theme.fg;
-                font-size: Theme.fs-sm;
+                font-size: Theme.fs;
+                font-weight: Theme.weight-title;
                 overflow: elide;
             }
 
-            Text {
-                text: root.data.detail;
-                color: Theme.fg-dim;
-                font-family: Theme.font-technical;
-                font-size: Theme.fs-xs;
-                overflow: elide;
-            }
+            HorizontalLayout {
+                spacing: 6px;
 
-            // 授权行：CC BY 这类需要署名的显示授权名 + attribution。
-            Text {
-                text: root.data.attribution;
-                color: root.data.commercial ? Theme.fg-dim : Theme.fg-muted;
-                font-size: Theme.fs-xs;
-                overflow: elide;
-            }
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.data.detail;
+                    color: Theme.fg-muted;
+                    font-family: Theme.font-technical;
+                    font-size: Theme.fs-xs;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
 
-            Rectangle { height: 3px; }
-
-            if root.data.state == 1: Rectangle {
-                height: 4px;
-                border-radius: 2px;
-                background: Theme.well;
-
-                Rectangle {
-                    width: parent.width * Math.min(1.0, Math.max(0.0, root.data.progress));
-                    height: parent.height;
-                    border-radius: 2px;
-                    background: Theme.accent;
+                if root.data.source != "": Text {
+                    text: root.data.source;
+                    color: Theme.fg-dim;
+                    font-size: 9px;
+                    overflow: elide;
+                    vertical-alignment: center;
                 }
             }
 
             Button {
-                height: 26px;
+                height: 28px;
+                block: true;
+                glyph: root.data.state == 2 ? Glyph.plus : Glyph.import;
                 label: root.data.action;
                 clicked => { root.act(); }
             }
@@ -335,8 +372,10 @@ component AssetCard inherits Rectangle {
 component AssetSkeleton inherits Rectangle {
     in property <length> thumb-height;
 
-    border-radius: Theme.r;
+    border-radius: Theme.r-lg;
     background: Theme.raised;
+    border-width: 1px;
+    border-color: Theme.line;
     clip: true;
 
     VerticalLayout {
@@ -348,27 +387,28 @@ component AssetSkeleton inherits Rectangle {
         }
 
         VerticalLayout {
-            padding: 6px;
-            padding-top: 6px;
-            spacing: 4px;
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 8px;
+            padding-bottom: 8px;
+            spacing: 5px;
 
-            Rectangle { height: 9px; border-radius: 3px; background: Theme.well; }
-            Rectangle { height: 8px; border-radius: 3px; background: Theme.well; width: 55%; }
-            Rectangle { height: 8px; border-radius: 3px; background: Theme.well; width: 70%; }
-            Rectangle { height: 26px; border-radius: Theme.r-xs; background: Theme.well; }
+            Rectangle { height: 12px; border-radius: 3px; background: Theme.well; width: 62%; }
+            Rectangle { height: 9px; border-radius: 3px; background: Theme.well; width: 84%; }
+            Rectangle { height: 28px; border-radius: Theme.r; background: Theme.well; }
         }
     }
 }
 
 // 加载中的骨架网格：两行假卡，位置和真网格同一套算术，加载完不跳。
 component AssetSkeletonGrid inherits Rectangle {
-    property <length> gap: 8px;
-    property <length> min-card: 158px;
+    property <length> gap: 10px;
+    property <length> min-card: 190px;
     property <int> cols: Math.max(1,
         Math.floor((root.width + root.gap) / (root.min-card + root.gap)));
     property <length> card-w: (root.width - (root.cols - 1) * root.gap) / root.cols;
     property <length> thumb-h: root.card-w * 9 / 16;
-    property <length> card-h: root.thumb-h + 92px;
+    property <length> card-h: root.thumb-h + 86px;
 
     height: 2 * (root.card-h + root.gap) - root.gap;
 
@@ -400,13 +440,14 @@ component AssetGrid inherits Rectangle {
     callback hover-start(id: string);
     callback hover-end(id: string);
 
-    property <length> gap: 8px;
-    property <length> min-card: 158px;
+    property <length> gap: 10px;
+    property <length> min-card: 190px;
     property <int> cols: Math.max(1,
         Math.floor((root.width + root.gap) / (root.min-card + root.gap)));
     property <length> card-w: (root.width - (root.cols - 1) * root.gap) / root.cols;
     property <length> thumb-h: root.card-w * 9 / 16;
-    property <length> card-h: root.thumb-h + 92px;
+    // 缩略图 + 标题/副信息/按钮三行（Rust 侧的卡片文案固定两行）。
+    property <length> card-h: root.thumb-h + 86px;
     property <length> row-h: root.card-h + root.gap;
     property <int> rows: Math.ceil(root.items.length / root.cols);
 
@@ -549,8 +590,8 @@ export component AssetPage inherits VerticalLayout {
 
     // ── 网格 ──
     if Assets.items.length > 0: VerticalLayout {
-        padding-left: 8px;
-        padding-right: 8px;
+        padding-left: 10px;
+        padding-right: 10px;
 
         AssetGrid {
             items: Assets.items;

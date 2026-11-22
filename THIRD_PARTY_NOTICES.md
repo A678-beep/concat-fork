@@ -277,3 +277,116 @@ https://unsplash.com/photos/2v921tlqdXE), used under the Unsplash License. The s
 and is embedded in the app; each card is the effect's own shader run over
 it on the GPU when the app first needs the card (`concat-host`'s
 `cards.rs`).
+
+---
+
+# 星籁剪辑（XingLai Cut）补充声明
+
+本文件由星籁（XingLai）为 0.2.11–0.2.25 Windows 桌面版补充，用于说明上游
+Concat 文本未覆盖的随包组件、AI 插件与模型、素材与许可义务。与上游文本
+冲突时，以义务更严格者为准。审计日期：2026-11-22。许可证全文见本目录旁
+`LICENSES/`；源码要约见 `SOURCE_OFFER.md`；AI 插件清单见 `AI_PLUGINS_NOTICES.md`。
+
+## 1. FFmpeg（Windows）
+
+随包 FFmpeg 8.1 共享库（`avcodec-62.dll`、`avdevice-62.dll`、
+`avfilter-11.dll`、`avformat-62.dll`、`avutil-60.dll`、`swresample-6.dll`、
+`swscale-9.dll`；0.2.14–0.2.24 另含 `ffmpeg.exe`、`ffprobe.exe`）来自 BtbN 的
+`ffmpeg-n8.1.3-9-g29e619e767-win64-lgpl-shared-8.1` 构建，许可
+**LGPL-3.0-or-later**（`--enable-version3`，未启用 `--enable-gpl` /
+`--enable-nonfree`，`--disable-libx264 --disable-libx265`）。许可证全文：
+`LICENSES/LGPL-3.0.txt`；对应源码与构建脚本见 `SOURCE_OFFER.md` 第 2 节。
+DLL 位于 exe 旁、可被用户替换。H.264/HEVC/AAC 等编解码专利许可不在上述
+开源许可范围内，由分发/使用方自行处理。
+
+## 2. Slint（界面）
+
+`slint 1.18.1` 等 14 个 crate 以 **GPL-3.0-only** 选项使用（Slint 同时提供
+GPLv3 / Royalty-free / 商业许可三种选择；本产品选择 GPLv3）。GPLv3 第 13 条
+明确允许与 AGPLv3 结合，故与主程序 AGPL-3.0-or-later 一并分发合规。
+GPLv3 全文：`LICENSES/GPL-3.0-only.txt`。
+
+## 3. ONNX Runtime
+
+`onnxruntime.dll`、`onnxruntime_providers_shared.dll` 为 Microsoft ONNX
+Runtime 1.28.0（MIT）。文本：`LICENSES/MIT-ONNXRuntime.txt`；微软第三方
+声明：`LICENSES/ONNXRuntime-ThirdPartyNotices.txt`。
+
+## 4. Rust 依赖（Cargo.lock 全量）
+
+主程序由 Cargo 构建，`Cargo.lock` 共 **826** 个包：806 个 crates.io 包 +
+20 个本地 workspace/补丁包（19 个 concat-* + `i-slint-renderer-skia` +
+`whisper-rs-sys`）。许可分布（2026-11-22 本地审计）：
+
+- 约 760 个 MIT / Apache-2.0 / BSD / ISC / Zlib / Unicode 等宽松许可；
+- 14 个 Slint crate：GPL-3.0-only 选项（见上）；
+- 9 个 MPL-2.0：`uniffi*`（移动端绑定，Windows 构建不链接）与
+  `option-ext`——MPL 为文件级弱 copyleft，不影响作为更大作品分发，
+  源码可从 crates.io 获取；
+- 2 个 r-efi：MIT / Apache-2.0 / LGPL-2.1-or-later 三选一（本产品取宽松项）；
+- 其余为 Unlicense / BSL-1.0 / CDLA-Permissive / WTFPL 等宽松许可；
+- 2 个包（`arbitrary`、`derive_arbitrary`）本地缓存缺 license 字段，
+  crates.io 标称 MIT OR Apache-2.0（待复核）。
+- 完整清单：`LICENSES/cargo-licenses.csv`。
+
+未发现 AGPL/SSPL/自定义非自由许可；未发现要求版税的依赖。
+
+## 5. 字体
+
+界面与标题渲染嵌入的字体均为 SIL OFL 1.1（Permanent Marker 与 Kosugi Maru
+为 Apache-2.0），包括 Hanken Grotesk、Inter、Montserrat、Space Grotesk、
+Archivo Black、Bebas Neue、Anton、DM Serif Display、Abril Fatface、Bangers、
+Permanent Marker、Pacifico、Lobster、Caveat Brush、Staatliches、Black Ops One、
+Germania One、Atomic Age、Hammersmith One、Secular One、Londrina Solid、
+Bungee Hairline、Rubik Scribble、Shadows Into Light Two、Pixelify Sans、
+Google Sans Code、Kosugi Maru、Frijole、Emilys Candy、Mystery Quest、
+Zen Tokyo Zoo，以及 Noto Sans CJK SC / Arabic UI / Hebrew / Devanagari /
+Bengali / Thai 的 OFL 子集。OFL 全文：`LICENSES/OFL-1.1.txt`；各字体版权行在
+源码 `src/crates/concat-text/fonts/LICENSE-*.txt`。OFL 允许随软件分发，
+但不得单独售卖字体文件。
+
+## 6. 素材库（云端，不随安装包）
+
+桌面端 0.2.20 起「素材库」按需从平台接口下载图片/视频/音乐/音效/字体，
+不随安装包分发。接口为每个素材返回授权元数据：Pixabay Content License、
+CC0 1.0、CC BY 3.0、SIL OFL 1.1，并标注是否需要署名。CC BY 素材需在成片
+中署名，客户端卡片显示 attribution；建议导出时同时给出署名清单（待办）。
+Pixabay 素材由平台重新托管并供下载，是否符合其「不得单独再分发」条款，
+待法务确认。
+
+## 7. AI 插件与本地模型（按需下载，不随安装包）
+
+详细清单、证据与处置见 `AI_PLUGINS_NOTICES.md`。摘要：
+
+- **Piper 本地配音**：引擎 MIT；`espeak-ng` 运行时与数据 GPL-3.0-or-later
+  （源码 https://github.com/espeak-ng/espeak-ng）；中文音色 `zh_CN-huayan`
+  的数据集许可上游记载为 **Unknown**，商用授权待确认。
+- **Wav2Lip 本地数字人**：上游无许可证文件、README 明确仅个人/研究/
+  非商业使用，权重为第三方转换。**已停止分发**（0.2.26 起从下载清单与
+  客户端默认流程移除）。
+- **SadTalker 本地数字人**：代码 Apache-2.0（含腾讯补充声明）；权重由
+  上游发布，其 3D 人脸重建基于 Basel Face Model (BFM)，权重商用授权
+  待法务确认。
+- **ZipVoice 语音克隆**：sherpa-onnx 与 ZipVoice 模型均 Apache-2.0；
+  随包 `espeak-ng-data` 为 GPL-3.0-or-later；内置参考音色
+  `news-female*.wav` 与 ZipVoice 发布包 `test_wavs` 字节一致（新闻播报
+  音频，版权/声音权未确认，正在替换）。
+- 本地字幕：whisper.cpp（MIT）+ Whisper ggml 模型（MIT，按需下载）；
+  Silero VAD（MIT）；DeepFilterNet3（MIT/Apache-2.0）。
+- 抠像模型：MediaPipe Selfie Segmentation（Apache-2.0，内嵌）；
+  IS-Net/rembg（Apache-2.0/MIT）、SlimSAM（Apache-2.0）、Robust Video
+  Matting（GPL-3.0，按需下载）。RVM 的 GPL-3.0 仅与 AGPL 分发兼容；
+  若将来闭源发行必须移除。
+
+## 8. 其他
+
+Microsoft Visual C++ 运行库按 Visual Studio 可再分发条款随包；语音示例
+来自 LibriVox 公有领域录音；效果预览图为 Unsplash License。均见上方上游
+文本。
+
+## 9. 无额外限制
+
+星籁剪辑不限制用户复制、修改、再分发本程序（AGPL 允许的行为）；账号登录
+仅用于星籁云端 AI、云同步等平台服务，本地剪辑、本地配音、本地数字人
+不需要登录，也不含激活/DRM 限制。若未来以修改版 Concat 提供网络交互
+服务，将按 AGPL 第 13 条向网络用户提供对应源码。

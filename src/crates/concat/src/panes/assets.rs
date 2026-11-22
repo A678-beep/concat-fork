@@ -125,6 +125,73 @@ fn kind_of(item: &AssetItem) -> Kind {
     }
 }
 
+/// 是不是汉字（含扩展 A 与兼容区，够认平台的中文标签）。
+fn is_han(ch: char) -> bool {
+    ('\u{3400}'..='\u{4dbf}').contains(&ch)
+        || ('\u{4e00}'..='\u{9fff}').contains(&ch)
+        || ('\u{f900}'..='\u{faff}').contains(&ch)
+}
+
+fn has_han(text: &str) -> bool {
+    text.chars().any(is_han)
+}
+
+/// 文本里第一段连续汉字：字体名「思源宋体 CN Bold」只留「思源宋体」。
+fn han_head(text: &str) -> String {
+    let mut run = String::new();
+    for ch in text.chars() {
+        if is_han(ch) {
+            run.push(ch);
+        } else if !run.is_empty() {
+            break;
+        }
+    }
+    run
+}
+
+/// 平台给的中文标签：`sub_tags` 在前（具体），`tags_zh` 在后（内容词）。
+/// 只要带汉字的，去重，保持顺序。
+fn chinese_tags(item: &AssetItem) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    for tag in item.sub_tags.iter().chain(item.tags_zh.iter()) {
+        let tag = tag.trim();
+        if tag.is_empty() || !has_han(tag) {
+            continue;
+        }
+        if tags.iter().any(|kept| kept.as_str() == tag) {
+            continue;
+        }
+        tags.push(tag.to_owned());
+    }
+    tags
+}
+
+/// 来源显示名小字：`fonts/官方字体源（Google Noto / 思源）` → `官方字体源`。
+fn source_label(item: &AssetItem) -> String {
+    let raw = if item.source_name.trim().is_empty() {
+        item.source.trim()
+    } else {
+        item.source_name.trim()
+    };
+    let raw = raw.rsplit('/').next().unwrap_or(raw).trim();
+    let short = raw.split(['（', '(']).next().unwrap_or(raw).trim();
+    if short.is_empty() {
+        raw.to_owned()
+    } else {
+        short.to_owned()
+    }
+}
+
+/// 时长：不到一分钟说「13s」，再长说「1:32」。
+fn short_duration(seconds: f64) -> String {
+    let total = seconds.round().max(1.0) as u32;
+    if total >= 60 {
+        format!("{}:{:02}", total / 60, total % 60)
+    } else {
+        format!("{total}s")
+    }
+}
+
 /// 一次加载回来的一整包：行业、分类与第一页。
 #[derive(Debug)]
 pub struct Bundle {
@@ -695,8 +762,11 @@ impl AssetsPane {
         let Some(item) = self.items.iter().find(|item| item.id == id).cloned() else {
             return;
         };
-        if kind_of(&item) == Kind::Font {
-            self.message = tf("assets.fontCached", &[&item.title]);
+        // toast、媒体库、时间线都用卡片上的中文名，英文标题不上界面。
+        let kind = kind_of(&item);
+        let display = self.title_of(&item, kind);
+        if kind == Kind::Font {
+            self.message = tf("assets.fontCached", &[&display]);
             self.bump_full();
             return;
         }
@@ -709,7 +779,7 @@ impl AssetsPane {
             }
         };
         let mut media = summary.to_new_media();
-        media.name = item.title.clone();
+        media.name = display.clone();
         let created = studio.apply(Command::AddMedia { item: media });
         let media_id = created.or_else(|| {
             studio
@@ -722,9 +792,9 @@ impl AssetsPane {
         if let Some(media_id) = media_id {
             let start = f64::from(studio.playhead);
             studio.apply(Command::AddClipAtFirstFree { media_id, start });
-            let toast = tf("assets.insertedToast", &[&item.title]);
+            let toast = tf("assets.insertedToast", &[&display]);
             studio.notify(&toast, false);
-            self.message = tf("assets.inserted", &[&item.title]);
+            self.message = tf("assets.inserted", &[&display]);
         } else {
             self.message = t("assets.insertFailed");
         }
@@ -739,15 +809,17 @@ impl AssetsPane {
         let preview = self.previews.borrow().get(&item.id).cloned().unwrap_or_default();
         AssetCardData {
             id: SharedString::from(item.id.clone()),
-            title: SharedString::from(item.title.clone()),
-            detail: SharedString::from(self.detail(item)),
+            title: SharedString::from(self.title_of(item, kind)),
+            detail: SharedString::from(self.detail_of(item, kind)),
+            source: SharedString::from(source_label(item)),
+            tags: SharedString::from(self.tags_line(item)),
+            license: SharedString::from(self.license_line(item)),
             kind: kind.index(),
             kind_label: SharedString::from(kind.label()),
             thumb: self.thumbs.get(&item.id).cloned().unwrap_or_default(),
             has_thumb: self.thumbs.contains_key(&item.id),
             commercial: item.license.commercial_ok,
             needs_attribution: item.license.attribution_required,
-            attribution: SharedString::from(self.attribution(item)),
             state: phase.code(),
             progress,
             action: SharedString::from(self.action_label(item, phase, progress)),
@@ -822,37 +894,141 @@ impl AssetsPane {
         self.full.set(false);
     }
 
-    fn detail(&self, item: &AssetItem) -> String {
-        let mut parts = Vec::new();
-        if item.duration > 0.5 {
-            parts.push(format!("{:.0}s", item.duration));
+    /// 卡片主标题：只在有中文信息时才出字，绝不把平台英文标题搬上来。
+    ///
+    /// 优先顺序：`title_zh` → 行业 + 子类标签（`sub_tags`，最多两个）→
+    /// `category_zh` → 标题里的汉字（字体名常是「思源宋体 CN Bold」这种）
+    /// → 「{类型}素材 · {来源}」兜底。搜索命中时把命中的中文标签放到最前，
+    /// 让人一眼看出为什么这张卡在结果里。
+    fn title_of(&self, item: &AssetItem, kind: Kind) -> String {
+        let title_zh = item.title_zh.trim();
+        if has_han(title_zh) {
+            return title_zh.to_owned();
         }
-        if item.width > 0 && item.height > 0 {
-            parts.push(format!("{}×{}", item.width, item.height));
-        }
-        if !item.category.trim().is_empty() {
-            parts.push(item.category.clone());
-        } else if item.industry.trim().is_empty() {
-            parts.push(t("assets.official"));
+        let tags = chinese_tags(item);
+        let industry = item.industry.trim();
+        let category = item.category_zh.trim();
+        let query = self.query.trim();
+        // 命中的中文标签比宽分类更能说明搜索意图。
+        let hit = if query.is_empty() {
+            None
         } else {
-            parts.push(item.industry.clone());
+            tags.iter()
+                .find(|tag| tag.contains(query))
+                .cloned()
+                .or_else(|| if has_han(query) { Some(query.to_owned()) } else { None })
+        };
+        let mut parts: Vec<String> = Vec::new();
+        let push = |parts: &mut Vec<String>, part: &str| {
+            let part = part.trim();
+            if !part.is_empty() && !parts.iter().any(|kept| kept.as_str() == part) {
+                parts.push(part.to_owned());
+            }
+        };
+        match kind {
+            Kind::Video | Kind::Image => {
+                if !industry.is_empty() && industry != "通用" {
+                    push(&mut parts, industry);
+                    if let Some(hit) = hit.as_deref() {
+                        push(&mut parts, hit);
+                    } else if !tags.is_empty() {
+                        // 子类标签（sub_tags 排在前）取前两个，比宽分类具体。
+                        push(&mut parts, &tags[0]);
+                        if let Some(second) = tags.get(1) {
+                            push(&mut parts, second);
+                        }
+                    } else {
+                        push(&mut parts, category);
+                    }
+                } else {
+                    // 行业是「通用」：用分类打头，再补具体子标签。
+                    push(&mut parts, category);
+                    if let Some(hit) = hit.as_deref() {
+                        push(&mut parts, hit);
+                    } else if let Some(first) = tags.first() {
+                        push(&mut parts, first);
+                        if let Some(second) = tags.get(1) {
+                            push(&mut parts, second);
+                        }
+                    }
+                }
+            }
+            Kind::Music | Kind::Sfx | Kind::Font => {
+                // 字体有中文名就只显示中文名（「思源宋体」），没有才用分类。
+                let han_title = han_head(&item.title);
+                if kind == Kind::Font && !han_title.is_empty() {
+                    push(&mut parts, &han_title);
+                } else {
+                    push(&mut parts, &kind.label());
+                    let descriptor = hit
+                        .as_deref()
+                        .filter(|hit| *hit != category)
+                        .or(if !category.is_empty() { Some(category) } else { None })
+                        .or_else(|| tags.first().map(String::as_str))
+                        .or(if !han_title.is_empty() { Some(han_title.as_str()) } else { None });
+                    if let Some(descriptor) = descriptor {
+                        push(&mut parts, descriptor);
+                    }
+                }
+            }
+        }
+        if parts.is_empty() {
+            // 平台没有给任何中文线索：按任务卡兜底「{类型}素材 · {来源}」。
+            parts.push(format!("{}素材", kind.label()));
+            let source = source_label(item);
+            if !source.is_empty() {
+                parts.push(source);
+            }
         }
         parts.join(" · ")
     }
 
-    fn attribution(&self, item: &AssetItem) -> String {
-        let name = if item.license.name.trim().is_empty() {
-            item.license.code.clone()
-        } else {
-            item.license.name.clone()
-        };
-        if item.license.attribution_required && !item.attribution.trim().is_empty() {
-            format!("{} · {}：{}", name, t("assets.needsCredit"), item.attribution)
-        } else if item.license.attribution_required {
-            format!("{} · {}", name, t("assets.attribution"))
-        } else {
-            name
+    /// 副标题：类型 · 分辨率/时长（来源名在卡片上另起小字）。
+    fn detail_of(&self, item: &AssetItem, kind: Kind) -> String {
+        let mut parts = vec![kind.label()];
+        if item.width > 0 && item.height > 0 {
+            parts.push(format!("{}×{}", item.width, item.height));
         }
+        if item.duration > 0.5 {
+            parts.push(short_duration(item.duration));
+        }
+        if parts.len() == 1 && !item.resolution.trim().is_empty() {
+            parts.push(item.resolution.trim().to_owned());
+        }
+        parts.join(" · ")
+    }
+
+    /// 悬停时露出的中文标签行：前几个具体标签；没有标签就用行业/分类。
+    fn tags_line(&self, item: &AssetItem) -> String {
+        let tags = chinese_tags(item);
+        if !tags.is_empty() {
+            return tags.into_iter().take(4).collect::<Vec<_>>().join(" · ");
+        }
+        if !item.category_zh.trim().is_empty() {
+            return item.category_zh.trim().to_owned();
+        }
+        item.industry.trim().to_owned()
+    }
+
+    /// 悬停时露出的来源 + 许可全称（Pixabay License 这类不放在主视觉）。
+    fn license_line(&self, item: &AssetItem) -> String {
+        let mut parts = Vec::new();
+        let source = source_label(item);
+        if !source.is_empty() {
+            parts.push(source);
+        }
+        let license = if item.license.name.trim().is_empty() {
+            item.license.code.trim()
+        } else {
+            item.license.name.trim()
+        };
+        if !license.is_empty() {
+            parts.push(license.to_owned());
+        }
+        if item.license.attribution_required && !item.attribution.trim().is_empty() {
+            parts.push(format!("作者 {}", item.attribution.trim()));
+        }
+        parts.join(" · ")
     }
 
     fn action_label(&self, item: &AssetItem, phase: Phase, progress: f32) -> String {
@@ -1395,12 +1571,13 @@ impl AssetsPane {
                 }
             }
             AssetsMsg::Downloaded { id, result } => {
-                let title = self
-                    .items
-                    .iter()
-                    .find(|item| item.id == id)
-                    .map(|item| item.title.clone())
-                    .unwrap_or_else(|| id.clone());
+                let title = match self.items.iter().find(|item| item.id == id) {
+                    Some(item) => {
+                        let kind = kind_of(item);
+                        self.title_of(item, kind)
+                    }
+                    None => id.clone(),
+                };
                 self.note_downloaded(&id, result);
                 if self.phase.get(&id).copied() == Some(Phase::Cached) {
                     self.message = tf("assets.downloaded", &[&title]);

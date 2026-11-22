@@ -108,6 +108,11 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "{#Stage}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\icons\concat.ico"; DestDir: "{app}"; Flags: ignoreversion
+; AGPL/LGPL 义务入口：许可证全文、第三方声明、FFmpeg 对应源码要约与 AI 插件/模型清单。
+; 已 staged 的构建不需要这些行（{#Stage}\* 会带上），直接跑本 .iss 时兜底。
+Source: "..\..\LICENSES\*"; DestDir: "{app}\LICENSES"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "..\..\SOURCE_OFFER.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\..\AI_PLUGINS_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 ; 自动字幕的中文语音模型：一键安装脚本 + 使用说明。488 MB 的 ggml-small.bin
 ; 不随安装包分发；脚本优先复制 {app}\模型\ggml-small.bin（离线），
 ; 否则按系统代理 → HuggingFace → hf-mirror → GitHub 镜像下载，校验 SHA-256 后安装。
