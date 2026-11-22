@@ -21,12 +21,18 @@
 //! document model needs serde, and concat-core's zero-dependency rule is worth
 //! more than the adjacency.
 
+// The draft exporter's documents are wide: one `json!` per file, with fifty
+// fields at a level, and the macro expands one level per field.
+#![recursion_limit = "512"]
+
 pub mod capcut;
+pub mod capcut_export;
 pub mod commands;
 #[cfg(test)]
 mod consolidate_tests;
 pub mod doc;
 pub mod editor;
+pub mod fcpxml;
 pub mod model;
 pub mod placement;
 pub mod runs;

@@ -17,10 +17,13 @@ use serde_json::Value;
 use crate::projects::{self, ProjectInfo};
 
 /// CapCut's drafts on this machine, where it keeps them: the folder holding
-/// one folder a draft. `None` where there is none.
+/// one folder a draft. `None` where there is none. 剪映（JianyingPro）keeps
+/// its drafts the same way, under its own folder, and is found here too so
+/// the same import reads either.
 pub fn drafts_folder() -> Option<PathBuf> {
     let under = |base: Option<PathBuf>, tail: &str| base.map(|base| base.join(tail));
     let home = std::env::var_os("HOME").map(PathBuf::from);
+    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
     let candidates = [
         // The download from capcut.com, then the App Store's, which is
         // sandboxed into a container of its own.
@@ -29,12 +32,41 @@ pub fn drafts_folder() -> Option<PathBuf> {
             "Movies/CapCut/User Data/Projects/com.lveditor.draft",
         ),
         under(
-            home,
+            home.clone(),
             "Library/Containers/com.lemon.lvoverseas/Data/Movies/CapCut/User Data/Projects/com.lveditor.draft",
         ),
         under(
-            std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
+            local.clone(),
             "CapCut/User Data/Projects/com.lveditor.draft",
+        ),
+    ];
+    candidates
+        .into_iter()
+        .flatten()
+        .find(|folder| folder.is_dir())
+        .or_else(jianying_drafts_folder)
+}
+
+/// 剪映专业版（JianyingPro）'s drafts on this machine: the Windows and the
+/// Mac layout, where the folder exists. The folders hold one draft each and
+/// are the plain-JSON 5.x ones; 剪映 6 encrypts the file inside instead, so
+/// a draft from it reads as encrypted rather than as absent.
+pub fn jianying_drafts_folder() -> Option<PathBuf> {
+    let under = |base: Option<PathBuf>, tail: &str| base.map(|base| base.join(tail));
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    let candidates = [
+        under(
+            local.clone(),
+            "JianyingPro/User Data/Projects/com.lveditor.draft",
+        ),
+        under(
+            home.clone(),
+            "Movies/JianyingPro/User Data/Projects/com.lveditor.draft",
+        ),
+        under(
+            home,
+            "Library/Containers/com.lemon.lvoverseas/Data/Movies/JianyingPro/User Data/Projects/com.lveditor.draft",
         ),
     ];
     candidates

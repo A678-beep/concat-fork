@@ -40,6 +40,7 @@ mod gpu;
 mod grading;
 mod host;
 mod i18n;
+mod interop;
 mod localize;
 /// The iPhone's pickers and its way to Photos; see the module.
 #[cfg(target_os = "ios")]
@@ -1155,6 +1156,45 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                     let _ = opener::open(&url);
                 }
             }
+        });
+    }
+
+    // ── 剪映草稿互通 / XML 导出 ──
+    // 菜单的三行与面板上的按钮都落在 crate::interop：写文件在
+    // concat_project::capcut_export 与 ::fcpxml，这里只转交。
+    {
+        let weak = app.as_weak();
+        app.on_interop_closed({
+            let weak = weak.clone();
+            move || interop::close(weak.clone())
+        });
+    }
+    {
+        let weak = app.as_weak();
+        app.on_interop_export_jianying({
+            let weak = weak.clone();
+            move || interop::export_jianying(weak.clone())
+        });
+    }
+    {
+        let weak = app.as_weak();
+        app.on_interop_export_xml({
+            let weak = weak.clone();
+            move || interop::export_xml(weak.clone())
+        });
+    }
+    {
+        let weak = app.as_weak();
+        app.on_interop_reveal({
+            let weak = weak.clone();
+            move || interop::reveal(weak.clone())
+        });
+    }
+    {
+        let weak = app.as_weak();
+        app.on_interop_sync({
+            let weak = weak.clone();
+            move || interop::sync_jianying(weak.clone())
         });
     }
 
@@ -3078,6 +3118,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
             log::debug!("menu: {action}");
             Shell::with(|shell, app| {
                 let mut cloud_action = 0u8;
+                let mut interop_action = 0u8;
                 {
                     // The edits a row makes say they were asked from the
                     // menu, unless a shortcut came in through here first.
@@ -3103,6 +3144,10 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                             },
                         ),
                         "export" => state.handle(Msg::Export(ExportMsg::Open)),
+                        // 剪映草稿互通与 XML 导出：借用放下之后再问文件夹、写文件。
+                        "export-jianying" => interop_action = 1,
+                        "export-xml" => interop_action = 2,
+                        "import-cut-draft" => interop_action = 3,
                         "template" => state.save_template(),
                         "speech" => state.handle(Msg::Speech(SpeechMsg::Open)),
                         "clear-cache" => state.clear_project_cache(),
@@ -3207,6 +3252,15 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                         1 => project_cloud::save_current(weak),
                         2 => project_cloud::refresh(weak),
                         _ => project_cloud::upload_current(weak),
+                    }
+                }
+                // 剪映草稿 / XML：同样等借用放掉再动文件和对话框。
+                if interop_action != 0 {
+                    let weak = app.as_weak();
+                    match interop_action {
+                        1 => interop::export_jianying(weak),
+                        2 => interop::export_xml(weak),
+                        _ => interop::import_draft(),
                     }
                 }
             });

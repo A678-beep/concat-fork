@@ -2673,6 +2673,30 @@ impl Studio {
                     &keymap::label(&self.prefs, "export"),
                     !self.timeline().clips.is_empty(),
                 ),
+                // 剪映草稿互通与 XML：导出到别的剪辑软件继续编辑，以及
+                // 读回剪映 / CapCut 的草稿。菜单只有一层（见 context-menu），
+                // 所以「导出」下面这两行就是「文件 → 导出 → …」那两条。
+                row(
+                    "export-jianying",
+                    "导出剪映草稿（JSON）…".to_owned(),
+                    Glyph::Export,
+                    "",
+                    !self.timeline().clips.is_empty(),
+                ),
+                row(
+                    "export-xml",
+                    "导出 FCPXML / Premiere XML…".to_owned(),
+                    Glyph::Export,
+                    "",
+                    !self.timeline().clips.is_empty(),
+                ),
+                row(
+                    "import-cut-draft",
+                    "导入剪映 / CapCut 草稿…".to_owned(),
+                    Glyph::Import,
+                    "",
+                    true,
+                ),
                 row(
                     "template",
                     t("studio.saveAsTemplate"),

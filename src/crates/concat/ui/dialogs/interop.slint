@@ -1,0 +1,105 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 XingLai contributors
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph } from "../icons.slint";
+import { Button, Modal } from "../primitives/modal.slint";
+
+// 剪映草稿互通与 XML 导出：文件菜单里的「导出剪映草稿（JSON）」「导出
+// FCPXML / Premiere XML」「导入剪映草稿」都落在这张表上。写文件在 Rust
+// （concat_project::capcut_export / fcpxml），这里只显示结果。
+//
+// 两行导出的按钮各问一次文件夹；「一键同步到剪映草稿目录」只在检测到
+// 剪映（%LOCALAPPDATA%\JianyingPro）时可按。底部两枚按钮是导出之后才
+// 有用的：打开文件夹、去剪映里看。
+export component InteropDialog inherits Modal {
+    in property <bool> busy;
+    in property <bool> jianying;
+    in property <string> status;
+    in property <string> folder;
+    in property <string> hint;
+
+    callback export-jianying();
+    callback export-xml();
+    callback reveal();
+    callback sync();
+    callback dismiss();
+
+    title: "导出为可编辑草稿";
+    glyph: Glyph.export;
+    surface-width: 680px;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        Text {
+            text: root.hint;
+            color: Theme.fg-muted;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        status-text := Text {
+            text: root.status;
+            color: Theme.fg;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+            min-height: 96px;
+            vertical-alignment: top;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Button {
+                label: "导出剪映草稿（JSON）";
+                primary: true;
+                enabled: !root.busy;
+                clicked => { root.export-jianying(); }
+            }
+
+            Button {
+                label: "导出 FCPXML / Premiere XML";
+                enabled: !root.busy;
+                clicked => { root.export-xml(); }
+            }
+        }
+
+        Text {
+            text: "剪映草稿：可导入剪映继续编辑，部分特效/关键帧可能丢失。\nXML：给 PR / 达芬奇二次编辑，复杂特效不保证。";
+            color: Theme.fg-dim;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Button {
+                label: "打开导出文件夹";
+                enabled: !root.busy && root.folder != "";
+                clicked => { root.reveal(); }
+            }
+
+            Button {
+                label: "一键同步到剪映草稿目录";
+                enabled: !root.busy && root.jianying;
+                clicked => { root.sync(); }
+            }
+
+            Text {
+                text: root.jianying ? "" : "（未检测到剪映）";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+            }
+
+            Button {
+                label: "关闭";
+                clicked => { root.dismiss(); }
+            }
+        }
+    }
+}
