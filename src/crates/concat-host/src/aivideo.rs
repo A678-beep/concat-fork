@@ -58,6 +58,17 @@ pub struct Model {
     /// 平台默认模型。
     #[serde(default)]
     pub default: bool,
+    /// 平台判定可用（开通 + 余额/上游正常）。0.2.23 之前的后端没有该字段，
+    /// 缺省按可用处理，避免升级后整页模型都被标成不可用。
+    #[serde(default = "available_by_default")]
+    pub available: bool,
+    /// 不可用原因：`upstream_balance` / `model_disabled` / `timeout`，空 = 可用。
+    #[serde(default)]
+    pub reason: String,
+}
+
+fn available_by_default() -> bool {
+    true
 }
 
 impl Model {
@@ -67,6 +78,21 @@ impl Model {
             self.id.clone()
         } else {
             self.label.clone()
+        }
+    }
+
+    /// 能不能选来生成：既开通、又没被平台标成不可用。
+    pub fn usable(&self) -> bool {
+        self.enabled && self.available
+    }
+
+    /// 不可用原因的中文说法，给下拉和生成前的提示用。
+    pub fn reason_label(&self) -> &str {
+        match self.reason.trim() {
+            "upstream_balance" => "上游余额不足",
+            "model_disabled" => "本账号未开通",
+            "timeout" => "上游暂时不可用",
+            _ => "",
         }
     }
 }
@@ -85,17 +111,23 @@ pub struct Inventory {
 }
 
 impl Inventory {
-    /// 能选的下标：优先默认模型，否则第一个已开通的；一个都没有返回 None。
+    /// 能选的下标：平台默认且可用 → 第一个可用 → 第一个开通的；一个都没有返回 None。
     pub fn default_index(&self) -> Option<usize> {
+        if let Some(index) = self.models.iter().position(|model| {
+            model.id == self.default_id && model.usable()
+        }) {
+            return Some(index);
+        }
         self.models
             .iter()
-            .position(|model| model.enabled && model.default)
+            .position(|model| model.usable() && model.default)
+            .or_else(|| self.models.iter().position(|model| model.usable()))
             .or_else(|| self.models.iter().position(|model| model.enabled))
     }
 
-    /// 选中的模型。
+    /// 选中的模型（必须可用；不可用的留给界面提示原因）。
     pub fn chosen(&self, index: usize) -> Option<&Model> {
-        self.models.get(index).filter(|model| model.enabled)
+        self.models.get(index).filter(|model| model.usable())
     }
 }
 
@@ -188,27 +220,31 @@ pub fn token() -> Result<String, String> {
     }
 }
 
-/// 服务器说不行时翻成一句人话（优先平台自己的 `hint`）。
+/// 服务器说不行时翻成一句人话：优先用平台给的中文 `message`（0.2.23 起
+/// 两路都失败时会返回 `{"ok":false,"error":"aivideo_unavailable","message":"…"}`），
+/// 其次 `hint`，最后才退回按 HTTP 状态码的通用文案。
 fn refusal(status: u16, text: &str) -> String {
-    let hint = serde_json::from_str::<serde_json::Value>(text)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("hint")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned)
-        });
+    let value = serde_json::from_str::<serde_json::Value>(text).ok();
+    let field = |name: &str| {
+        value
+            .as_ref()
+            .and_then(|value| value.get(name))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    };
+    let message = field("message").or_else(|| field("hint"));
     match status {
         0 => "服务器没有给出回复（连接被中途关闭），请稍后重试".to_owned(),
         401 => "登录已失效，请重新登录星籁账号".to_owned(),
-        402 | 403 => hint.unwrap_or_else(|| {
+        402 | 403 => message.unwrap_or_else(|| {
             "套餐额度不足或没有这个功能的权限，请在网页工作台升级套餐".to_owned()
         }),
-        404 => hint.unwrap_or_else(|| "云端接口不存在，请升级到最新版本".to_owned()),
+        404 => message.unwrap_or_else(|| "云端接口不存在，请升级到最新版本".to_owned()),
         413 => "上传的首帧图片太大（上限 10MB），请换一张小一点的图".to_owned(),
-        429 => hint.unwrap_or_else(|| "请求太频繁或额度用完了，请稍后再试".to_owned()),
-        500..=599 => format!("星籁云端 AI 暂时不可用（HTTP {status}），请稍后再试"),
-        _ => hint.unwrap_or_else(|| format!("云端 AI 返回了 HTTP {status}")),
+        429 => message.unwrap_or_else(|| "请求太频繁或额度用完了，请稍后再试".to_owned()),
+        500..=599 => message
+            .unwrap_or_else(|| format!("星籁云端 AI 暂时不可用（HTTP {status}），请稍后再试")),
+        _ => message.unwrap_or_else(|| format!("云端 AI 返回了 HTTP {status}")),
     }
 }
 
@@ -222,8 +258,9 @@ fn json_reply(status: u16, text: &str) -> Result<serde_json::Value, String> {
 fn check_ok(value: &serde_json::Value) -> Result<(), String> {
     if value.get("ok").and_then(serde_json::Value::as_bool) == Some(false) {
         let hint = value
-            .get("hint")
+            .get("message")
             .and_then(serde_json::Value::as_str)
+            .or_else(|| value.get("hint").and_then(serde_json::Value::as_str))
             .or_else(|| value.get("detail").and_then(serde_json::Value::as_str))
             .unwrap_or("云端 AI 拒绝了这次请求");
         return Err(hint.to_owned());
@@ -831,8 +868,10 @@ mod tests {
             note: "¥0.5/秒".to_owned(),
             enabled: true,
             default: true,
+            ..Model::default()
         };
         assert!(row.display().contains("MiniMax"));
+        assert!(row.usable());
     }
 
     #[test]

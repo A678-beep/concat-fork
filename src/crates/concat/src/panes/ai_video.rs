@@ -110,11 +110,9 @@ pub struct AiVideoPane {
 }
 
 impl AiVideoPane {
-    /// 打开第 4 页时调用：还没取过模型列表就去取一次。
+    /// 打开第 4 页时调用：每次打开都刷新一次模型状态（后端探测缓存 10 分钟，
+    /// 不会频繁打上游）；后端会顺带返回哪些模型余额不足/未开通。
     pub fn ensure_models(&mut self, studio: &mut Studio) {
-        if self.inventory.is_some() || self.loading {
-            return;
-        }
         self.load_models(studio);
     }
 
@@ -165,13 +163,21 @@ impl AiVideoPane {
                             .models
                             .iter()
                             .position(|model| {
-                                chosen.as_deref() == Some(model.id.as_str()) && model.enabled
+                                chosen.as_deref() == Some(model.id.as_str()) && model.usable()
                             })
                             .or_else(|| inventory.default_index())
                             .map_or(0, |index| index as i32);
                         self.models_error.clear();
-                        let usable = inventory.models.iter().filter(|m| m.enabled).count();
+                        let usable = inventory.models.iter().filter(|m| m.usable()).count();
                         if usable == 0 {
+                            self.message = inventory.hint.clone();
+                        } else if chosen.is_some_and(|id| {
+                            inventory
+                                .models
+                                .get(self.model.max(0) as usize)
+                                .is_none_or(|model| model.id != id)
+                        }) {
+                            // 之前选的模型已不可用：自动换默认可用模型，并说明原因。
                             self.message = inventory.hint.clone();
                         }
                         self.inventory = Some(inventory);
@@ -311,7 +317,23 @@ impl AiVideoPane {
             return;
         };
         let Some(model) = inventory.chosen(self.model.max(0) as usize) else {
-            self.message = "选中的视频模型本账号未开通：换一个模型（MiniMax H3 可用）".to_owned();
+            let why = inventory
+                .models
+                .get(self.model.max(0) as usize)
+                .map(|model| {
+                    if model.available {
+                        "本账号未开通".to_owned()
+                    } else if model.reason_label().is_empty() {
+                        "平台暂不可用".to_owned()
+                    } else {
+                        model.reason_label().to_owned()
+                    }
+                })
+                .unwrap_or_else(|| "没有可用模型".to_owned());
+            self.message = format!(
+                "当前视频模型不可用（{why}）：请点「刷新模型」换一个可用模型，或稍后再试"
+            );
+            studio.notify(&self.message, true);
             return;
         };
         if self.mode == 1 && self.image.is_none() {
@@ -516,10 +538,28 @@ impl AiVideoPane {
         let model_note = match (inventory, model) {
             (None, _) => MODELS_EMPTY_HINT.to_owned(),
             (Some(_), Some(model)) => {
-                let enabled = if model.enabled { "" } else { "（本账号未开通）" };
-                format!("{}{enabled}", model.note.trim())
+                let mut note = model.note.trim().to_owned();
+                if note.is_empty() {
+                    note = model.label.clone();
+                }
+                note
             }
-            (Some(_), None) => "模型列表是空的：平台账号可能没有开通任何视频模型".to_owned(),
+            (Some(inventory), None) => {
+                let mut lines = vec!["当前没有可用视频模型：".to_owned()];
+                for model in &inventory.models {
+                    let why = if !model.enabled {
+                        "本账号未开通".to_owned()
+                    } else {
+                        model.reason_label().to_owned()
+                    };
+                    lines.push(format!(
+                        "{}（{}）",
+                        model.display(),
+                        if why.is_empty() { "不可用" } else { why.as_str() }
+                    ));
+                }
+                lines.join("；")
+            }
         };
         let segments = aivideo::segments_for(seconds);
         let gpu = hardware.map(|hardware| &hardware.gpu);
@@ -610,14 +650,27 @@ impl AiVideoPane {
         }
     }
 
-    /// 模型下拉的行。
+    /// 模型下拉的行：不可用的标注原因（余额不足/未开通），兜底模型单独标出来。
     pub fn model_rows(&self) -> Vec<slint::SharedString> {
         match self.inventory.as_ref() {
             Some(inventory) => inventory
                 .models
                 .iter()
                 .map(|model| {
-                    let state = if model.enabled { "" } else { "（未开通）" };
+                    let state = if !model.enabled {
+                        "（未开通）".to_owned()
+                    } else if !model.available {
+                        let why = model.reason_label();
+                        if why.is_empty() {
+                            "（不可用）".to_owned()
+                        } else {
+                            format!("（不可用：{why}）")
+                        }
+                    } else if model.id.starts_with("dashscope:") {
+                        "（兜底可用）".to_owned()
+                    } else {
+                        String::new()
+                    };
                     slint::SharedString::from(format!("{}{state}", model.display()))
                 })
                 .collect(),
