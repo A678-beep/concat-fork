@@ -17,6 +17,7 @@ import "../../concat-text/fonts/HankenGrotesk-Bold.ttf";
 import "../../concat-text/fonts/HankenGrotesk-Italic.ttf";
 
 import { Theme } from "theme/theme.slint";
+import { Skins, SkinSpec } from "theme/skins.slint";
 import { Bezier, Curves, Fmt, Focus, Payload } from "util.slint";
 import { EffectData } from "demo/effects-panel.slint";
 import {
@@ -124,6 +125,8 @@ export {
     Focus,
     Payload,
     Theme,
+    Skins,
+    SkinSpec,
     Bezier,
     Editor,
     I18n,
@@ -201,7 +204,7 @@ export {
     AiVoiceItem,
 }
 export component App inherits Window {
-    title: "星籁剪辑 XingLai Cut";
+    title: "鏄熺眮鍓緫 XingLai Cut";
     // The taskbar's and Alt-Tab's picture on Windows, and the window
     // list's on X11. A Mac takes its Dock icon from the bundle and ignores
     // this; the .exe's own, for Explorer, is embedded by build.rs.
@@ -261,13 +264,13 @@ export component App inherits Window {
     }
 
     // The editor's own state and actions live on the Editor global rather
-    // than here — see editor.slint. What is left on the window is the window:
+    // than here 鈥?see editor.slint. What is left on the window is the window:
     // its title bar, its menus, and the two sheets that cover everything.
 
-    // ── the launch screen ────────────────────────────────────────────────
+    // 鈹€鈹€ the launch screen 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     //
     // Which screen the window is showing. The editor is not built until a
-    // project exists, so nothing behind this is instantiated meanwhile — and
+    // project exists, so nothing behind this is instantiated meanwhile 鈥?and
     // the workspace, when it does arrive, arrives with every callback already
     // bound rather than during the window's own construction.
     in property <bool> on-start: true;
@@ -313,30 +316,30 @@ export component App inherits Window {
     /// CapCut keeps drafts on this machine; see `concat_host::capcut`.
     in property <bool> capcut;
 
-    // 星籁 AI 账号，见 concat_host::account：登录了没有，叫谁，什么套餐，
-    // 到期哪天，出错说什么。登录在后台线程里做，回来的路上把这几样写好。
+    // 鏄熺眮 AI 璐﹀彿锛岃 concat_host::account锛氱櫥褰曚簡娌℃湁锛屽彨璋侊紝浠€涔堝椁愶紝
+    // 鍒版湡鍝ぉ锛屽嚭閿欒浠€涔堛€傜櫥褰曞湪鍚庡彴绾跨▼閲屽仛锛屽洖鏉ョ殑璺笂鎶婅繖鍑犳牱鍐欏ソ銆?
     in property <bool> account-signed-in;
     in property <string> account-name;
     in property <string> account-plan;
     in property <string> account-expire;
     in property <string> account-error;
     in property <bool> account-busy;
-    /// 账号登录弹窗：AI 面板的「去登录」或云端未登录时的引导把它打开，
-    /// 首屏右上角的账号 chip 自己还有一张（见 start.slint）。
+    /// 璐﹀彿鐧诲綍寮圭獥锛欰I 闈㈡澘鐨勩€屽幓鐧诲綍銆嶆垨浜戠鏈櫥褰曟椂鐨勫紩瀵兼妸瀹冩墦寮€锛?
+    /// 棣栧睆鍙充笂瑙掔殑璐﹀彿 chip 鑷繁杩樻湁涓€寮狅紙瑙?start.slint锛夈€?
     in property <bool> account-sheet;
     callback account-sign-in(phone: string, password: string);
     callback account-sign-out();
     callback account-sheet-closed();
-    /// AI 面板里的「去登录」。
+    /// AI 闈㈡澘閲岀殑銆屽幓鐧诲綍銆嶃€?
     callback ai-login();
 
-    // Title bar. The drag/maximize pair must be handled in main.rs — a window
+    // Title bar. The drag/maximize pair must be handled in main.rs 鈥?a window
     // cannot drag itself from inside the scene graph; the rest are seams like
     // the library callbacks above.
     in property <string> project-name: I18n.t("common.untitledProject");
     in property <string> project-status: I18n.t("common.saved");
 
-    // 工程云同步：面板的状态与列表，由 Rust 在后台取回后写进来。
+    // 宸ョ▼浜戝悓姝ワ細闈㈡澘鐨勭姸鎬佷笌鍒楄〃锛岀敱 Rust 鍦ㄥ悗鍙板彇鍥炲悗鍐欒繘鏉ャ€?
     in property <[CloudItem]> cloud-items;
     in property <bool> cloud-open;
     in property <bool> cloud-busy;
@@ -348,10 +351,10 @@ export component App inherits Window {
     callback cloud-open-pid(pid: string, name: string);
     callback cloud-open-url();
 
-    // 星籁 AI：本地优先的算力选择、本地配音（Piper 插件）、照片数字人、
-    // 插件管理，以及默认关闭的云端兜底。状态与两列由 Rust 写好；这里只转发。
+    // 鏄熺眮 AI锛氭湰鍦颁紭鍏堢殑绠楀姏閫夋嫨銆佹湰鍦伴厤闊筹紙Piper 鎻掍欢锛夈€佺収鐗囨暟瀛椾汉銆?
+    // 鎻掍欢绠＄悊锛屼互鍙婇粯璁ゅ叧闂殑浜戠鍏滃簳銆傜姸鎬佷笌涓ゅ垪鐢?Rust 鍐欏ソ锛涜繖閲屽彧杞彂銆?
     in property <AiData> ai;
-    /// AI 生视频（AI 面板第 4 页）的状态。
+    /// AI 鐢熻棰戯紙AI 闈㈡澘绗?4 椤碉級鐨勭姸鎬併€?
     in property <AiVideoData> ai-video;
     in property <[string]> ai-video-models;
     in property <[string]> ai-video-locals;
@@ -381,7 +384,7 @@ export component App inherits Window {
     callback ai-photo-pick();
     callback ai-photo-clear();
     callback ai-confirm-yes();
-    /// AI 生视频页的一个动作：action + 下拉下标 + 文本。
+    /// AI 鐢熻棰戦〉鐨勪竴涓姩浣滐細action + 涓嬫媺涓嬫爣 + 鏂囨湰銆?
     callback ai-video-action(action: string, index: int, text: string);
     callback ai-confirm-no();
     in property <bool> macos;
@@ -452,7 +455,7 @@ export component App inherits Window {
     in property <[string]> version-details;
     in property <[string]> languages;
     /// Settings > About's copyable block. Gathered once in main.rs and
-    /// never republished — every line of it is fixed for the life of the
+    /// never republished 鈥?every line of it is fixed for the life of the
     /// process.
     in property <[SystemFactData]> system-facts;
     in property <string> system-report;
@@ -486,7 +489,7 @@ export component App inherits Window {
     callback settings-watermark-position-changed(index: int);
     callback settings-watermark-opacity-changed(value: float);
     callback settings-watermark-size-changed(value: float);
-    /// 打开 AGPL 许可证或源码页面。
+    /// 鎵撳紑 AGPL 璁稿彲璇佹垨婧愮爜椤甸潰銆?
     callback settings-open-license(url: string);
     callback settings-show-log();
     callback settings-clear-asset-cache();
@@ -494,6 +497,12 @@ export component App inherits Window {
     callback settings-language-changed(index: int);
     callback settings-log-level-changed(index: int);
     callback settings-theme-changed(dark: bool);
+    /// 主题皮肤：gallery 选中的下标（Theme.skins）。
+    callback settings-skin-changed(index: int);
+    /// 动态背景开关。
+    callback settings-motion-changed(on: bool);
+    /// 低配模式（风景静态）。
+    callback settings-low-power-changed(on: bool);
     callback settings-accent-changed(index: int);
     callback settings-accent-custom-changed(colour: color);
     callback settings-playhead-changed(colour: color);
@@ -518,7 +527,7 @@ export component App inherits Window {
     callback settings-install-version();
     callback settings-install-cancel();
     /// The Shortcuts page: a row asked to capture the next keys, and the
-    /// two ways out of a change — put one row back, or put them all back.
+    /// two ways out of a change 鈥?put one row back, or put them all back.
     callback settings-shortcut-capture(id: string);
     callback settings-shortcut-reset(id: string);
     callback settings-shortcut-reset-all();
@@ -644,7 +653,7 @@ export component App inherits Window {
     }
 
     /// The bottom-right notice: what just happened, said once. Set from Rust
-    /// and watched by its token — see ToastLayer, which owns the timing.
+    /// and watched by its token 鈥?see ToastLayer, which owns the timing.
     in property <ToastData> toast;
     /// The notice with this token has gone from the screen.
     callback toast-gone(int);
@@ -672,7 +681,7 @@ export component App inherits Window {
     //   - Clicking anything that is not a control blurs the one that had
     //     focus, the way a browser does. Slint holds focus until something
     //     else takes it, so without somewhere for it to land a number field
-    //     stays in its editing state — ring and all — for the rest of the
+    //     stays in its editing state 鈥?ring and all 鈥?for the rest of the
     //     session. Every real control is inside this and takes its own press
     //     first; what reaches here is a press on nothing, and a FocusScope
     //     takes focus on one.
@@ -683,15 +692,15 @@ export component App inherits Window {
     //     rather than from a check on the target.
     //
     // `Control` in a binding is the platform's own command modifier: Slint
-    // remaps it to ⌘ on macOS and leaves it Ctrl on Windows and Linux, and
+    // remaps it to 鈱?on macOS and leaves it Ctrl on Windows and Linux, and
     // the menu row beside it is written from the same keys (platform.rs,
     // `keys`), so what a row says is what works on the machine it is on.
     //
     // What still lives in bindings here is the window's own: the menu
     // bar's F10 and Alt+F/E/V/A, and opening, closing and quitting. A
     // binding on this scope is matched before `key-pressed` below runs,
-    // so these hold their keys whatever the keymap says — which is why
-    // Settings › Shortcuts turns those chords away rather than letting a
+    // so these hold their keys whatever the keymap says 鈥?which is why
+    // Settings 鈥?Shortcuts turns those chords away rather than letting a
     // row claim a key that would not answer to it. Every other shortcut
     // is one table in Rust now (src/keymap.rs), rebindable there and
     // reached through `key-pressed`.
@@ -700,9 +709,9 @@ export component App inherits Window {
         height: 100%;
         focus-on-tab-navigation: false;
 
-        // The editor's chords were bound here, one KeyBinding apiece —
+        // The editor's chords were bound here, one KeyBinding apiece 鈥?
         // save, undo, redo, split, copy and the rest. They are the
-        // keymap's now: a person moves one in Settings › Shortcuts, and
+        // keymap's now: a person moves one in Settings 鈥?Shortcuts, and
         // the key, the menu row's label and the dispatch all follow it.
         KeyBinding {
             keys: @keys(F10);
@@ -739,7 +748,7 @@ export component App inherits Window {
             keys: @keys(Control + O);
             activated => { root.app-menu-selected("open"); }
         }
-        // ⌘W closes the window on a Mac. Elsewhere Ctrl+W closes the
+        // 鈱榃 closes the window on a Mac. Elsewhere Ctrl+W closes the
         // document - the project - and Ctrl+Q quits; Windows' Alt+F4 is
         // the system's, and arrives as the window's close request.
         KeyBinding {
@@ -766,8 +775,8 @@ export component App inherits Window {
         // same callback. False lets the key go on up, so Escape still
         // closes a popup and Tab still moves focus.
         key-pressed(event) => {
-            // Escape closes the sheet on top, as its × does. A sheet busy
-            // with a job keeps itself - its × is gone then too - and the
+            // Escape closes the sheet on top, as its 脳 does. A sheet busy
+            // with a job keeps itself - its 脳 is gone then too - and the
             // key is spent on it, not passed to the editor underneath.
             // Android's Back is the same key on a phone: unhandled, Slint
             // finishes the activity, so Back with Export or a sheet open
@@ -792,7 +801,7 @@ export component App inherits Window {
                 // The tool cards, under the sheets: the one in front first.
                 // A floating card closes with its job running, which goes
                 // on and is there again when it is opened; a phone's sheet
-                // busy with a job keeps itself, as its × is gone.
+                // busy with a job keeps itself, as its 脳 is gone.
                 if (root.speech.open && (root.front-tool == "speech" || !root.captions.open)) {
                     if (!root.sheets-fill || !root.speech.running) { root.speech-closed(); }
                     return accept;
@@ -871,7 +880,7 @@ export component App inherits Window {
                 // A close goes the way every close does: the project is
                 // saved and a running export is cancelled. One click on the
                 // corner is not a way to lose a long export, so Close
-                // waits for it, as the sheet's own × does.
+                // waits for it, as the sheet's own 脳 does.
                 can-close: root.export.phase != ExportPhase.running;
                 maximized: root.window-maximized;
                 begin-drag => { root.titlebar-begin-drag(); }
@@ -1066,11 +1075,11 @@ export component App inherits Window {
 
     // Declared last, and that is load-bearing: Slint paints siblings in
     // declaration order, so a modal placed above the workspace in the file is
-    // painted *under* it on screen — open, correct, and completely hidden.
+    // painted *under* it on screen 鈥?open, correct, and completely hidden.
     //
     // The launch screen's sheet first among them. Settings is the only other
-    // sheet the launch screen can put up, and never at the same time — the
-    // scrim keeps the rail from being pressed — so the order between the two
+    // sheet the launch screen can put up, and never at the same time 鈥?the
+    // scrim keeps the rail from being pressed 鈥?so the order between the two
     // decides nothing and this one reads first because it comes first.
     NewProjectDialog {
         fill: root.sheets-fill;
@@ -1181,6 +1190,9 @@ export component App inherits Window {
         language-changed(index) => { root.settings-language-changed(index); }
         log-level-changed(index) => { root.settings-log-level-changed(index); }
         theme-changed(dark) => { root.settings-theme-changed(dark); }
+        skin-changed(index) => { root.settings-skin-changed(index); }
+        motion-changed(on) => { root.settings-motion-changed(on); }
+        low-power-changed(on) => { root.settings-low-power-changed(on); }
         accent-changed(index) => { root.settings-accent-changed(index); }
         accent-custom-changed(colour) => { root.settings-accent-custom-changed(colour); }
         playhead-changed(colour) => { root.settings-playhead-changed(colour); }
@@ -1301,7 +1313,7 @@ export component App inherits Window {
         dismissed => { root.confirm-dismissed(); }
     }
 
-    // 工程云同步：文件菜单的保存/打开/上传都落在这张表上。
+    // 宸ョ▼浜戝悓姝ワ細鏂囦欢鑿滃崟鐨勪繚瀛?鎵撳紑/涓婁紶閮借惤鍦ㄨ繖寮犺〃涓娿€?
     CloudDialog {
         inset-top: root.safe-area-insets.top;
         inset-bottom: root.safe-area-insets.bottom;
@@ -1327,8 +1339,8 @@ export component App inherits Window {
         dismiss => { root.cloud-closed(); }
     }
 
-    // 星籁 AI 面板：本地优先，云端兜底。浮在编辑器和已有面板之上；向导
-    // 声明在它后面，第一次用 AI 时向导是更该看到的那张。
+    // 鏄熺眮 AI 闈㈡澘锛氭湰鍦颁紭鍏堬紝浜戠鍏滃簳銆傛诞鍦ㄧ紪杈戝櫒鍜屽凡鏈夐潰鏉夸箣涓婏紱鍚戝
+    // 澹版槑鍦ㄥ畠鍚庨潰锛岀涓€娆＄敤 AI 鏃跺悜瀵兼槸鏇磋鐪嬪埌鐨勯偅寮犮€?
     AiDialog {
         inset-top: root.safe-area-insets.top;
         inset-bottom: root.safe-area-insets.bottom;
@@ -1371,8 +1383,8 @@ export component App inherits Window {
         video-action(action, index, text) => { root.ai-video-action(action, index, text); }
     }
 
-    // 星籁账号登录卡：AI 面板里的「去登录」、以及云端未登录时的引导都开
-    // 这一张（首屏右上角的账号 chip 自己也有一张，见 start.slint）。
+    // 鏄熺眮璐﹀彿鐧诲綍鍗★細AI 闈㈡澘閲岀殑銆屽幓鐧诲綍銆嶃€佷互鍙婁簯绔湭鐧诲綍鏃剁殑寮曞閮藉紑
+    // 杩欎竴寮狅紙棣栧睆鍙充笂瑙掔殑璐﹀彿 chip 鑷繁涔熸湁涓€寮狅紝瑙?start.slint锛夈€?
     AccountDialog {
         inset-top: root.safe-area-insets.top;
         inset-bottom: root.safe-area-insets.bottom;
@@ -1428,12 +1440,12 @@ export component App inherits Window {
         inset-left: root.safe-area-insets.left;
         inset-right: root.safe-area-insets.right;
         gone(token) => { root.toast-gone(token); }
-        // The same action as Settings › About's, by the same callback.
+        // The same action as Settings 鈥?About's, by the same callback.
         show-log => { root.settings-show-log(); }
     }
 
     // Over the workspace and both sheets, under the menus. A tooltip has to
-    // clear the pane it belongs to — panes clip — and it has no business over
+    // clear the pane it belongs to 鈥?panes clip 鈥?and it has no business over
     // an open menu, which is the one surface that would rather not be
     // explained at. A PopupWindow is its own layer above all of this anyway,
     // so the menus win without having to be declared after it.

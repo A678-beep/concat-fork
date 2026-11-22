@@ -125,6 +125,18 @@ fn kind_of(item: &AssetItem) -> Kind {
     }
 }
 
+/// 把一份字体字节注册进窗口的字体集合（Slint 的 fontique 集合），拿它
+/// 自己的 family 名。字体卡示例文字用这个名字就真的用该字体渲染；同一
+/// family 注册两次没有害处，预览和安装都会走这里。
+fn register_family(bytes: Vec<u8>) -> Option<String> {
+    let mut collection = slint::fontique_011::shared_collection();
+    let blob = slint::fontique_011::fontique::Blob::new(std::sync::Arc::new(bytes));
+    let registered = collection.register_fonts(blob, None);
+    registered
+        .iter()
+        .find_map(|(family, _)| collection.family_name(*family).map(str::to_owned))
+}
+
 /// 是不是汉字（含扩展 A 与兼容区，够认平台的中文标签）。
 fn is_han(ch: char) -> bool {
     ('\u{3400}'..='\u{4dbf}').contains(&ch)
@@ -343,6 +355,9 @@ pub struct AssetsPane {
     audio_preview: RefCell<Option<AudioPreview>>,
     /// 已注册进窗口字体集合的素材字体：id -> family。
     font_families: RefCell<HashMap<String, String>>,
+    /// 已「安装」进本应用的字体素材：字体文件复制进应用字体目录、注册到
+    /// 工程，文字面板的字体列表里能选到（0.2.27 的「一键安装」）。
+    font_installed: RefCell<HashSet<String>>,
     /// 光标在预览准备途中离开了：让这次预览做完、露一小会儿再收，而不是
     /// 把刚花 1–2 秒取回来的片段扔掉（指针从卡片边缘滑过时不该闪一下）。
     hover_ended: Cell<bool>,
@@ -383,6 +398,7 @@ impl Default for AssetsPane {
             previews: RefCell::new(HashMap::new()),
             audio_preview: RefCell::new(None),
             font_families: RefCell::new(HashMap::new()),
+            font_installed: RefCell::new(HashSet::new()),
             hover_ended: Cell::new(false),
         }
     }
@@ -715,9 +731,22 @@ impl AssetsPane {
 
     fn note_downloaded(&mut self, id: &str, result: Result<PathBuf, String>) {
         match result {
-            Ok(_) => {
+            Ok(path) => {
                 self.phase.insert(id.to_owned(), Phase::Cached);
                 self.progress.insert(id.to_owned(), 1.0);
+                // 字体下载完就先注册进窗口字体集合：卡的示例文字用的就是
+                // 该字体，不用等悬停；「安装」按钮再把它装进文字面板。
+                if self
+                    .items
+                    .iter()
+                    .find(|item| item.id == id)
+                    .is_some_and(|item| kind_of(item) == Kind::Font)
+                    && let Ok(bytes) = std::fs::read(&path)
+                    && let Some(family) = register_family(bytes)
+                {
+                    log::info!("assets: font {id} downloaded, registered as {family}");
+                    self.font_families.borrow_mut().insert(id.to_owned(), family);
+                }
             }
             Err(error) => {
                 self.phase.insert(id.to_owned(), Phase::Failed);
@@ -729,6 +758,11 @@ impl AssetsPane {
     }
 
     fn action(&mut self, id: &str, studio: &mut Studio) {
+        let font = self
+            .items
+            .iter()
+            .find(|item| item.id == id)
+            .is_some_and(|item| kind_of(item) == Kind::Font);
         match self.phase.get(id).copied().unwrap_or(Phase::Idle) {
             Phase::Downloading => {}
             Phase::Cached => {
@@ -736,7 +770,11 @@ impl AssetsPane {
                     return;
                 };
                 if let Some(path) = assets::cached(&dirs, id) {
-                    self.insert(id, &path, studio);
+                    if font {
+                        self.install_font(id, &path, studio);
+                    } else {
+                        self.insert(id, &path, studio);
+                    }
                 } else {
                     // 缓存文件被外面删了：重新下载，按钮回到下载中。
                     self.phase.remove(id);
@@ -749,12 +787,52 @@ impl AssetsPane {
                 {
                     // 打开面板时它还没缓存，现在有了：点一下直接插，不再下载。
                     self.phase.insert(id.to_owned(), Phase::Cached);
-                    self.insert(id, &path, studio);
+                    if font {
+                        self.install_font(id, &path, studio);
+                    } else {
+                        self.insert(id, &path, studio);
+                    }
                     return;
                 }
                 self.download(id);
             }
         }
+    }
+
+    /// 字体素材装进本应用（0.2.27）：字体文件读回来注册进窗口字体集合，
+    /// 卡的示例文字从此用该字体；再交给 `Studio::import_fonts` 复制到
+    /// 应用字体目录并注册到工程，文字面板的字体列表里就能选到。和文字
+    /// 面板自己的「导入字体」走同一条路，不是第二套。
+    fn install_font(&mut self, id: &str, path: &PathBuf, studio: &mut Studio) {
+        let Some(item) = self.items.iter().find(|item| item.id == id).cloned() else {
+            return;
+        };
+        let display = self.title_of(&item, Kind::Font);
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                log::warn!("assets: 字体 {id} 读不回缓存文件：{error}");
+                self.message = tf("assets.fontInstallFailed", &[&display]);
+                self.bump_full();
+                return;
+            }
+        };
+        let Some(family) = register_family(bytes) else {
+            log::warn!("assets: 字体 {id} 注册不进窗口字体集合");
+            self.message = tf("assets.fontInstallFailed", &[&display]);
+            self.bump_full();
+            return;
+        };
+        log::info!("assets: 字体 {id} 安装为 {family}");
+        self.font_families
+            .borrow_mut()
+            .insert(id.to_owned(), family);
+        // 复制进 app 的字体目录 + 注册到当前工程，文字面板即可选用；
+        // import_fonts 自己会弹一条「已导入字体」的提示。
+        studio.import_fonts(vec![path.clone()]);
+        self.font_installed.borrow_mut().insert(id.to_owned());
+        self.message = tf("assets.fontInstalled", &[&display]);
+        self.bump_full();
     }
 
     /// 缓存好的文件进工程：探一次时长/类型，再进媒体库和第一条空轨。
@@ -807,6 +885,22 @@ impl AssetsPane {
         let progress = self.progress.get(&item.id).copied().unwrap_or(0.0);
         let kind = kind_of(item);
         let preview = self.previews.borrow().get(&item.id).cloned().unwrap_or_default();
+        // 悬停预览注册过的 family，或下载/安装时注册过的（后者在移开鼠标
+        // 之后还留着，字体卡的示例文字因此一直是该字体的样子）。
+        let family = if preview.family.is_empty() {
+            self.font_families
+                .borrow()
+                .get(&item.id)
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            preview.family.clone()
+        };
+        let duration = if matches!(kind, Kind::Music | Kind::Sfx) && item.duration > 0.5 {
+            short_duration(item.duration)
+        } else {
+            String::new()
+        };
         AssetCardData {
             id: SharedString::from(item.id.clone()),
             title: SharedString::from(self.title_of(item, kind)),
@@ -825,7 +919,9 @@ impl AssetsPane {
             action: SharedString::from(self.action_label(item, phase, progress)),
             preview_state: preview.state,
             preview_frames: ModelRc::new(VecModel::from(preview.frames.clone())),
-            font_family: SharedString::from(preview.family.clone()),
+            font_family: SharedString::from(family),
+            duration: SharedString::from(duration),
+            font_installed: self.font_installed.borrow().contains(&item.id),
         }
     }
 
@@ -1040,7 +1136,11 @@ impl AssetsPane {
             }
             Phase::Cached => {
                 if font {
-                    t("assets.cached")
+                    if self.font_installed.borrow().contains(&item.id) {
+                        t("assets.fontInstalledShort")
+                    } else {
+                        t("assets.installFont")
+                    }
                 } else {
                     t("assets.insert")
                 }
@@ -1166,6 +1266,12 @@ impl AssetsPane {
         let Some(item) = self.items.iter().find(|item| item.id == id).cloned() else {
             return;
         };
+        // 图片的缩略图就是它本身：不需要悬停预览，硬要一次只会让卡片挂
+        // 上「预览不了」的提示，反而像出了错。
+        if kind_of(&item) == Kind::Image {
+            self.hover_ended.set(false);
+            return;
+        }
         let Some(dirs) = self.dirs() else {
             return;
         };
@@ -1416,15 +1522,7 @@ impl AssetsPane {
             Ok(bytes) => {
                 // 注册进窗口的字体集合，拿它自己的 family 名：卡片示例文字
                 // 用这个 family 就真的用该字体渲染。
-                let family = {
-                    let mut collection = slint::fontique_011::shared_collection();
-                    let blob = slint::fontique_011::fontique::Blob::new(std::sync::Arc::new(bytes));
-                    let registered = collection.register_fonts(blob, None);
-                    registered
-                        .iter()
-                        .find_map(|(family, _)| collection.family_name(*family).map(str::to_owned))
-                };
-                match family {
+                match register_family(bytes) {
                     Some(family) => {
                         log::info!("assets: hover preview font {id} registered as {family}");
                         self.expire_later(&id, generation);

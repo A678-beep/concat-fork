@@ -1,0 +1,199 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 XingLai AI and Concat contributors
+
+// The theme skins: the looks Settings > Appearance offers beside the two
+// greys the app has always had.
+//
+// A skin is a *tone*, not a redraw: a hue the surfaces are mixed towards, the
+// signature colour its scenery is painted in, a backdrop style, and the
+// accent it wears when it is picked. The relationship between the ladder's
+// steps, the text's contrasts and every kind's pair is the palette's, kept
+// because the skin only ever nudges the surfaces it is allowed to nudge (see
+// `Theme.tone`). That is also why a skin can be worn on either base: mix its
+// hue into the dark ladder and it is a dark room, into the light ladder and
+// it is a bright one, with the contrasts the palette's header promises still
+// held in both.
+//
+// Everything drawn for a skin is procedurally generated vector and particle
+// work, drawn by the same GPU the window already renders with: there is no
+// video, no GIF and no borrowed artwork anywhere behind these presets. The
+// dragon and cloud curls, the star field, the mountain silhouettes and the
+// grid are all paths and rectangles built from numbers in this file and in
+// `backdrop.slint`.
+//
+// 0 is Minimal Dark: no hue, no scenery, no timer. It is the default for the
+// reason the task card gives - a window nobody is looking at should cost
+// nothing - and every other skin is opt-in.
+
+import { Dark } from "dark.slint";
+import { Light } from "light.slint";
+
+export struct SkinSpec {
+    /// The id it is remembered under in settings.json, lower-cased words.
+    id: string,
+    /// The name the gallery shows.
+    name: string,
+    /// One line under the name: what the look is, in plain words.
+    hint: string,
+    /// The scenery drawn behind the panes:
+    /// 0 plain / 1 dragon-gold / 2 tech-blue / 3 cyber-violet /
+    /// 4 teal-ink landscape / 5 deep stars / 6 warm dawn / 7 ink jade.
+    style: int,
+    /// The base palette the gallery shows this skin on: a look designed on a
+    /// dark ground reads wrong on a light one, so the card previews it where
+    /// it was drawn rather than where the window happens to be. The window
+    /// itself can wear it on either base; the settings page keeps its own
+    /// Dark/Light row for that.
+    base-light: bool,
+    /// The hue mixed into the surfaces, and the strength (0..1) it is mixed
+    /// at on each base. 0 leaves the palette exactly as it ships.
+    seed: color,
+    dark-strength: float,
+    light-strength: float,
+    /// The colour the scenery's glow, stars, strokes and shimmer are painted
+    /// in. It is the skin's signature, not the accent: the accent follows the
+    /// user's own choice after the skin has been picked.
+    signature: color,
+    /// Which of `Theme.accent-names` the skin wears when it is picked.
+    accent: int,
+}
+
+export global Skins {
+    out property <[SkinSpec]> specs: [
+        {
+            id: "minimal-dark",
+            name: "极简暗",
+            hint: "纯色 · 无动画 · 省电默认",
+            style: 0,
+            base-light: false,
+            seed: #1c1c1e,
+            dark-strength: 0.0,
+            light-strength: 0.0,
+            signature: #cbf53f,
+            accent: 0,
+        },
+        {
+            id: "dragon-gold",
+            name: "中国龙 · 赤金",
+            hint: "暗底赤金 · 龙纹云纹 · 微光流动",
+            style: 1,
+            base-light: false,
+            seed: #6e1410,
+            dark-strength: 0.22,
+            light-strength: 0.10,
+            signature: #e8b04b,
+            accent: 4,
+        },
+        {
+            id: "tech-blue",
+            name: "科技蓝",
+            hint: "冷蓝光晕 · 网格粒子 · 扫描线",
+            style: 2,
+            base-light: false,
+            seed: #0c2c4d,
+            dark-strength: 0.26,
+            light-strength: 0.10,
+            signature: #4fc3ff,
+            accent: 1,
+        },
+        {
+            id: "cyber-violet",
+            name: "赛博紫",
+            hint: "霓虹紫青 · 故障细线",
+            style: 3,
+            base-light: false,
+            seed: #2a1052,
+            dark-strength: 0.28,
+            light-strength: 0.10,
+            signature: #c34dff,
+            accent: 2,
+        },
+        {
+            id: "teal-ink",
+            name: "青绿山水",
+            hint: "低饱和青绿 · 水墨晕染",
+            style: 4,
+            base-light: true,
+            seed: #2c5a52,
+            dark-strength: 0.20,
+            light-strength: 0.14,
+            signature: #4fa393,
+            accent: 5,
+        },
+        {
+            id: "deep-space",
+            name: "星空深空",
+            hint: "星点缓慢漂移",
+            style: 5,
+            base-light: false,
+            seed: #0a1830,
+            dark-strength: 0.28,
+            light-strength: 0.10,
+            signature: #9fc3ff,
+            accent: 1,
+        },
+        {
+            id: "warm-dawn",
+            name: "暖金晨曦",
+            hint: "暖金渐变 · 晨光微尘",
+            style: 6,
+            base-light: true,
+            seed: #8a4a1c,
+            dark-strength: 0.18,
+            light-strength: 0.14,
+            signature: #ffb45e,
+            accent: 4,
+        },
+        {
+            id: "jade-ink",
+            name: "墨玉青砂",
+            hint: "深墨底 · 青玉微光",
+            style: 7,
+            base-light: false,
+            seed: #0f3a30,
+            dark-strength: 0.26,
+            light-strength: 0.10,
+            signature: #57c2a5,
+            accent: 5,
+        },
+    ];
+
+    /// The surface ladder the gallery draws a card's mini window from, on the
+    /// base the skin was drawn for. The same arithmetic as `Theme.tone`, with
+    /// the spec passed in rather than read off the global.
+    public pure function preview-page(spec: SkinSpec) -> color {
+        return Skins.preview(spec.base-light ? Light.launch-page : Dark.launch-page, spec, 2.2);
+    }
+
+    public pure function preview-panel(spec: SkinSpec) -> color {
+        return Skins.preview(spec.base-light ? Light.panel : Dark.panel, spec, 1.0);
+    }
+
+    public pure function preview-raised(spec: SkinSpec) -> color {
+        return Skins.preview(spec.base-light ? Light.raised : Dark.raised, spec, 1.0);
+    }
+
+    public pure function preview-well(spec: SkinSpec) -> color {
+        return Skins.preview(spec.base-light ? Light.well : Dark.well, spec, 1.0);
+    }
+
+    public pure function preview-line(spec: SkinSpec) -> color {
+        return spec.base-light ? Light.line : Dark.line;
+    }
+
+    public pure function preview-fg(spec: SkinSpec) -> color {
+        return spec.base-light ? Light.fg : Dark.fg;
+    }
+
+    public pure function preview-fg-muted(spec: SkinSpec) -> color {
+        return spec.base-light ? Light.fg-muted : Dark.fg-muted;
+    }
+
+    /// `base` with `spec`'s seed mixed in at the strength of the base it was
+    /// drawn for, `boost` times stronger (the page takes a deeper cut than a
+    /// panel, so the scenery behind the gutters reads).
+    public pure function preview(base: color, spec: SkinSpec, boost: float) -> color {
+        let strength = (spec.base-light ? spec.light-strength : spec.dark-strength) * boost;
+        return strength <= 0.0 ? base : base.mix(spec.seed, 1.0 - Math.min(0.55, strength));
+    }
+}

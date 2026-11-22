@@ -174,10 +174,18 @@ struct DropHandler {
     /// says where it moved, and a press says only that it happened.
     cursor: Option<(f32, f32)>,
     on_pressed_away: Box<dyn Fn()>,
-    /// The window came back to the front: the moment a person returns from
-    /// moving a file, and the one where a file that went missing can be
+    /// The window came back to the front, or went away from it: `true` when it
+    /// is at the front and not covered, `false` otherwise. Two facts arrive
+    /// for it - winit's focus and its occlusion - and they are folded into the
+    /// one the caller cares about, so a skin's scenery can stop while the
+    /// window is out of sight. The same `true` is the moment a person returns
+    /// from moving a file, and the one where a file that went missing can be
     /// noticed. See `Studio::check_missing_media`.
-    on_focused: Box<dyn Fn()>,
+    on_activity: Box<dyn Fn(bool)>,
+    /// winit's two facts, and what the last `on_activity` was told.
+    focused: bool,
+    occluded: bool,
+    active: bool,
     /// The event loop is ending, by any road: see `start` in lib.rs.
     on_exiting: Box<dyn Fn()>,
     /// Whether this window draws its own resize edges: Linux, undecorated.
@@ -234,7 +242,7 @@ impl DropHandler {
     fn new(
         on_dropped: impl Fn(Vec<PathBuf>) + 'static,
         on_pressed_away: impl Fn() + 'static,
-        on_focused: impl Fn() + 'static,
+        on_activity: impl Fn(bool) + 'static,
         on_exiting: impl Fn() + 'static,
     ) -> Self {
         Self {
@@ -246,7 +254,10 @@ impl DropHandler {
             fitted: false,
             cursor: None,
             on_pressed_away: Box::new(on_pressed_away),
-            on_focused: Box::new(on_focused),
+            on_activity: Box::new(on_activity),
+            focused: true,
+            occluded: false,
+            active: true,
             on_exiting: Box::new(on_exiting),
             edges: cfg!(not(any(
                 target_os = "macos",
@@ -254,6 +265,19 @@ impl DropHandler {
                 target_os = "ios"
             ))) && !phone(),
             edge: None,
+        }
+    }
+
+    /// Tells the caller whether the window is in front, when that changes.
+    /// Focus and occlusion arrive as separate events and either can change
+    /// alone; the callback is for the one fact they make together, so a
+    /// covered window (occluded) and a background one (unfocused) are both
+    /// "not in front" and a restore is one `true`, not two.
+    fn settle_activity(&mut self) {
+        let active = self.focused && !self.occluded;
+        if active != self.active {
+            self.active = active;
+            (self.on_activity)(active);
         }
     }
 }
@@ -312,8 +336,19 @@ impl CustomApplicationHandler for DropHandler {
             WindowEvent::DroppedFile(path) => self.pending.push(path.clone()),
             // Back at the front, after Explorer or the file manager: what a
             // dropped file is to an import, a return is to a look for one
-            // that went away while the window was open.
-            WindowEvent::Focused(true) => (self.on_focused)(),
+            // that went away while the window was open. And the other way:
+            // a window that has gone to the back is one the skin's scenery
+            // stops moving in, so the timer schedules nothing.
+            WindowEvent::Focused(focused) => {
+                self.focused = *focused;
+                self.settle_activity();
+            }
+            // The window is fully covered by another one: the same pause as
+            // losing the focus, for a platform that reports occlusion.
+            WindowEvent::Occluded(occluded) => {
+                self.occluded = *occluded;
+                self.settle_activity();
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 let scale = slint_window
                     .map(|window| f64::from(window.scale_factor()))
@@ -447,13 +482,14 @@ pub fn phone() -> bool {
 /// a file manager - batched into one call per drag. It is taken here,
 /// before the window exists, because the backend - and the hook into its
 /// event loop that OS drops arrive through - has to be selected before
-/// anything is built on top of it; see [`DropHandler`]. `on_focused` fires
-/// the same way each time the window is brought back to the front.
+/// anything is built on top of it; see [`DropHandler`]. `on_activity` fires
+/// the same way whenever the window comes to the front or goes away from it:
+/// `true` when it is in front and not covered, `false` when it is not.
 #[cfg(not(target_os = "android"))]
 pub fn select_backend(
     on_files_dropped: impl Fn(Vec<PathBuf>) + 'static,
     on_pressed_away: impl Fn() + 'static,
-    on_focused: impl Fn() + 'static,
+    on_activity: impl Fn(bool) + 'static,
     on_exiting: impl Fn() + 'static,
 ) -> Result<Option<Gpu>, PlatformError> {
     // The device the renderer and the monitor share. Taken first, because
@@ -515,7 +551,7 @@ pub fn select_backend(
         .with_winit_custom_application_handler(DropHandler::new(
             on_files_dropped,
             on_pressed_away,
-            on_focused,
+            on_activity,
             on_exiting,
         ));
     selector = match &gpu {
@@ -729,7 +765,7 @@ pub fn select_backend(
     _on_pressed_away: impl Fn() + 'static,
     // Nor a window that loses and regains the front: the activity owns the
     // screen, and a file comes back through the picker.
-    _on_focused: impl Fn() + 'static,
+    _on_activity: impl Fn(bool) + 'static,
     // Nor a desktop event loop whose end this hook watches.
     _on_exiting: impl Fn() + 'static,
 ) -> Result<Option<Gpu>, PlatformError> {

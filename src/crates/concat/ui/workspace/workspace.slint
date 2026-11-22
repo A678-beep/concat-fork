@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Jareer Abdullah
 
 import { Theme } from "../theme/theme.slint";
+import { ThemeBackdrop } from "../theme/backdrop.slint";
 import { Editor } from "../editor.slint";
 import { ColSplitter, RowSplitter } from "splitter.slint";
 import { Seat } from "seat.slint";
@@ -28,6 +29,17 @@ export component Workspace inherits Rectangle {
     // knows where those are.
 
     background: Theme.page;
+
+    // 主题皮肤的动态背景：画在座位下面，从面板之间的缝里露出来。面板本身
+    // 是实心的（透明度会让字跟着一起透），所以皮肤在这里是「面板的色调 +
+    // 缝里的一道风景」。没开动态背景、或极简暗这种没有风景的皮肤，这个
+    // 元素根本不实例化，窗口回到一张静止的纯色。
+    if Theme.backdrop-shown: ThemeBackdrop {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+    }
 
     // The box, on the way up. `init` as well as the two `changed` handlers,
     // because a window that opens and is never resized still has to be laid

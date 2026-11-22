@@ -411,8 +411,16 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         // Back at the front, after Explorer or Finder: a file moved out
         // from under an open project is noticed here, and the relink
         // dialog opens on it. See `Studio::check_missing_media`.
-        || {
+        //
+        // The same signal is the skin's animation switch: the window that is
+        // not in front (unfocused, behind another, minimised) stops its
+        // backdrop timer, so a window nobody is watching schedules no frame.
+        |active| {
             Shell::with(|shell, app| {
+                app.global::<Theme>().set_animating(active);
+                if !active {
+                    return;
+                }
                 let changed = shell.studio.borrow_mut().check_missing_media();
                 if changed {
                     shell.studio.borrow().publish(&app, &shell.models);
@@ -539,6 +547,24 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     starting_step(&mut starting, "packages");
     let dark = studio.prefs.dark.unwrap_or(true);
     app.global::<Theme>().set_dark(dark);
+    // 主题皮肤：设置文件记的是 `Theme.skins` 里的 id（"dragon-gold"…），
+    // 认不出就落回第一套「极简暗」。皮肤自带的强调色先记下来，给下面的
+    // 强调色默认值用：用户自己选过强调色时以用户为准。
+    let skin_accent = {
+        let theme = app.global::<Theme>();
+        let specs = theme.get_skins();
+        let index = studio
+            .prefs
+            .skin_index(slint::Model::iter(&specs).map(|spec| spec.id.to_string()));
+        theme.set_skin_choice(index as i32);
+        theme.set_motion(studio.prefs.motion_enabled());
+        theme.set_low_power(studio.prefs.low_power_mode());
+        usize::try_from(index)
+            .ok()
+            .and_then(|row| slint::Model::row_data(&specs, row))
+            .map(|spec| spec.accent)
+            .unwrap_or(0)
+    };
     motion_tiles::install(&app);
     // Windows puts a dialog's OK before its Cancel; macOS and Linux after.
     app.global::<Theme>().set_ok_first(cfg!(windows));
@@ -556,10 +582,15 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                 theme.set_accent_choice(count as i32);
             }
             None => {
-                let index = studio
-                    .prefs
-                    .accent_index(slint::Model::iter(&names).map(|name| name.to_string()));
-                theme.set_accent_choice(index as i32);
+                let index = if studio.prefs.accent.is_none() {
+                    skin_accent
+                } else {
+                    studio
+                        .prefs
+                        .accent_index(slint::Model::iter(&names).map(|name| name.to_string()))
+                        as i32
+                };
+                theme.set_accent_choice(index);
             }
         }
     }
@@ -2481,6 +2512,63 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                 app.global::<Theme>().set_dark(dark);
                 let mut studio = shell.studio.borrow_mut();
                 studio.prefs.dark = Some(dark);
+                studio.prefs.save(&studio.host.dirs);
+            });
+        }
+    });
+    // 主题皮肤：切图库下标，同时把皮肤自带的强调色一起换上（之后仍可在
+    // 强调色一行里改），皮肤 id 记进设置文件。
+    app.on_settings_skin_changed({
+        move |index| {
+            Shell::with(|shell, app| {
+                let theme = app.global::<Theme>();
+                let specs = theme.get_skins();
+                let Some(spec) = usize::try_from(index)
+                    .ok()
+                    .and_then(|row| slint::Model::row_data(&specs, row))
+                else {
+                    return;
+                };
+                log::info!("settings: Skin {} ({})", spec.name, spec.id);
+                theme.set_skin_choice(index);
+                theme.set_accent_choice(spec.accent);
+                let accent = usize::try_from(spec.accent)
+                    .ok()
+                    .and_then(|row| slint::Model::row_data(&theme.get_accent_names(), row))
+                    .map(|name| prefs::Preferences::accent_id(&name));
+                let mut studio = shell.studio.borrow_mut();
+                studio.prefs.skin = Some(spec.id.to_string());
+                studio.prefs.accent = accent;
+                studio.prefs.save(&studio.host.dirs);
+            });
+        }
+    });
+    // 动态背景开关：只有开/关；风景和动画在 theme/backdrop.slint 里。
+    app.on_settings_motion_changed({
+        move |on| {
+            Shell::with(|shell, app| {
+                log::info!(
+                    "settings: Dynamic background {}",
+                    if on { "on" } else { "off" }
+                );
+                app.global::<Theme>().set_motion(on);
+                let mut studio = shell.studio.borrow_mut();
+                studio.prefs.dynamic_background = Some(on);
+                studio.prefs.save(&studio.host.dirs);
+            });
+        }
+    });
+    // 低配模式：保留风景、停掉动画。
+    app.on_settings_low_power_changed({
+        move |on| {
+            Shell::with(|shell, app| {
+                log::info!(
+                    "settings: Low-power background {}",
+                    if on { "on" } else { "off" }
+                );
+                app.global::<Theme>().set_low_power(on);
+                let mut studio = shell.studio.borrow_mut();
+                studio.prefs.low_power = Some(on);
                 studio.prefs.save(&studio.host.dirs);
             });
         }

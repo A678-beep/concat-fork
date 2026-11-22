@@ -1,10 +1,10 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+﻿// SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
 
 // The theme: the two palettes, and the two properties that choose from them.
 //
-// Everything the interface is made of — every colour, every radius, every
-// metric, every step of the type scale — is read from `Theme`, and nowhere
+// Everything the interface is made of 鈥?every colour, every radius, every
+// metric, every step of the type scale 鈥?is read from `Theme`, and nowhere
 // else. Nothing outside this directory names a colour. Which colour `Theme`
 // hands back depends on `dark`, and for the accent on `accent-choice` as
 // well, and that is the whole of the switch.
@@ -12,7 +12,7 @@
 // The split across the files is by what a theme gets to decide:
 //
 //   - `dark.slint` and `light.slint` are the palettes. Colours only, the same
-//     token names in the same order, and each one complete — no palette
+//     token names in the same order, and each one complete 鈥?no palette
 //     borrows a value from the other. Their headers say what the values mean
 //     and which relationships between them are load-bearing; read the dark
 //     one first, it is where those rules are written down. Each lists its
@@ -20,8 +20,8 @@
 //     names them.
 //   - This file holds the switch, and everything a palette does *not* get to
 //     decide: the type, the shape, and the content colours. A second theme is
-//     a retone, not a redraw — the panels are the same size and the corners
-//     are the same radius under both — and the colours a *title* can be belong
+//     a retone, not a redraw 鈥?the panels are the same size and the corners
+//     are the same radius under both 鈥?and the colours a *title* can be belong
 //     to the document, which is exported the same way whichever theme the
 //     window happened to be wearing.
 //
@@ -35,11 +35,12 @@
 //
 //   - The effect previews in ui/assets, which are photographs of what an
 //     effect does rather than anything a theme decides.
-//   - Sizes under about 5px — a 2px scrollbar thumb, a 1px splitter pill.
+//   - Sizes under about 5px 鈥?a 2px scrollbar thumb, a 1px splitter pill.
 //     Those are shape at a scale nobody themes, and stay where they are drawn.
 import { Accent } from "accent.slint";
 import { Dark } from "dark.slint";
 import { Light } from "light.slint";
+import { Skins, SkinSpec } from "skins.slint";
 
 export global Theme {
     /// Which palette every colour below is read from. Settings > Appearance
@@ -64,7 +65,7 @@ export global Theme {
     /// `accent-choice` points past the list, and one colour under both
     /// palettes: whoever picked it picked what they see, and the three
     /// tokens that go with an accent are derived from it below, each by
-    /// the palette's own rule. Grey until picked — the dot that offers it
+    /// the palette's own rule. Grey until picked 鈥?the dot that offers it
     /// is grey, and a grey accent is what nobody would choose, so it
     /// cannot be mistaken for a choice that was made.
     in-out property <color> accent-custom: #808080;
@@ -98,13 +99,71 @@ export global Theme {
     /// https://github.com/jub0t/Concat/issues/320
     in-out property <int> ui-scale: 0;
 
-    // ── type ─────────────────────────────────────────────────────────────
+    // 鈹€鈹€ skins 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    //
+    // A skin is a hue the surfaces are mixed towards, plus the scenery
+    // `backdrop.slint` draws behind the panes. The palettes above stay the
+    // one place a colour is written down with a meaning: a skin only ever
+    // nudges the surfaces it is allowed to nudge, which is what keeps the
+    // ladder's steps, the text's contrasts and the kind pairs intact under
+    // every skin and on either base. Settings > Appearance picks it; Rust
+    // remembers it under the skin's id in settings.json.
+    /// Which skin the window wears: an index into `skins`.
+    in-out property <int> skin-choice: 0;
+    /// The skins on offer, in the order the gallery lists them. Their names
+    /// and hints are data (skins.slint); the gallery reads the list here.
+    out property <[SkinSpec]> skins: Skins.specs;
+    /// The skin being worn, clamped so a stale index after a build that
+    /// drops a skin cannot point past the end.
+    out property <SkinSpec> skin:
+        skins[Math.max(0, Math.min(skins.length - 1, skin-choice))];
+    /// The dynamic background: the scenery is drawn behind the panes, and
+    /// animated while the window is at the front. Off, the scenery is not
+    /// drawn at all - the skin's tint remains - which is the way to keep a
+    /// machine that is not moving pixels that way.
+    in-out property <bool> motion: true;
+    /// Low-power mode: the scenery is kept but does not move. One still
+    /// frame of the skin, instead of the animated one; the timer does not
+    /// run, so the window returns to zero when it is left alone.
+    in-out property <bool> low-power: false;
+    /// The window is in front, and not minimised. Written by Rust from the
+    /// platform's focus and occlusion events (lib.rs, `platform::select_backend`);
+    /// not remembered - it is a fact about this moment, not a preference.
+    in-out property <bool> animating: true;
+    /// Draw the scenery: a skin has one, and the person asked for it.
+    out property <bool> backdrop-shown: motion && skin.style > 0;
+    /// Move the scenery: only while it is drawn, not in Low-power, and only
+    /// while the window is in front. The single gate `ThemeBackdrop`'s
+    /// timer runs on.
+    out property <bool> skin-motion: backdrop-shown && !low-power && animating;
+    /// The accent row the skin wears when it is picked, for Settings to
+    /// hand to the accent handler as part of "switch to this skin".
+    out property <int> skin-accent: skin.accent;
+
+    /// `base` with the worn skin's hue mixed in at the strength the skin
+    /// asks for on the base that is on. 0 strength (Minimal Dark) is the
+    /// palette's own value, untouched.
+    pure function skin-tone(base: color) -> color {
+        let strength = dark ? skin.dark-strength : skin.light-strength;
+        return strength <= 0.0 ? base : base.mix(skin.seed, 1.0 - strength);
+    }
+
+    /// The page and the launch ladder take a deeper cut than a panel: they
+    /// are the ground a skin is mostly seen through, between the panes and
+    /// behind the launch screen's cards, and a hue that is right in a panel
+    /// disappears at gutter width.
+    pure function skin-tone-deep(base: color) -> color {
+        let strength = (dark ? skin.dark-strength : skin.light-strength) * 2.2;
+        return strength <= 0.0 ? base : base.mix(skin.seed, 1.0 - Math.min(0.55, strength));
+    }
+
+    // 鈹€鈹€ type 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     //
     // Two roles, not one, even while one face plays both.
     //
     // `font` carries the interface: every label, title and sentence. `font-
     // technical` is for timecode, the ruler, clip labels, paths, dimensions,
-    // counts — anything you read as a *value* rather than as language.
+    // counts 鈥?anything you read as a *value* rather than as language.
     //
     // Both are Hanken Grotesk, the one face this build bundles (app.slint).
     // The split between the roles stays so that the two can differ again
@@ -113,8 +172,8 @@ export global Theme {
     out property <string> font-technical: "Hanken Grotesk";
     /// The scale. `fs` is the body size everything inherits; the two either
     /// side of it are the dense readout and the panel title. `xl` is for the
-    /// few lines that are content rather than chrome — a project's name in a
-    /// list — and `display` is the launch screen's heading and nothing else.
+    /// few lines that are content rather than chrome 鈥?a project's name in a
+    /// list 鈥?and `display` is the launch screen's heading and nothing else.
     out property <length> fs-xs: 10px;
     out property <length> fs-sm: 11px;
     out property <length> fs: 12px;
@@ -141,7 +200,7 @@ export global Theme {
     /// is bundled, so this names it exactly.
     out property <int> weight-display: 700;
 
-    // ── shape ────────────────────────────────────────────────────────────
+    // 鈹€鈹€ shape 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     //
     // radii
     out property <length> r-xs: 3px;
@@ -158,24 +217,24 @@ export global Theme {
     out property <length> pad: 14px;      // panel horizontal padding
     out property <length> label-w: 62px;
 
-    // ── surfaces ─────────────────────────────────────────────────────────
-    out property <color> panel: dark ? Dark.panel : Light.panel;
-    out property <color> raised: dark ? Dark.raised : Light.raised;
-    out property <color> well: dark ? Dark.well : Light.well;
-    out property <color> field: dark ? Dark.field : Light.field;
-    out property <color> field-hover: dark ? Dark.field-hover : Light.field-hover;
-    out property <color> field-active: dark ? Dark.field-active : Light.field-active;
+    // 鈹€鈹€ surfaces 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    out property <color> panel: skin-tone(dark ? Dark.panel : Light.panel);
+    out property <color> raised: skin-tone(dark ? Dark.raised : Light.raised);
+    out property <color> well: skin-tone(dark ? Dark.well : Light.well);
+    out property <color> field: skin-tone(dark ? Dark.field : Light.field);
+    out property <color> field-hover: skin-tone(dark ? Dark.field-hover : Light.field-hover);
+    out property <color> field-active: skin-tone(dark ? Dark.field-active : Light.field-active);
 
     // the launch screen's ladder: the same five steps, cut deeper. Read by
     // start.slint and by the title strip while it is up, and by nothing
-    // else — the editor keeps the ladder above.
-    out property <color> launch-page: dark ? Dark.launch-page : Light.launch-page;
-    out property <color> launch-panel: dark ? Dark.launch-panel : Light.launch-panel;
-    out property <color> launch-well: dark ? Dark.launch-well : Light.launch-well;
-    out property <color> launch-raised: dark ? Dark.launch-raised : Light.launch-raised;
-    out property <color> launch-field: dark ? Dark.launch-field : Light.launch-field;
+    // else 鈥?the editor keeps the ladder above.
+    out property <color> launch-page: skin-tone-deep(dark ? Dark.launch-page : Light.launch-page);
+    out property <color> launch-panel: skin-tone(dark ? Dark.launch-panel : Light.launch-panel);
+    out property <color> launch-well: skin-tone(dark ? Dark.launch-well : Light.launch-well);
+    out property <color> launch-raised: skin-tone(dark ? Dark.launch-raised : Light.launch-raised);
+    out property <color> launch-field: skin-tone(dark ? Dark.launch-field : Light.launch-field);
     out property <color> launch-field-active:
-        dark ? Dark.launch-field-active : Light.launch-field-active;
+        skin-tone(dark ? Dark.launch-field-active : Light.launch-field-active);
 
     // hairlines
     out property <color> line: dark ? Dark.line : Light.line;
@@ -187,7 +246,7 @@ export global Theme {
     out property <color> fg-dim: dark ? Dark.fg-dim : Light.fg-dim;
     out property <color> fg-hot: dark ? Dark.fg-hot : Light.fg-hot;
 
-    // accents — the chosen row of the palette that is on, spread into the
+    // accents 鈥?the chosen row of the palette that is on, spread into the
     // four tokens the tree has always read.
     //
     // A custom colour has no row, so its three companions are made from it
@@ -256,9 +315,9 @@ export global Theme {
     out property <color> kind-sound-layer-well: dark ? Dark.kind-sound-layer-well : Light.kind-sound-layer-well;
 
     // timeline
-    out property <color> lane: dark ? Dark.lane : Light.lane;
-    out property <color> lane-alt: dark ? Dark.lane-alt : Light.lane-alt;
-    out property <color> ruler: dark ? Dark.ruler : Light.ruler;
+    out property <color> lane: skin-tone(dark ? Dark.lane : Light.lane);
+    out property <color> lane-alt: skin-tone(dark ? Dark.lane-alt : Light.lane-alt);
+    out property <color> ruler: skin-tone(dark ? Dark.ruler : Light.ruler);
     out property <color> grid: dark ? Dark.grid : Light.grid;
     /// The palette's own playhead, for the dot in Settings that offers it
     /// back while a picked colour is on.
@@ -307,12 +366,12 @@ export global Theme {
     out property <color> danger-edge: dark ? Dark.danger-edge : Light.danger-edge;
 
     // the window ground the panes float on
-    out property <color> page: dark ? Dark.page : Light.page;
+    out property <color> page: skin-tone-deep(dark ? Dark.page : Light.page);
     out property <color> page-fg-muted: dark ? Dark.page-fg-muted : Light.page-fg-muted;
 
-    // ── content ──────────────────────────────────────────────────────────
+    // 鈹€鈹€ content 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     //
-    // Colours the *edit* can be made of, as opposed to the interface — and the
+    // Colours the *edit* can be made of, as opposed to the interface 鈥?and the
     // one group here that does not follow the switch. A title's colour is
     // baked into the export; the video does not have a theme, and a shelf that
     // offered different colours depending on which way the toggle was pointing
@@ -321,7 +380,7 @@ export global Theme {
     // They live here rather than beside the control that offers them because
     // there is exactly one shelf and it belongs to the whole application. The
     // list is the neutrals first, then the interface's own status hues, then
-    // the clip palette's marks — the chosen accent under both palettes is in
+    // the clip palette's marks 鈥?the chosen accent under both palettes is in
     // it, so the row agrees with the window whichever way it is set. Those
     // two are the one thing in the shelf that follows a setting, and only
     // which colour is *offered* moves: a title already painted keeps its

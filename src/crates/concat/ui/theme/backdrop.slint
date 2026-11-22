@@ -1,0 +1,553 @@
+﻿// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 XingLai AI and Concat contributors
+
+// The skin's scenery, drawn behind the panes.
+//
+// Everything here is vector: paths, rectangles, gradients and a handful of
+// per-frame numbers. No video, no GIF, no image asset - the dragon's body and
+// scales, the clouds, the grid, the stars, the mountains and the shimmer are
+// generated from the numbers in this file and the skin's signature colour in
+// `skins.slint`, so there is nothing to license and nothing to decode.
+//
+// It is drawn by the same GPU the window already renders with (Slint's Skia
+// renderer, on the device shared with the engine's compositor), and it is
+// animated by one `Timer` at 33ms - a 30fps cap, not a screen's refresh rate.
+// That timer is gated by `Theme.skin-motion`: it stops the moment the window
+// loses focus or is minimised, stops when the person turns the dynamic
+// background off, and stops under Low-power mode. A stopped timer means no
+// frame is scheduled, which is what keeps an unfocused window at zero CPU.
+//
+// `SkinScene` is exported on its own so the Appearance gallery can show a
+// still of the same scenery in its preview cards: the gallery passes a fixed
+// phase and owns no timer at all, so a settings page with eight previews
+// costs a frame, not eight animators.
+
+import { Theme } from "theme.slint";
+import { SkinSpec } from "skins.slint";
+
+/// One skin's scene, at `phase` (0..1 around its loop). Draws nothing for
+/// style 0, which is Minimal Dark and is allowed to be free.
+export component SkinScene inherits Rectangle {
+    in property <SkinSpec> spec;
+    in property <float> phase: 0;
+    /// The ground the scene is painted on: the window's own page, or the
+    /// gallery card's preview of the skin's base.
+    in property <color> page: #000000;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+    clip: true;
+
+    // A shared base: the skin's hue sunk into the ground, and its signature
+    // as a soft glow. Every style builds on this, so a scene reads as the
+    // same room under different weather.
+    if root.spec.style > 0: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(158deg,
+            root.page.mix(root.spec.seed, root.spec.base-light ? 0.18 : 0.34) 0%,
+            root.page 68%);
+    }
+
+    if root.spec.style > 0: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @radial-gradient(circle,
+            root.spec.signature.with-alpha(0.12) 0%,
+            root.spec.signature.with-alpha(0.0) 62%);
+    }
+
+    // 鈹€鈹€ 1 路 涓浗榫?路 璧ら噾 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    //
+    // A cinnabar ground, a gold dragon curling up from the lower left, cloud
+    // curls drifting across it, and one wide shimmer band moving slowly
+    // across the window. The dragon is an abstract ribbon and a row of
+    // scales rather than a literal animal: enough to read as 榫欑汗, and
+    // nothing borrowed from anybody's artwork.
+    if root.spec.style == 1: Rectangle {
+        width: 100%;
+        height: 100%;
+
+        // The body: one long S from the lower left, then the head's arc.
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: root.spec.signature.with-alpha(0.30);
+            stroke-width: root.width * 0.0018;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+            commands: "M 2 96 C 16 82 20 66 34 60 C 48 54 46 38 60 32 C 72 27 80 33 84 41 C 87 47 84 52 78 52";
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: root.spec.signature.with-alpha(0.12);
+            stroke-width: root.width * 0.0032;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+            commands: "M 2 96 C 16 82 20 66 34 60 C 48 54 46 38 60 32 C 72 27 80 33 84 41 C 87 47 84 52 78 52";
+        }
+
+        // Scales along the body: two rows of small arcs, offset per row.
+        for i in 14: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: root.spec.signature.with-alpha(0.16);
+            stroke-width: root.width * 0.0009;
+            commands: "M \{4 + i * 5.4} \{88 - i * 2.1} A 2.6 2.0 0 0 1 \{9.2 + i * 5.4} \{88 - i * 2.1}";
+        }
+
+        for i in 11: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: root.spec.signature.with-alpha(0.10);
+            stroke-width: root.width * 0.0008;
+            commands: "M \{9 + i * 5.2} \{82 - i * 2.0} A 2.2 1.7 0 0 1 \{13.4 + i * 5.2} \{82 - i * 2.0}";
+        }
+
+        // Cloud curls: three arcs of 浜戠汗, drifting a few pixels on the loop.
+        for i in 4: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            y: Math.sin((root.phase * 360 + i * 82.8) * 1deg) * 2.2px;
+            stroke: root.spec.signature.with-alpha(0.14);
+            stroke-width: root.width * 0.0012;
+            stroke-line-cap: round;
+            commands: i == 0 ? "M 6 24 C 10 18 17 18 20 23 C 22 26 20 30 16 30 C 13 30 12 27 14 25"
+                : i == 1 ? "M 62 78 C 67 72 75 73 77 79 C 78 83 74 86 70 84 C 68 83 68 80 70 79"
+                : i == 2 ? "M 80 18 C 85 12 93 13 95 19 C 96 23 92 26 88 24 C 86 23 86 20 88 19"
+                : "M 26 44 C 30 38 37 38 40 43 C 41 46 39 50 35 50 C 32 50 31 47 33 45";
+        }
+
+        // The shimmer: one long, faint gold band sliding across the loop.
+        Rectangle {
+            width: 24%;
+            height: 100%;
+            x: (Math.mod(root.phase * 1.15, 1.0) - 0.28) * root.width;
+            background: @linear-gradient(90deg,
+                Colors.transparent 0%,
+                root.spec.signature.with-alpha(0.05) 38%,
+                root.spec.signature.with-alpha(0.13) 50%,
+                root.spec.signature.with-alpha(0.04) 62%,
+                Colors.transparent 100%);
+        }
+
+        // A few floating gold embers.
+        for i in 10: Rectangle {
+            width: 2px;
+            height: 2px;
+            border-radius: 1px;
+            x: Math.mod(i * 0.618 + root.phase * 0.04, 1.0) * root.width;
+            y: Math.mod(i * 0.377 + 0.12, 1.0) * root.height;
+            opacity: 0.18 + 0.22 * Math.abs(Math.sin((root.phase * 360 + i * 74.5) * 1deg));
+            background: root.spec.signature;
+        }
+    }
+
+    // 鈹€鈹€ 2 路 绉戞妧钃?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    //
+    // A cold blue glow, a faint engineering grid, one scan line crossing the
+    // window on the loop, and a handful of drifting particles. Corner
+    // brackets are drawn as one path, so the grid reads as a surface rather
+    // than as wallpaper.
+    if root.spec.style == 2: Rectangle {
+        width: 100%;
+        height: 100%;
+
+        for i in 14: Rectangle {
+            x: i * root.width / 14;
+            width: 1px;
+            height: 100%;
+            background: root.spec.signature.with-alpha(0.055);
+        }
+
+        for i in 9: Rectangle {
+            y: i * root.height / 9;
+            height: 1px;
+            width: 100%;
+            background: root.spec.signature.with-alpha(0.045);
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: root.spec.signature.with-alpha(0.34);
+            stroke-width: root.width * 0.0014;
+            commands: "M 7 16 L 7 7 L 16 7 M 84 7 L 93 7 L 93 16 M 93 84 L 93 93 L 84 93 M 16 93 L 7 93 L 7 84";
+        }
+
+        // The scan line: a soft band falling down the window once a loop.
+        Rectangle {
+            width: 100%;
+            height: 88px;
+            y: Math.mod(root.phase, 1.0) * (root.height + 88px) - 88px;
+            background: @linear-gradient(180deg,
+                Colors.transparent 0%,
+                root.spec.signature.with-alpha(0.10) 50%,
+                Colors.transparent 100%);
+        }
+
+        for i in 22: Rectangle {
+            width: 2px;
+            height: 2px;
+            border-radius: 1px;
+            x: Math.mod(i * 0.618 + root.phase * 0.06 * (1 + Math.mod(i, 3)), 1.0) * root.width;
+            y: Math.mod(i * 0.377 + root.phase * 0.03, 1.0) * root.height;
+            opacity: 0.16 + 0.30 * Math.abs(Math.sin((root.phase * 360 + i * 51.6) * 1deg));
+            background: root.spec.signature;
+        }
+    }
+
+    // 鈹€鈹€ 3 路 璧涘崥绱?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    //
+    // Neon violet and cyan rails, a slow bloom behind the grid, and a few
+    // one-pixel glitch lines that are only visible for a moment in the loop.
+    // The kink of a glitch is the thin line itself, not a flashing screen.
+    if root.spec.style == 3: Rectangle {
+        width: 100%;
+        height: 100%;
+
+        for i in 4: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: (i == 1 || i == 3 ? #4fe3ff : root.spec.signature).with-alpha(0.18);
+            stroke-width: root.width * 0.0012;
+            stroke-line-cap: round;
+            commands: i == 0 ? "M 8 100 L 36 0"
+                : i == 1 ? "M 30 100 L 52 0"
+                : i == 2 ? "M 62 0 L 84 100"
+                : "M 78 0 L 100 100";
+        }
+
+        // A wide neon rail crossing the lower third, sliding on the loop.
+        Rectangle {
+            width: 38%;
+            height: 1.5px;
+            y: root.height * 0.68;
+            x: (Math.mod(root.phase * 0.7, 1.0) - 0.15) * root.width;
+            background: @linear-gradient(90deg,
+                Colors.transparent 0%,
+                #4fe3ff.with-alpha(0.55) 50%,
+                Colors.transparent 100%);
+        }
+
+        // Glitch lines: short bars that blink for part of the loop only.
+        for i in 7: Rectangle {
+            height: 1.5px;
+            width: root.width * (0.05 + Math.mod(i, 3) * 0.045);
+            x: Math.mod(i * 0.37 + root.phase * 0.6, 1.1) * root.width - root.width * 0.08;
+            y: root.height * (0.08 + i * 0.125);
+            opacity: Math.mod(root.phase * 9.0 + i * 0.27, 1.0) > 0.78
+                ? (i == 3 ? 0.55 : 0.32) : 0.0;
+            background: i == 3 ? #4fe3ff : root.spec.signature;
+        }
+
+        for i in 12: Rectangle {
+            width: 1.5px;
+            height: 1.5px;
+            x: Math.mod(i * 0.707 + root.phase * 0.10, 1.0) * root.width;
+            y: Math.mod(i * 0.414 + root.phase * 0.05, 1.0) * root.height;
+            opacity: 0.20 + 0.35 * Math.abs(Math.sin((root.phase * 360 + i * 63.0) * 1deg));
+            background: #4fe3ff;
+        }
+    }
+
+    // 鈹€鈹€ 4 路 闈掔豢灞辨按 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    //
+    // A light teal wash with three ridges of low-saturation ink, a slow mist
+    // between them, a pale sun and a few ink dots on the water. The
+    // silhouettes are hand-placed path data - a few corners and curves - not
+    // a photograph of anywhere.
+    if root.spec.style == 4: Rectangle {
+        width: 100%;
+        height: 100%;
+
+        // The sun: a pale disc, and a warmer halo around it.
+        Rectangle {
+            width: Math.min(root.width, root.height) * 0.10;
+            height: self.width;
+            border-radius: self.width / 2;
+            x: root.width * 0.70;
+            y: root.height * 0.16;
+            background: root.spec.signature.mix(#f4f1e4, 0.35).with-alpha(0.55);
+        }
+
+        Rectangle {
+            width: Math.min(root.width, root.height) * 0.34;
+            height: self.width;
+            border-radius: self.width / 2;
+            x: root.width * 0.70 + Math.min(root.width, root.height) * 0.05 - self.width / 2;
+            y: root.height * 0.16 + Math.min(root.width, root.height) * 0.05 - self.width / 2;
+            background: @radial-gradient(circle,
+                root.spec.signature.with-alpha(0.10) 0%,
+                root.spec.signature.with-alpha(0.0) 70%);
+        }
+
+        // Far ridge.
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            y: Math.sin((root.phase * 360) * 1deg) * 1.4px;
+            fill: root.spec.seed.with-alpha(0.10);
+            commands: "M 0 72 L 12 60 L 22 66 L 34 52 L 46 64 L 58 56 L 72 68 L 84 60 L 100 70 L 100 100 L 0 100 Z";
+        }
+
+        // Middle ridge.
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            y: Math.sin((root.phase * 360 + 120.3) * 1deg) * 2.0px;
+            fill: root.spec.seed.with-alpha(0.16);
+            commands: "M 0 84 L 14 70 L 26 78 L 40 64 L 54 76 L 68 66 L 82 78 L 100 68 L 100 100 L 0 100 Z";
+        }
+
+        // Near ridge, with the water line under it.
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            y: Math.sin((root.phase * 360 + 240.6) * 1deg) * 2.6px;
+            fill: root.spec.seed.with-alpha(0.26);
+            commands: "M 0 92 L 18 82 L 34 90 L 50 80 L 66 90 L 84 82 L 100 88 L 100 100 L 0 100 Z";
+        }
+
+        // Mist: two wide, faint bands drifting opposite ways.
+        Rectangle {
+            width: 60%;
+            height: 16%;
+            y: root.height * 0.66;
+            x: (Math.mod(root.phase * 0.5, 1.0) - 0.2) * root.width;
+            background: @linear-gradient(90deg,
+                Colors.transparent 0%,
+                #ffffff.with-alpha(0.16) 50%,
+                Colors.transparent 100%);
+        }
+
+        Rectangle {
+            width: 48%;
+            height: 12%;
+            y: root.height * 0.76;
+            x: (1.0 - Math.mod(root.phase * 0.42, 1.0) - 0.2) * root.width;
+            background: @linear-gradient(90deg,
+                Colors.transparent 0%,
+                #ffffff.with-alpha(0.13) 50%,
+                Colors.transparent 100%);
+        }
+
+        // Ink dots on the water.
+        for i in 12: Rectangle {
+            width: 2px;
+            height: 1.6px;
+            border-radius: 1px;
+            x: Math.mod(i * 0.618 + root.phase * 0.02, 1.0) * root.width;
+            y: root.height * (0.90 + Math.mod(i, 3) * 0.025);
+            opacity: 0.10 + 0.10 * Math.abs(Math.sin((root.phase * 360 + i * 57.3) * 1deg));
+            background: root.spec.seed;
+        }
+    }
+
+    // 鈹€鈹€ 5 路 鏄熺┖娣辩┖ 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    //
+    // Slow drifting stars over a deep navy, one soft nebula, and a pair of
+    // brighter stars with a halo. The field turns a little every loop, which
+    // is what reads as "deep space" rather than as a still image.
+    if root.spec.style == 5: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(180deg,
+            root.page.mix(#050b18, 0.55) 0%,
+            root.page.mix(root.spec.seed, 0.45) 100%);
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: @radial-gradient(circle,
+                root.spec.signature.with-alpha(0.10) 0%,
+                root.spec.signature.with-alpha(0.0) 58%);
+        }
+
+        for i in 52: Rectangle {
+            width: 1.5px + Math.mod(i, 3) * 0.5px;
+            height: self.width;
+            border-radius: self.width / 2;
+            x: Math.mod(i * 0.618 + root.phase * 0.004, 1.0) * root.width;
+            y: Math.mod(i * 0.377 + 0.02, 1.0) * root.height;
+            opacity: 0.24 + 0.55 * Math.abs(Math.sin((root.phase * 360 + i * 97.4) * 1deg));
+            background: i == 7 || i == 31 ? #ffffff : root.spec.signature;
+        }
+
+        for i in 4: Rectangle {
+            width: 5px;
+            height: self.width;
+            border-radius: self.width / 2;
+            x: Math.mod(i * 0.83 + 0.11, 1.0) * root.width;
+            y: Math.mod(i * 0.61 + 0.17, 1.0) * root.height;
+            opacity: 0.10 + 0.10 * Math.abs(Math.sin((root.phase * 360 + i * 120.3) * 1deg));
+            background: #ffffff;
+        }
+    }
+
+    // 鈹€鈹€ 6 路 鏆栭噾鏅ㄦ洣 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    //
+    // Warm light from the upper right: a low sun, eight pale rays turning
+    // very slowly, and dust motes rising through the light.
+    if root.spec.style == 6: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(200deg,
+            root.page.mix(#ffe3b8, 0.30) 0%,
+            root.page.mix(root.spec.seed, 0.12) 62%,
+            root.page 100%);
+
+        // The rays: eight lines from the sun, one loop of slow rotation.
+        for i in 8: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: root.spec.signature.with-alpha(0.10);
+            stroke-width: root.width * 0.0026;
+            stroke-line-cap: round;
+            commands: "M \{72 + Math.cos((i * 45 + root.phase * 10) * 1deg) * 5} \{22 + Math.sin((i * 45 + root.phase * 10) * 1deg) * 5} L \{72 + Math.cos((i * 45 + root.phase * 10) * 1deg) * 46} \{22 + Math.sin((i * 45 + root.phase * 10) * 1deg) * 46}";
+        }
+
+        Rectangle {
+            width: 26%;
+            height: 26%;
+            x: root.width * 0.60;
+            y: root.height * 0.05;
+            background: @radial-gradient(circle,
+                root.spec.signature.with-alpha(0.26) 0%,
+                root.spec.signature.with-alpha(0.0) 70%);
+        }
+
+        Rectangle {
+            width: Math.min(root.width, root.height) * 0.085;
+            height: self.width;
+            border-radius: self.width / 2;
+            x: root.width * 0.715;
+            y: root.height * 0.14;
+            background: (#fff4dc).with-alpha(0.85);
+        }
+
+        for i in 16: Rectangle {
+            width: 1.6px;
+            height: 1.6px;
+            border-radius: 0.8px;
+            x: Math.mod(i * 0.53 + root.phase * 0.02, 1.0) * root.width;
+            y: Math.mod(i * 0.291 - root.phase * 0.09, 1.0) * root.height;
+            opacity: 0.18 + 0.30 * Math.abs(Math.sin((root.phase * 360 + i * 45.8) * 1deg));
+            background: root.spec.signature;
+        }
+    }
+
+    // 鈹€鈹€ 7 路 澧ㄧ帀闈掔爞 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    //
+    // A dark jade ground with one soft jade bloom, two brush-like curves, a
+    // few drifting specks of 闈掔爞 and three faint ripples.
+    if root.spec.style == 7: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(168deg,
+            root.page.mix(root.spec.seed, 0.42) 0%,
+            root.page.mix(#07120f, 0.35) 100%);
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: @radial-gradient(circle,
+                root.spec.signature.with-alpha(0.09) 0%,
+                root.spec.signature.with-alpha(0.0) 56%);
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: root.spec.signature.with-alpha(0.20);
+            stroke-width: root.width * 0.0015;
+            stroke-line-cap: round;
+            commands: "M 8 86 C 24 76 30 58 48 54 C 64 50 72 36 92 30";
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: root.spec.signature.with-alpha(0.09);
+            stroke-width: root.width * 0.0035;
+            stroke-line-cap: round;
+            commands: "M 8 86 C 24 76 30 58 48 54 C 64 50 72 36 92 30";
+        }
+
+        for i in 3: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: root.spec.signature.with-alpha(0.12);
+            stroke-width: root.width * 0.0009;
+            commands: "M \{20 + i * 6} \{92 - i * 4} C \{38 + i * 6} \{84 - i * 4} \{58 + i * 6} \{84 - i * 4} \{76 + i * 6} \{92 - i * 4}";
+        }
+
+        for i in 18: Rectangle {
+            width: 1.6px;
+            height: 1.6px;
+            border-radius: 0.8px;
+            x: Math.mod(i * 0.618 + root.phase * 0.03, 1.0) * root.width;
+            y: Math.mod(i * 0.414 - root.phase * 0.02, 1.0) * root.height;
+            opacity: 0.12 + 0.22 * Math.abs(Math.sin((root.phase * 360 + i * 63.0) * 1deg));
+            background: root.spec.signature;
+        }
+    }
+}
+
+/// The scenery as a window surface: the scene, and the one timer that moves
+/// it. Mounted only while `Theme.backdrop-shown`; the timer runs only while
+/// `Theme.skin-motion`, so a window that is minimised, unfocused, set to
+/// Low-power or showing Minimal Dark schedules no frame at all.
+export component ThemeBackdrop inherits Rectangle {
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+    clip: true;
+
+    property <float> phase: 0;
+
+    Timer {
+        interval: 33ms;
+        running: Theme.skin-motion;
+        triggered => { root.phase = Math.mod(root.phase + 0.033 / 9.0, 1.0); }
+    }
+
+    SkinScene {
+        width: 100%;
+        height: 100%;
+        spec: Theme.skin;
+        phase: root.phase;
+        page: Theme.page;
+    }
+}

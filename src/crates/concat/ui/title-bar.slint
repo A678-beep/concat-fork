@@ -192,6 +192,29 @@ export component TitleBar inherits Rectangle {
     // float in, and it reads as one with the gutters between them.
     background: root.deep ? Theme.launch-page : Theme.page;
 
+    // 主题皮肤在标题栏上的一笔：一道很淡的强调色斜光，和底边一根渐变细线。
+    // 面板被皮肤染了色，标题栏也得跟着，不然窗口顶部像另一套程序。
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        background: @linear-gradient(120deg,
+            Theme.accent.with-alpha(0.10) 0%,
+            Colors.transparent 46%);
+    }
+
+    Rectangle {
+        x: 0;
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: @linear-gradient(90deg,
+            Colors.transparent 0%,
+            Theme.accent.with-alpha(0.55) 50%,
+            Colors.transparent 100%);
+    }
+
     property <bool> drag-armed: false;
     property <length> press-x: 0px;
     property <length> press-y: 0px;

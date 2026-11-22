@@ -62,6 +62,17 @@ pub struct Preferences {
     /// place the moment the choice is made.
     /// https://github.com/jub0t/Concat/issues/320
     pub ui_scale: Option<u32>,
+    /// 主题皮肤，记 `Theme.skins` 里的 id（"minimal-dark"、"dragon-gold"…）。
+    /// `None` 或认不出的 id 是第一套，也就是极简暗：纯色、无动画。
+    #[serde(default)]
+    pub skin: Option<String>,
+    /// 动态背景：皮肤的风景画在面板后面。`None` 是开（皮肤自带什么就画什么）；
+    /// 极简暗没有风景，所以默认就是静止的。
+    #[serde(default)]
+    pub dynamic_background: Option<bool>,
+    /// 低配模式：保留风景但停掉动画。`None` 是关。
+    #[serde(default)]
+    pub low_power: Option<bool>,
     /// The chosen transcriber model id, e.g. "base.en".
     pub transcriber_model: Option<String>,
     /// The language the captions sheet last asked the transcriber for, by
@@ -301,6 +312,29 @@ impl Preferences {
     /// file reads `"accent": "sky"` and a hand-typed capital still matches.
     pub fn accent_id(name: &str) -> String {
         name.trim().to_lowercase()
+    }
+
+    /// 记住的皮肤是哪一套：`ids` 是 `Theme.skins` 的 id，按图库顺序。没记住、
+    /// 或记住的 id 这一版已经没有了，都落回第一套（极简暗），和强调色一样的
+    /// 兜底规则。
+    pub fn skin_index(&self, ids: impl IntoIterator<Item = impl AsRef<str>>) -> usize {
+        let Some(wanted) = self.skin.as_deref().map(str::trim) else {
+            return 0;
+        };
+        let wanted = wanted.to_lowercase();
+        ids.into_iter()
+            .position(|id| id.as_ref().trim().to_lowercase() == wanted)
+            .unwrap_or(0)
+    }
+
+    /// 动态背景开着没有：记住的是关才算关。
+    pub fn motion_enabled(&self) -> bool {
+        self.dynamic_background.unwrap_or(true)
+    }
+
+    /// 低配模式开着没有。
+    pub fn low_power_mode(&self) -> bool {
+        self.low_power.unwrap_or(false)
     }
 
     /// The remembered accent when it is a colour rather than a name: the

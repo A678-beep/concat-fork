@@ -3,6 +3,8 @@
 
 import { I18n } from "../i18n.slint";
 import { Theme } from "../theme/theme.slint";
+import { SkinScene } from "../theme/backdrop.slint";
+import { Skins, SkinSpec } from "../theme/skins.slint";
 import { NumberField } from "../primitives/number-field.slint";
 import { Glyph, Icon } from "../icons.slint";
 import { Button, DialogSection, Field, Progress, Sheet } from "../primitives/modal.slint";
@@ -468,6 +470,225 @@ component AccentSwatch inherits Rectangle {
     }
 }
 
+// One skin in the Appearance gallery: a mini window drawn *in that skin* -
+// the scenery is the same `SkinScene` the editor mounts, at a fixed phase, so
+// the card shows what the window actually becomes rather than a hand-drawn
+// illustration that could drift from it. The panels over it are the skin's
+// own surfaces (`Skins.preview-*`), the accent dot is the signature colour.
+component SkinCard inherits Rectangle {
+    in property <SkinSpec> spec;
+    in property <bool> chosen;
+
+    callback picked();
+
+    height: 124px;
+    border-radius: Theme.r;
+    background: Theme.raised;
+    border-width: root.chosen ? 2px : 1px;
+    border-color: root.chosen ? Theme.accent
+        : touch.has-hover ? Theme.line-strong
+        : Theme.line;
+    clip: true;
+
+    accessible-role: button;
+    accessible-label: root.spec.name;
+
+    animate border-color { duration: 120ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+
+    VerticalLayout {
+        spacing: 0;
+
+        // The mini window.
+        Rectangle {
+            height: 84px;
+            background: Skins.preview-page(root.spec);
+            clip: true;
+
+            SkinScene {
+                width: 100%;
+                height: 100%;
+                spec: root.spec;
+                phase: 0.38;
+                page: Skins.preview-page(root.spec);
+            }
+
+            // Title strip.
+            Rectangle {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: 13px;
+                background: Skins.preview-panel(root.spec).with-alpha(0.86);
+
+                Rectangle {
+                    x: 6px;
+                    y: 5px;
+                    width: 20px;
+                    height: 3px;
+                    border-radius: 1.5px;
+                    background: Skins.preview-fg(root.spec).with-alpha(0.55);
+                }
+
+                Rectangle {
+                    x: parent.width - 10px;
+                    y: 4px;
+                    width: 5px;
+                    height: 5px;
+                    border-radius: 2.5px;
+                    background: root.spec.signature;
+                }
+            }
+
+            // Left panel, with three rows of "clips".
+            Rectangle {
+                x: 0;
+                y: 13px;
+                width: 22%;
+                height: parent.height - 35px;
+                background: Skins.preview-panel(root.spec).with-alpha(0.80);
+
+                for row in 3: Rectangle {
+                    x: 5px;
+                    y: 8px + row * 13px;
+                    width: parent.width - 10px;
+                    height: 4px;
+                    border-radius: 2px;
+                    background: Skins.preview-fg-muted(root.spec).with-alpha(0.30);
+                }
+            }
+
+            // The monitor: a black frame in the panels' middle.
+            Rectangle {
+                x: parent.width * 0.34;
+                y: 23px;
+                width: parent.width * 0.36;
+                height: 42px;
+                border-radius: 3px;
+                background: #0a0a0b;
+                border-width: 1px;
+                border-color: Skins.preview-line(root.spec);
+            }
+
+            // The inspector's two blocks, down the right.
+            Rectangle {
+                x: parent.width * 0.78;
+                y: 13px;
+                width: 22%;
+                height: parent.height - 35px;
+                background: Skins.preview-panel(root.spec).with-alpha(0.80);
+
+                Rectangle {
+                    x: 5px;
+                    y: 7px;
+                    width: parent.width - 10px;
+                    height: 4px;
+                    border-radius: 2px;
+                    background: root.spec.signature.with-alpha(0.55);
+                }
+
+                Rectangle {
+                    x: 5px;
+                    y: 16px;
+                    width: parent.width - 10px;
+                    height: 4px;
+                    border-radius: 2px;
+                    background: Skins.preview-fg-muted(root.spec).with-alpha(0.28);
+                }
+            }
+
+            // The timeline: three clips in the skin's signature.
+            Rectangle {
+                x: 0;
+                y: parent.height - 22px;
+                width: parent.width;
+                height: 22px;
+                background: Skins.preview-panel(root.spec).with-alpha(0.86);
+
+                for clip in 3: Rectangle {
+                    x: 6px + clip * (parent.width - 12px) / 3;
+                    y: 5px + Math.mod(clip, 2) * 6px;
+                    width: (parent.width - 12px) / 3 - 4px;
+                    height: 7px;
+                    border-radius: 2px;
+                    background: root.spec.signature.with-alpha(0.35 + 0.2 * Math.mod(clip, 2));
+                }
+            }
+        }
+
+        VerticalLayout {
+            padding-left: 9px;
+            padding-right: 9px;
+            padding-top: 6px;
+            spacing: 1px;
+
+            Text {
+                text: root.spec.name;
+                color: Theme.fg;
+                font-size: Theme.fs;
+                font-weight: Theme.weight-title;
+                overflow: elide;
+            }
+
+            Text {
+                text: root.spec.hint;
+                color: Theme.fg-dim;
+                font-size: 9px;
+                overflow: elide;
+            }
+        }
+    }
+
+    if root.chosen: Rectangle {
+        x: parent.width - 22px;
+        y: 6px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: Theme.accent;
+        Icon {
+            glyph: Glyph.check;
+            size: 11px;
+            weight: 2.6;
+            tint: Theme.on-accent;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+}
+
+// The gallery: the skins in a grid whose column count follows the sheet's
+// width, each card the same size. Absolute positions rather than a layout,
+// the same arithmetic the asset grid uses, so the card is a plain Rectangle
+// and the whole grid's height is known without a second pass.
+component SkinGallery inherits Rectangle {
+    callback picked(index: int);
+
+    property <length> gap: 10px;
+    property <length> min-card: 168px;
+    property <int> cols: Math.max(2,
+        Math.floor((root.width + root.gap) / (root.min-card + root.gap)));
+    property <length> card-w: (root.width - (root.cols - 1) * root.gap) / root.cols;
+    property <length> card-h: 124px;
+    property <int> rows: Math.ceil(Theme.skins.length * 1.0 / root.cols);
+
+    height: root.rows * (root.card-h + root.gap) - root.gap;
+
+    for index in Theme.skins.length: SkinCard {
+        x: Math.mod(index, root.cols) * (root.card-w + root.gap);
+        y: Math.floor(index / root.cols) * (root.card-h + root.gap);
+        width: root.card-w;
+        height: root.card-h;
+        spec: Theme.skins[index];
+        chosen: Theme.skin-choice == index;
+        picked => { root.picked(index); }
+    }
+}
+
 component PageTab inherits Rectangle {
     in property <string> label;
     in property <Glyph> glyph;
@@ -691,6 +912,14 @@ export component SettingsDialog inherits Sheet {
     /// say "the other one"; a page with two named options can say which one is
     /// on, which is the whole reason it moved in here.
     callback theme-changed(dark: bool);
+    /// 主题皮肤：which of `Theme.skins` the window should wear. Picking one
+    /// also picks the accent it ships with, from the Rust side.
+    callback skin-changed(index: int);
+    /// 动态背景开关：the scenery behind the panes, animated while the window
+    /// is at the front.
+    callback motion-changed(on: bool);
+    /// 低配模式：keep the scenery but stop moving it.
+    callback low-power-changed(on: bool);
     /// The accent, as an index into `Theme.accent-names`.
     callback accent-changed(index: int);
     /// A colour picked by hand in place of any on the list.
@@ -1316,6 +1545,41 @@ export component SettingsDialog inherits Sheet {
                         current: Theme.dark ? 0 : 1;
                         changed(index) => { root.theme-changed(index == 0); }
                     }
+                }
+
+                // 主题皮肤：一套预设 = 一组面板色调 + 一张程序化绘制的背景
+                // 风景（矢量与粒子，没有视频/GIF/图片素材）。极简暗是默认：
+                // 纯色、没有计时器，窗口空着的时候 CPU 是 0。
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.skins");
+                    hint: I18n.t("settings.skinsHint");
+
+                    SkinGallery {
+                        picked(index) => { root.skin-changed(index); }
+                    }
+                }
+
+                // 动态背景：风景画在面板后面、缝里露出来，只有窗口在最前面
+                // 且没有最小化时才动（30fps 上限）；关掉就只剩皮肤色调。
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.dynamicBackground");
+                    hint: I18n.t("settings.dynamicBackgroundHint");
+                    switchable: true;
+                    on: Theme.motion;
+                    switched(on) => { root.motion-changed(on); }
+                }
+
+                // 低配模式：保留风景，但不让它动（静态一帧）。老机器/远程
+                // 桌面/省电时用；和动态背景一起就是「不要任何背景」。
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.lowPower");
+                    hint: I18n.t("settings.lowPowerHint");
+                    switchable: true;
+                    on: Theme.low-power;
+                    switched(on) => { root.low-power-changed(on); }
                 }
 
                 // The accent: the colour every selection, activated tool and

@@ -54,6 +54,11 @@ export struct AssetCardData {
     preview-frames: [image],
     /// 字体预览注册进窗口字体集合后的 family 名；不是字体卡时为空。
     font-family: string,
+    /// 音乐/音效卡的时长（"0:32" / "13s"），别的类型为空。0.2.27 起音频卡
+    /// 有自己的主视觉，时长是它的一部分。
+    duration: string,
+    /// 字体已装进本应用（文字面板可选），按钮变成「已安装」。
+    font-installed: bool,
 }
 
 export global Assets {
@@ -119,6 +124,181 @@ component TinyTag inherits Rectangle {
     }
 }
 
+// 音频卡的主视觉（0.2.27）：音乐/音效没有缩略图，也不再是黑块——kind 色的
+// 渐变底、一排按索引变化的音轨条纹、时长和一颗试听按钮。所有图形都是
+// 程序化画的（没有版权素材）；播放中点一下画面暂停，移开自动停。
+component AudioArt inherits Rectangle {
+    in property <color> mark;
+    in property <color> ground;
+    in property <string> duration;
+    in property <bool> playing;
+
+    background: @linear-gradient(150deg,
+        root.ground 0%,
+        root.ground.mix(root.mark, 0.24) 58%,
+        root.ground.mix(root.mark, 0.34) 100%);
+
+    // 音轨条纹：30 根高矮不一的竖条，像一条音轨，不假装是真实波形。
+    for i in 30: Rectangle {
+        x: i * parent.width / 30 + (parent.width / 30 - self.width) / 2;
+        width: parent.width / 30 - 2.2px;
+        height: parent.height * (0.12 + Math.abs(Math.sin((i * 37.7 + 11.0) * 1deg)) * 0.50);
+        y: (parent.height - self.height) / 2;
+        border-radius: self.width / 2;
+        background: root.mark.with-alpha(0.30 + Math.abs(Math.sin((i * 21.3) * 1deg)) * 0.35);
+    }
+
+    // 试听按钮：画面正中的一颗圆，播放中变成暂停。
+    Rectangle {
+        width: Math.min(parent.width, parent.height) * 0.30;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: root.mark.with-alpha(0.92);
+        border-width: 1px;
+        border-color: #ffffff33;
+
+        Icon {
+            glyph: root.playing ? Glyph.pause : Glyph.play;
+            size: parent.width * 0.44;
+            tint: #0d0d0e;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+        }
+    }
+
+    if root.duration != "": Rectangle {
+        x: 6px;
+        y: parent.height - self.height - 6px;
+        width: label.preferred-width + 10px;
+        height: 15px;
+        border-radius: 4px;
+        background: #00000066;
+
+        label := Text {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            text: root.duration;
+            color: #ffffffd9;
+            font-family: Theme.font-technical;
+            font-size: 9px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// 字体卡：已经注册过（悬停预览过或装好了）的字体，用该字体排一行示例，
+// 再给三种字重的样子；字体拿不到时是「字」字号占位，不是黑块。
+component FontSpecimen inherits Rectangle {
+    in property <string> family;
+
+    background: @linear-gradient(160deg, Theme.field 0%, Theme.well 100%);
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 2px;
+        padding-left: 8px;
+        padding-right: 8px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+
+        Text {
+            text: "星籁剪辑 · 让好内容被看见";
+            font-family: root.family;
+            color: Theme.fg;
+            font-size: 15px;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: center;
+
+            Text {
+                text: "常规 400";
+                font-family: root.family;
+                font-weight: 400;
+                color: Theme.fg-muted;
+                font-size: 9px;
+            }
+            Text {
+                text: "中等 500";
+                font-family: root.family;
+                font-weight: 500;
+                color: Theme.fg-muted;
+                font-size: 9px;
+            }
+            Text {
+                text: "加粗 700";
+                font-family: root.family;
+                font-weight: 700;
+                color: Theme.fg-muted;
+                font-size: 9px;
+            }
+        }
+
+        Text {
+            text: I18n.t("assets.previewFont");
+            color: Theme.fg-dim;
+            font-size: 8px;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+component FontFallbackArt inherits Rectangle {
+    background: @linear-gradient(150deg,
+        Theme.well 0%,
+        Theme.field.mix(Theme.accent, 0.07) 100%);
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 2px;
+
+        Text {
+            text: "字";
+            color: Theme.fg;
+            font-size: 30px;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: I18n.t("assets.fontHint");
+            color: Theme.fg-dim;
+            font-size: 9px;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+// 图片/视频没有缩略图时的兜底：类型图标 + 一句中文，不是黑块。
+component MediaFallback inherits Rectangle {
+    in property <int> kind;
+
+    background: @linear-gradient(160deg, Theme.well 0%, Theme.field 100%);
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 5px;
+
+        Icon {
+            glyph: root.kind == 1 ? Glyph.image : Glyph.film;
+            size: 26px;
+            tint: Theme.fg-dim;
+        }
+
+        Text {
+            text: root.kind == 1 ? I18n.t("assets.noThumbImage") : I18n.t("assets.noThumbVideo");
+            color: Theme.fg-muted;
+            font-size: 9px;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+    }
+}
+
 // 一张素材卡。
 component AssetCard inherits Rectangle {
     in property <AssetCardData> data;
@@ -180,7 +360,7 @@ component AssetCard inherits Rectangle {
                 image-fit: contain;
             }
 
-            // 悬停预览：视频放后台解好的 3–5 秒循环帧；字体用该字体渲染示例。
+            // 悬停预览：视频放后台解好的 3–5 秒循环帧。
             if root.data.preview-state == 2 && root.data.preview-frames.length > 0: Image {
                 width: 100%;
                 height: 100%;
@@ -188,49 +368,38 @@ component AssetCard inherits Rectangle {
                 image-fit: contain;
             }
 
-            if root.data.preview-state == 4: Rectangle {
+            // 字体卡：不管平台给没给封面图，卡片上要展示的都是「这个字体
+            // 本身」。已注册（悬停预览过，或下载后装好）就永远用该字体排
+            // 版；没有字体时是「字」字占位。平台的字体封面图是一张通用示
+            // 意图，反而看不出各字体的差别。
+            if root.data.kind == 4 && root.data.font-family != "": FontSpecimen {
                 width: 100%;
                 height: 100%;
-                background: Theme.field;
-
-                VerticalLayout {
-                    alignment: center;
-                    spacing: 1px;
-
-                    Text {
-                        text: "星籁剪辑";
-                        font-family: root.data.font-family;
-                        color: Theme.fg;
-                        font-size: 21px;
-                        horizontal-alignment: center;
-                    }
-                    Text {
-                        text: "让好内容被看见";
-                        font-family: root.data.font-family;
-                        color: Theme.fg;
-                        font-size: 12px;
-                        horizontal-alignment: center;
-                    }
-                    Text {
-                        text: I18n.t("assets.previewFont");
-                        color: Theme.fg-dim;
-                        font-size: Theme.fs-xs;
-                        horizontal-alignment: center;
-                    }
-                }
+                family: root.data.font-family;
             }
 
-            if !root.data.has-thumb && root.data.preview-state != 4: VerticalLayout {
-                alignment: center;
-                Icon {
-                    glyph: root.data.kind == 1 ? Glyph.image
-                        : root.data.kind == 2 ? Glyph.music
-                        : root.data.kind == 3 ? Glyph.music
-                        : root.data.kind == 4 ? Glyph.text-mark
-                        : Glyph.film;
-                    size: 22px;
-                    tint: Theme.fg-dim;
-                }
+            if root.data.kind == 4 && root.data.font-family == "": FontFallbackArt {
+                width: 100%;
+                height: 100%;
+            }
+
+            // 音乐/音效：一律用音频专属主视觉 + 时长。封面图对找音效没有
+            // 帮助，波形、时长和那颗试听按钮才是这张卡该说的。
+            if root.data.kind == 2 || root.data.kind == 3: AudioArt {
+                width: 100%;
+                height: 100%;
+                mark: Theme.kind-audio;
+                ground: Theme.kind-audio-well;
+                duration: root.data.duration;
+                playing: root.data.preview-state == 3;
+            }
+
+            // 图片/视频没有缩略图：类型图标 + 中文说明，不再是一块黑。
+            if (root.data.kind == 0 || root.data.kind == 1)
+                && !root.data.has-thumb && root.data.preview-state != 2: MediaFallback {
+                width: 100%;
+                height: 100%;
+                kind: root.data.kind;
             }
 
             // 合规角标：右上角，小字号、半透明，不再是一条大绿杠。
@@ -304,7 +473,8 @@ component AssetCard inherits Rectangle {
             }
 
             // 悬停感知盖在缩略图上：停留 400ms 起预览，移开就停；试听中
-            // 点一下画面也可以停（任务卡允许点击暂停）。
+            // 点一下画面也可以停，没在播时点一下立刻试听（音频卡的播放
+            // 按钮就是这块画面，不另起一个会抢走悬停的 TouchArea）。
             thumb-hover := HoverArea {
                 hover(on) => {
                     if (on) {
@@ -315,7 +485,14 @@ component AssetCard inherits Rectangle {
                     }
                 }
                 clicked => {
-                    if (root.data.preview-state == 3) { root.end-preview(); }
+                    if (root.data.preview-state == 3) {
+                        root.end-preview();
+                    } else if (root.data.kind == 2 || root.data.kind == 3) {
+                        if (root.data.preview-state == 0 || root.data.preview-state == 5) {
+                            hover-timer.running = false;
+                            root.ask-preview();
+                        }
+                    }
                 }
             }
         }

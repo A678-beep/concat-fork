@@ -3,6 +3,7 @@
 
 import { I18n } from "i18n.slint";
 import { Theme } from "theme/theme.slint";
+import { ThemeBackdrop } from "theme/backdrop.slint";
 import { CopyChip, Modal } from "primitives/modal.slint";
 import { FocusRing } from "primitives/focus-ring.slint";
 import { Glyph, Icon } from "icons.slint";
@@ -2633,6 +2634,16 @@ export component StartScreen inherits Rectangle {
 
     background: Theme.launch-page;
     clip: true;
+
+    // 主题皮肤的动态背景：首屏地方大，皮肤在这里最看得出来。外面还有
+    // 一层 launch-page 的底色，元素只负责风景；没开动态背景/极简暗时
+    // 什么都不挂。
+    if Theme.backdrop-shown: ThemeBackdrop {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+    }
 
     /// 页面边距，和 WideHome 的 pad 同一套算法：账号菜单要靠它对齐到 chip 下面。
     property <length> menu-pad: Math.max(24px, Math.min(64px, root.width / 18));
