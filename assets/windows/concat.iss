@@ -123,4 +123,12 @@ Name: "{autodesktop}\星籁剪辑"; Filename: "{app}\concat.exe"; IconFilename: 
 Name: "{autoprograms}\星籁剪辑 · 安装中文语音模型（自动字幕）"; Filename: "{app}\安装中文语音模型.cmd"; IconFilename: "{app}\concat.ico"; WorkingDir: "{app}"
 
 [Run]
+; 0.25.0: a first launch right after an install took 12 s on the boss's
+; machine - Windows scanning the freshly written 188 MB binary (and the
+; libraries it imports) for the first time, before `main` was reached.
+; That scan happens here instead, where a few seconds of install time are
+; expected: `--version` loads the executable and everything it links and
+; exits before the log, the GPU and a window. The person's first launch is
+; the second time Windows has seen these files.
+Filename: "{app}\concat.exe"; Parameters: "--version"; Flags: runhidden waituntilterminated; StatusMsg: "Preparing the program files"
 Filename: "{app}\concat.exe"; Description: "{cm:LaunchProgram,星籁剪辑}"; Flags: nowait postinstall skipifsilent

@@ -172,6 +172,21 @@ impl Op {
             let _ = write!(line, " · {step} {}", span(*took));
         }
     }
+    /// The steps that have ended, how long each took in whole milliseconds,
+    /// in the order they ended. What the window's own report is built from:
+    /// the line in the log says the same, but a sheet cannot read a file.
+    pub fn step_durations(&mut self) -> Vec<(String, u64)> {
+        self.end_step();
+        self.steps
+            .iter()
+            .map(|(name, took)| (name.clone(), took.as_millis() as u64))
+            .collect()
+    }
+
+    /// How long the work has been going, in whole milliseconds.
+    pub fn elapsed_ms(&self) -> u64 {
+        self.started.elapsed().as_millis() as u64
+    }
 }
 
 impl Drop for Op {

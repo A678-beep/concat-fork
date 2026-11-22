@@ -379,6 +379,9 @@ impl AiPane {
 
     /// 重新读插件、登录状态与音色。
     pub fn refresh(&mut self, dirs: &concat_host::AppDirs) {
+        // A fresh read means an import, a removal or the panel opening: the
+        // cached "is Piper installed" answer the speech pane keeps must go.
+        plugins::forget_installed();
         self.plugins = plugins::scan(dirs);
         self.piper = self
             .plugins
@@ -461,6 +464,19 @@ impl AiPane {
     /// 后台取一次远端插件清单，模型中心据此把能下载的点亮。
     ///
     /// 只取一次：清单不常变，用户在插件页点「刷新」会清掉重取。
+    /// The sizes `plugins::sizes` walked, onto the rows: the panel shows
+    /// them in place of the dashes `scan` leaves when it has no cache yet.
+    pub fn apply_sizes(&mut self, sizes: std::collections::HashMap<String, u64>) {
+        if sizes.is_empty() {
+            return;
+        }
+        for plugin in &mut self.plugins {
+            if let Some(bytes) = sizes.get(&plugin.manifest.id) {
+                plugin.bytes = *bytes;
+            }
+        }
+    }
+
     fn load_packages(&mut self, studio: &mut Studio) {
         if self.packages_loading {
             return;
@@ -1201,6 +1217,9 @@ impl AiPane {
         self.tab = tab.clamp(0, 3);
         let dirs = studio.host.dirs.clone();
         self.refresh(&dirs);
+        // The panel shows the sizes the last walk left on file; walk them
+        // again on a worker so an install done outside the app is counted.
+        studio.measure_plugin_sizes();
         if self.tab == 2 && !self.busy {
             self.load_packages(studio);
         }

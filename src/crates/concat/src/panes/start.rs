@@ -438,6 +438,7 @@ impl StartPane {
             self.error = t("start.chooseWhereProjectFolder");
             return;
         }
+        let began = std::time::Instant::now();
         let opened = projects::create(&self.location, &name, width, height, num, den, self.canvas)
             .inspect_err(|error| {
                 log::error!(
@@ -452,6 +453,13 @@ impl StartPane {
                 studio.prefs.save(&studio.host.dirs);
                 self.composing = false;
                 self.error.clear();
+                // What a "new project" costs, from the button to the folder
+                // read back and the timeline on screen: asked for as a
+                // number, so it is a line in the log and not a feeling.
+                log::info!(
+                    "project: created {name} in {} 路 {width}x{height}",
+                    concat_log::span(began.elapsed())
+                );
                 // What was dropped to start it goes in, the way an import
                 // does: probed on a worker, with its own notice.
                 let dropped = std::mem::take(&mut self.dropped);

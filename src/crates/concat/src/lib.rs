@@ -45,6 +45,7 @@ mod localize;
 #[cfg(target_os = "ios")]
 mod ios;
 mod keymap;
+mod maintenance;
 mod meters;
 mod motion_tiles;
 mod platform;
@@ -75,6 +76,7 @@ mod project_cloud;
 mod smoke_export;
 mod source;
 mod speed_ramp;
+mod startup_report;
 mod studio;
 mod sysinfo;
 /// Native Wayland file drops, which winit does not report; see the module.
@@ -154,6 +156,82 @@ pub fn open_logging(extra: Option<Box<dyn log::Log>>) {
 /// first published. A launch that fails before that leaves it unfinished,
 /// which its line says.
 static STARTING: std::sync::Mutex<Option<concat_log::Op>> = std::sync::Mutex::new(None);
+
+/// Names a phase of the launch, so the log's one line about it says where
+/// the milliseconds went, and Settings > About can show the last few
+/// launches the same way. A clock read and a push: nothing on a launch's
+/// path should be afraid to call this.
+fn starting_step(op: &mut Option<concat_log::Op>, name: &str) {
+    if let Some(op) = op.as_mut() {
+        op.step(name);
+    }
+}
+
+/// Keeps this launch's report beside the log, and hands Settings > About
+/// the last few. On a worker: it writes a small file, and the launch is
+/// over by the time it runs.
+fn save_startup_report(
+    app: slint::Weak<ui::App>,
+    dirs: concat_host::AppDirs,
+    steps: Vec<(String, u64)>,
+    total_ms: u64,
+) {
+    host::spawn_detached(move || {
+        let launches = startup_report::record(&dirs, steps, total_ms);
+        let facts = startup_report::facts(&launches);
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(app) = app.upgrade() else {
+                return;
+            };
+            app.set_startup_facts(ModelRc::from(Rc::new(VecModel::from(
+                facts
+                    .into_iter()
+                    .map(|(label, value)| SystemFactData {
+                        label: label.into(),
+                        value: value.into(),
+                    })
+                    .collect::<Vec<_>>(),
+            ))));
+        });
+    });
+}
+
+/// Runs one cache cleanup in the background and says what it freed. The
+/// cleanup itself is [`maintenance`]; this is the thread, the log line, and
+/// the toast, because 128 MB of asset cache must not be deleted on the
+/// window's thread.
+fn clear_cache(
+    what: &'static str,
+    clear: fn(&concat_host::AppDirs) -> maintenance::Cleared,
+) {
+    Shell::with(|shell, _app| {
+        let dirs = shell.studio.borrow().host.dirs.clone();
+        let spawned = std::thread::Builder::new()
+            .name("concat cache cleanup".to_owned())
+            .spawn(move || {
+                let cleared = clear(&dirs);
+                log::info!(
+                    "maintenance: {what} cleared · {} files · {}",
+                    cleared.files,
+                    concat_log::bytes(cleared.bytes)
+                );
+                let message = format!(
+                    "{what}已清理：{} 个文件，{}",
+                    cleared.files,
+                    concat_log::bytes(cleared.bytes)
+                );
+                let _ = slint::invoke_from_event_loop(move || {
+                    Shell::with(|shell, app| {
+                        shell.studio.borrow_mut().notify(&message, false);
+                        shell.studio.borrow().publish(&app, &shell.models);
+                    });
+                });
+            });
+        if let Err(error) = spawned {
+            log::warn!("maintenance: wanted a thread for a cache cleanup and got none: {error}");
+        }
+    });
+}
 
 /// Whether a way out of the run has said so; see [`closing`].
 static CLOSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -264,6 +342,9 @@ pub(crate) fn close_window(
 const IDLE_FRAMES: usize = 96 * 1024 * 1024;
 
 fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint::PlatformError> {
+    // The launch's report, taken from the log's opener and handed back at
+    // the window's first publish; the steps below are its body.
+    let mut starting = STARTING.lock().ok().and_then(|mut slot| slot.take());
     // What Import and a finished export reach on an iPhone. Android's own
     // crate installs its; iOS runs this crate's binary, so it is here.
     // https://github.com/jub0t/Concat/issues/332
@@ -287,6 +368,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     } else {
         (None, false)
     };
+    starting_step(&mut starting, "prefs");
 
     // The shell doesn't exist yet - it needs the window the backend is about
     // to help create - but `Shell::with` is a no-op until `Shell::install`
@@ -385,6 +467,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         },
     )?;
 
+    starting_step(&mut starting, "backend");
     let host = match Host::start(gpu) {
         Ok(host) => host,
         Err(error) => {
@@ -394,8 +477,11 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     };
 
     // The base fonts, so the preset cards can be drawn in them.
+    starting_step(&mut starting, "engine");
     fonts::register();
+    starting_step(&mut starting, "fonts");
     let app = App::new()?;
+    starting_step(&mut starting, "window");
     app.set_macos(platform::MACOS);
     // A phone wears the phone shell - see ui/phone/ - and its lanes keep
     // the playhead at their middle; the strip and the dock are the desk's.
@@ -420,6 +506,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     // frame. One that will not load is skipped, and its reason is the
     // first thing the window says.
     let mut studio = Studio::new(host);
+    starting_step(&mut starting, "studio");
     studio.set_phone(phone);
     // A phone whose last run died says so once, now, and offers its log;
     // the next launch reads this run, which did not (#560).
@@ -449,6 +536,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     }
     studio.reload_packages(false);
     studio.watch_packages();
+    starting_step(&mut starting, "packages");
     let dark = studio.prefs.dark.unwrap_or(true);
     app.global::<Theme>().set_dark(dark);
     motion_tiles::install(&app);
@@ -532,6 +620,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         }
     }
 
+    starting_step(&mut starting, "theme");
     let shell = Rc::new(Shell {
         app: app.as_weak(),
         studio: RefCell::new(studio),
@@ -556,6 +645,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     // encoders), and the publish after this lands brings the rest.
     host::spawn(concat_media::encode::probe_encoders, |_, _, _, ()| {});
 
+    starting_step(&mut starting, "workers");
     // Handed over once, here, and never replaced: a fresh model is a reset,
     // and a reset rebuilds every row that hangs off it.
     {
@@ -648,26 +738,10 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
             .set_matches(ModelRc::from(models.caption_styles.clone()));
     }
 
-    // Settings > About's block, gathered once: nothing in it changes while
-    // the process runs.
-    let facts = sysinfo::system_facts();
-    app.set_system_report(
-        facts
-            .iter()
-            .map(|(label, value)| format!("{label}: {value}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-            .into(),
-    );
-    app.set_system_facts(ModelRc::from(Rc::new(VecModel::from(
-        facts
-            .into_iter()
-            .map(|(label, value)| SystemFactData {
-                label: label.into(),
-                value: value.into(),
-            })
-            .collect::<Vec<_>>(),
-    ))));
+    // Settings > About's block is gathered after the window is up: one line
+    // of it asks `cmd /c ver` and one looks the ONNX runtime up, and neither
+    // is anything the first frame draws. See the end of this function.
+    starting_step(&mut starting, "models");
 
     // The ladders' labels, handed over once; the index the form reports back
     // is what carries the meaning. The shapes carry their ratio as well,
@@ -727,6 +801,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         words.set_lang(i18n::current().into());
     }
 
+    starting_step(&mut starting, "callbacks");
     // The strip's drag region and double-click. Only the platform's window
     // can do either; the scene graph forwards the gestures here.
     app.on_titlebar_begin_drag({
@@ -2594,6 +2669,13 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     app.on_settings_show_log(on_window!(|state| {
         state.handle(Msg::Settings(SettingsMsg::ShowLog));
     }));
+    // Cache cleanup, from Settings > About's diagnostics block: only what
+    // the app can make again - the downloaded asset cache, the drawn effect
+    // cards, the title pictures, the plugin download cache. Never a project,
+    // a sound, a cloned voice, or a plugin the person installed. On a
+    // worker: the asset cache alone is 128 MB over a thousand files.
+    app.on_settings_clear_asset_cache(|| clear_cache("素材缓存", maintenance::clear_asset_cache));
+    app.on_settings_clear_plugin_cache(|| clear_cache("插件缓存", maintenance::clear_plugin_cache));
     app.on_settings_language_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Settings(SettingsMsg::LanguageChanged(index)));
     }));
@@ -3197,6 +3279,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         }
     });
 
+    starting_step(&mut starting, "project");
     if let Some(path) = project {
         // Use the same loader as Open project, after all callbacks and models
         // are installed. Make the path absolute so recents never depend on the
@@ -3216,12 +3299,23 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         }
     }
 
+    starting_step(&mut starting, "publish");
     {
         shell.studio.borrow_mut().refresh_art();
         shell.studio.borrow().publish(&app, &shell.models);
     }
-    if let Some(op) = STARTING.lock().ok().and_then(|mut slot| slot.take()) {
+    if let Some(mut op) = starting.take() {
+        let steps = op.step_durations();
+        let total_ms = op.elapsed_ms();
         op.done("the window is up");
+        if smoke == Smoke::No {
+            save_startup_report(
+                app.as_weak(),
+                shell.studio.borrow().host.dirs.clone(),
+                steps,
+                total_ms,
+            );
+        }
     }
     // The window is up: this launch started. The mark that says "starting"
     // goes here, not fifteen seconds later - a window that came up and was
@@ -3232,6 +3326,45 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     if let Some(mark) = startup_mark.take() {
         drop(mark);
         log::debug!("start: first frame up; the startup mark is gone");
+    }
+    if smoke == Smoke::No {
+        // The window is up, so the work that only makes the *next* moment
+        // better starts now, on threads of its own. The shader warm-up
+        // compiles all 85 effect pipelines - about a second of every core
+        // here - and used to start before the window, racing it. The local
+        // plugins' folder sizes are a walk of an embedded Python
+        // environment. And Settings > About's block spawns `cmd /c ver`.
+        {
+            let studio = shell.studio.borrow();
+            studio.host.monitor.warm_shaders();
+        }
+        shell.studio.borrow_mut().measure_plugin_sizes();
+        let weak = app.as_weak();
+        host::spawn_detached(move || {
+            let facts = sysinfo::system_facts();
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(app) = weak.upgrade() else {
+                    return;
+                };
+                app.set_system_report(
+                    facts
+                        .iter()
+                        .map(|(label, value)| format!("{label}: {value}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                        .into(),
+                );
+                app.set_system_facts(ModelRc::from(Rc::new(VecModel::from(
+                    facts
+                        .into_iter()
+                        .map(|(label, value)| SystemFactData {
+                            label: label.into(),
+                            value: value.into(),
+                        })
+                        .collect::<Vec<_>>(),
+                ))));
+            });
+        });
     }
     // A launch that fell back to software because the last one died while
     // starting is one launch, not a sentence: if this one has been up long

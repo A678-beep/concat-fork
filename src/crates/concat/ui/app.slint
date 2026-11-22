@@ -456,6 +456,9 @@ export component App inherits Window {
     /// process.
     in property <[SystemFactData]> system-facts;
     in property <string> system-report;
+    /// The last few launches, phase by phase: what Settings > About's
+    /// "launch diagnostics" block draws. See startup_report.rs.
+    in property <[SystemFactData]> startup-facts;
 
     callback export-closed();
     callback export-name-edited(name: string);
@@ -486,6 +489,8 @@ export component App inherits Window {
     /// 打开 AGPL 许可证或源码页面。
     callback settings-open-license(url: string);
     callback settings-show-log();
+    callback settings-clear-asset-cache();
+    callback settings-clear-plugin-cache();
     callback settings-language-changed(index: int);
     callback settings-log-level-changed(index: int);
     callback settings-theme-changed(dark: bool);
@@ -1151,6 +1156,7 @@ export component App inherits Window {
         languages: root.languages;
         system-facts: root.system-facts;
         system-report: root.system-report;
+        startup-facts: root.startup-facts;
         on-start: root.on-start;
 
         // Focus hands itself back to the window's own scope, which is
@@ -1170,6 +1176,8 @@ export component App inherits Window {
         shortcut-reset(id) => { root.settings-shortcut-reset(id); }
         shortcut-reset-all => { root.settings-shortcut-reset-all(); }
         show-log => { root.settings-show-log(); }
+        clear-asset-cache => { root.settings-clear-asset-cache(); }
+        clear-plugin-cache => { root.settings-clear-plugin-cache(); }
         language-changed(index) => { root.settings-language-changed(index); }
         log-level-changed(index) => { root.settings-log-level-changed(index); }
         theme-changed(dark) => { root.settings-theme-changed(dark); }

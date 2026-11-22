@@ -377,7 +377,13 @@ impl Plugin {
 
     /// 界面上显示的大小。
     pub fn size_label(&self) -> String {
-        human_size(self.bytes)
+        if self.bytes == 0 {
+            // The walk has not run for this install yet; the panel's worker
+            // fills it in and publishes the rows again.
+            "-".to_owned()
+        } else {
+            human_size(self.bytes)
+        }
     }
 }
 
@@ -409,6 +415,13 @@ pub fn scan(dirs: &crate::AppDirs) -> Vec<Plugin> {
     let Ok(entries) = std::fs::read_dir(&root) else {
         return Vec::new();
     };
+    // What the last walk found, so the list still shows sizes without one.
+    // 0.25.0: the walk itself moved to `sizes`, on a worker. A digital-human
+    // plugin is an embedded Python environment of ~14 000 files and 2 GB;
+    // walking it here took seconds off the launch (measured: 3.4 s -> 0.7 s
+    // with the plugin folder out of the way), and the window does not need
+    // any plugin's size to open.
+    let known = read_sizes(&root);
     let mut plugins = Vec::new();
     for entry in entries.flatten() {
         let folder = entry.path();
@@ -425,14 +438,92 @@ pub fn scan(dirs: &crate::AppDirs) -> Vec<Plugin> {
             plugins.push(plugin);
         }
     }
+    for plugin in &mut plugins {
+        if let Some(bytes) = known.get(&plugin.manifest.id) {
+            plugin.bytes = *bytes;
+        }
+    }
     plugins.sort_by(|a, b| a.manifest.id.cmp(&b.manifest.id));
     plugins
 }
 
+/// The file [`scan`] reads the last walk's numbers from, and [`sizes`]
+/// writes them to. Dot-prefixed, so the scan skips it.
+const SIZES_FILE: &str = ".sizes.json";
+
+fn sizes_path(root: &Path) -> PathBuf {
+    root.join(SIZES_FILE)
+}
+
+fn read_sizes(root: &Path) -> std::collections::HashMap<String, u64> {
+    let Ok(text) = std::fs::read_to_string(sizes_path(root)) else {
+        return std::collections::HashMap::new();
+    };
+    serde_json::from_str(&text).unwrap_or_default()
+}
+
+/// How many bytes each installed plugin takes, by plugin id, walking every
+/// folder under `ai-plugins`; the answer is written to `.sizes.json` for
+/// [`scan`], so the panel's sizes survive a launch.
+///
+/// On a worker, never on the window's thread: the biggest local plugin here
+/// is an embedded Python environment of about 14 000 files, and even warm
+/// that walk is half a second of disk.
+pub fn sizes(dirs: &crate::AppDirs) -> std::collections::HashMap<String, u64> {
+    let root = root(dirs);
+    let mut out = std::collections::HashMap::new();
+    for plugin in scan(dirs) {
+        out.insert(plugin.manifest.id.clone(), folder_size(&plugin.folder));
+    }
+    if !out.is_empty()
+        && let Ok(text) = serde_json::to_string(&out)
+    {
+        let _ = std::fs::write(sizes_path(&root), text);
+    }
+    out
+}
+
+/// Whether the Piper plugin is installed, answered from a cache for the run.
+///
+/// The speech pane's model list asks this every time it is rebuilt, and a
+/// rebuild happens on every publish; a full plugin scan on every publish
+/// walked the plugin folders on the window's thread and left an idle launch
+/// screen burning a core (0.2.24 measured: ~100% of one). The answer only
+/// changes when a plugin is imported or removed, and [`forget_installed`]
+/// is called from both.
+pub fn piper_installed(dirs: &crate::AppDirs) -> bool {
+    let root = root(dirs);
+    if let Ok(cache) = INSTALLED.lock()
+        && let Some((cached, answer)) = cache.as_ref()
+        && *cached == root
+    {
+        return *answer;
+    }
+    let answer = scan(dirs)
+        .iter()
+        .any(|plugin| plugin.engine().eq_ignore_ascii_case("piper"));
+    if let Ok(mut cache) = INSTALLED.lock() {
+        *cache = Some((root, answer));
+    }
+    answer
+}
+
+/// Drops the answers [`piper_installed`] keeps: a plugin was installed or
+/// removed, so the next question asks the disk again.
+pub fn forget_installed() {
+    if let Ok(mut cache) = INSTALLED.lock() {
+        *cache = None;
+    }
+}
+
+static INSTALLED: std::sync::Mutex<Option<(PathBuf, bool)>> = std::sync::Mutex::new(None);
+
 /// 读一个插件文件夹；没有清单但有 `piper.exe` 的按 Piper 认。
 pub fn read_plugin(folder: &Path) -> Option<Plugin> {
     let manifest = read_manifest(folder).or_else(|| synthesized(folder))?;
-    let bytes = folder_size(folder);
+    // Filled from `sizes`' cache by `scan`; this function only reads the
+    // manifest, so a scan is a few file reads and not a walk of the folder.
+    let bytes = 0;
     let complete = folder
         .join(if manifest.executable.trim().is_empty() {
             "piper.exe"

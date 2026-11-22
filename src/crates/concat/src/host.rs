@@ -88,9 +88,10 @@ impl Host {
             server: None,
             open_projects: concat_api::OpenProjects::default(),
         };
-        // Every effect's pipeline, compiled while the window opens rather
-        // than at the first frame each effect draws.
-        host.monitor.warm_shaders();
+        // The effect pipelines are warmed after the window is up, not here:
+        // compiling all 85 of them is a second of every core on this
+        // machine, and doing it before the window made the window wait for
+        // it. See the end of `lib::start`.
         Ok(host)
     }
 }

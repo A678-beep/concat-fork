@@ -3241,6 +3241,19 @@ impl Studio {
         studio.library[1].group = -1;
         studio
     }
+
+    /// Walks the local AI plugins' folders on a worker, for the sizes the
+    /// AI panel shows. The launch does not wait for it: a digital-human
+    /// plugin is an embedded Python environment of about fourteen thousand
+    /// files, and the panel can draw its rows with the sizes it already has
+    /// on file (see `plugins::scan`) for the second it takes to walk them.
+    pub fn measure_plugin_sizes(&mut self) {
+        let dirs = self.host.dirs.clone();
+        crate::host::spawn(
+            move || concat_host::plugins::sizes(&dirs),
+            |studio, _, _, sizes| studio.ai.apply_sizes(sizes),
+        );
+    }
 }
 
 /// How a detach goes, or why it cannot; see [`detach_plan`].

@@ -261,7 +261,10 @@ fn piper_plugin(dirs: &AppDirs) -> Option<concat_host::plugins::Plugin> {
 
 /// 本机有没有可用的本地中文音色（Piper 插件已安装）。
 pub fn piper_available(dirs: &AppDirs) -> bool {
-    piper_plugin(dirs).is_some()
+    // 0.25.0: from a per-run cache. This is asked every time the speech
+    // pane's model list is rebuilt, and that is every publish; a full scan
+    // there walked every plugin folder on the window's thread.
+    concat_host::plugins::piper_installed(dirs)
 }
 
 /// Whether this build offers a model at all: the phone's voice only where

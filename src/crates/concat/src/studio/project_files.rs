@@ -4,12 +4,38 @@
 
 use super::*;
 
+/// The project being opened, timed phase by phase. The log already says how
+/// long an open took; this says where it went, which is what a person
+/// reporting "opening takes seconds" is asked for. One at a time, on the
+/// window's thread, like every open.
+static OPENING_PROJECT: std::sync::Mutex<Option<concat_log::Op>> = std::sync::Mutex::new(None);
+
+/// Begins the report unless one is already open (`open_project_at` begins it
+/// before reading the folder, so a read that fails is timed too).
+fn start_project_op() {
+    if let Ok(mut slot) = OPENING_PROJECT.lock()
+        && slot.is_none()
+    {
+        *slot = Some(concat_log::op!("project"));
+    }
+}
+
+/// Ends the phase under way and begins `name`.
+fn project_step(name: &str) {
+    if let Ok(mut slot) = OPENING_PROJECT.lock()
+        && let Some(op) = slot.as_mut()
+    {
+        op.step(name);
+    }
+}
+
 impl Studio {
     // ── projects ──
 
     /// Opens a project as the session and leaves the launch screen, or
     /// says why it could not.
     pub fn open_project(&mut self, info: ProjectInfo) -> Result<(), String> {
+        start_project_op();
         let name = info.name.clone();
         let began = std::time::Instant::now();
         let opened = self.open_project_timed(info);
@@ -40,6 +66,25 @@ impl Studio {
                 log::error!("project: opening {name} failed: {error}; {left}");
             }
         }
+        if let Some(op) = OPENING_PROJECT.lock().ok().and_then(|mut slot| slot.take()) {
+            match &opened {
+                Ok(()) => {
+                    let detail = match self.session.as_ref() {
+                        Some(session) => {
+                            let timeline = session.project().active();
+                            let tracks = match timeline.tracks.len() {
+                                1 => "1 track".to_owned(),
+                                count => format!("{count} tracks"),
+                            };
+                            format!("{name} · {tracks}, {}", clips_of(timeline.clips.len()))
+                        }
+                        None => name.clone(),
+                    };
+                    op.done(detail);
+                }
+                Err(error) => op.failed(error),
+            }
+        }
         opened
     }
 
@@ -47,17 +92,26 @@ impl Studio {
     /// Recents do. A folder that will not read says so in the log as
     /// [`Studio::open_project`] does for one that will not open.
     pub fn open_project_at(&mut self, path: &str) -> Result<(), String> {
-        let info = projects::open(path).inspect_err(|error| {
-            let left = if self.session.is_some() {
-                format!("{} stays open", self.project_name)
-            } else {
-                "the launch screen stays up".to_owned()
-            };
-            log::error!(
-                "project: reading {} failed: {error}; {left}",
-                file_name_of(path)
-            );
-        })?;
+        start_project_op();
+        let info = match projects::open(path) {
+            Ok(info) => info,
+            Err(error) => {
+                if let Some(op) = OPENING_PROJECT.lock().ok().and_then(|mut slot| slot.take()) {
+                    op.failed(&error);
+                }
+                let left = if self.session.is_some() {
+                    format!("{} stays open", self.project_name)
+                } else {
+                    "the launch screen stays up".to_owned()
+                };
+                log::error!(
+                    "project: reading {} failed: {error}; {left}",
+                    file_name_of(path)
+                );
+                return Err(error);
+            }
+        };
+        project_step("read");
         self.open_project(info)
     }
 
@@ -105,6 +159,7 @@ impl Studio {
         }
         match Session::open_info(&info) {
             Ok(session) => {
+                project_step("session");
                 if let Err(error) = projects::remember(&self.host.dirs.config, &info) {
                     log::warn!(
                         "project: adding {} to Recents failed: {error}; it opens all the same",
@@ -136,6 +191,7 @@ impl Studio {
                         project_dir.display()
                     );
                 }
+                project_step("proxies");
                 self.session = Some(session);
                 // The relink dialog belongs to the project that opened it;
                 // this project's own check follows below.
@@ -173,6 +229,7 @@ impl Studio {
                 self.ensure_stabilizers();
                 self.ensure_voices();
                 self.ensure_regions();
+                project_step("requests");
 
                 // Effects this build no longer has, named once as the project
                 // opens: their links stay in the clips, marked not installed.

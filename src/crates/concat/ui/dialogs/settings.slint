@@ -671,12 +671,20 @@ export component SettingsDialog inherits Sheet {
     /// and not a model. Built from the same list, so the page and the paste
     /// cannot come apart.
     in property <string> system-report;
+    /// The last few launches' phase timings, drawn below the machine's
+    /// facts; see startup_report.rs.
+    in property <[SystemFactData]> startup-facts;
 
     callback page-changed(index: int);
     /// Opens the folder this run's log is being written into.
     /// 打开许可证或源码页面（AGPL 要求的入口）。
     callback open-license(url: string);
     callback show-log();
+    /// Deletes what the app can make again - the downloaded asset cache and
+    /// the drawn cards and titles - never a project or a sound.
+    callback clear-asset-cache();
+    /// Deletes the plugin download cache; installed plugins stay.
+    callback clear-plugin-cache();
     callback language-changed(index: int);
     callback log-level-changed(index: int);
     /// The theme, chosen rather than flipped. A toggle in the strip could only
@@ -1962,6 +1970,60 @@ export component SettingsDialog inherits Sheet {
                     spacing: 0px;
 
                     for fact in root.system-facts: FactRow {
+                        label: fact.label;
+                        value: fact.value;
+                    }
+                }
+
+                // 0.25.0: how long the last launches took, phase by phase,
+                // and the two cleanups that clear what the app can make
+                // again. This is what support asks for when the window feels
+                // slow: one block, no file to find. See startup_report.rs.
+                Rectangle {
+                    height: 1px;
+                    background: Theme.line;
+                }
+
+                Rectangle {
+                    height: 30px;
+
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        spacing: Theme.gap;
+
+                        Text {
+                            text: "启动诊断";
+                            color: Theme.fg;
+                            font-size: Theme.fs-lg;
+                            font-weight: Theme.weight-title;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle { horizontal-stretch: 1; }
+
+                        IconButton {
+                            glyph: Glyph.reset;
+                            label: "清理素材缓存";
+                            icon-size: 13px;
+                            clicked => { root.clear-asset-cache(); }
+                        }
+
+                        IconButton {
+                            glyph: Glyph.reset;
+                            label: "清理插件缓存";
+                            icon-size: 13px;
+                            clicked => { root.clear-plugin-cache(); }
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    padding: 14px;
+                    padding-top: 4px;
+                    spacing: 0px;
+
+                    for fact in root.startup-facts: FactRow {
                         label: fact.label;
                         value: fact.value;
                     }
