@@ -74,6 +74,10 @@ pub mod projects;
 pub mod proxy;
 pub mod record;
 pub mod reverse;
+/// 星籁电影 / 剧集制作向导（0.3.5）：平台 `/movie/*` 与 `/director/*` 的桌面端。
+pub mod movie;
+/// AI 工程包导入（0.3.5）：project_pack v1 的 zip → 桌面工程。
+pub mod projectpack;
 /// 本地数字人（Wav2Lip / SadTalker）引擎：照片 + 配音 → 对口型视频。
 pub mod sadtalker;
 mod route;

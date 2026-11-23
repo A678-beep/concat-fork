@@ -27,6 +27,8 @@ pub mod export;
 pub mod glide;
 pub mod media_bin;
 pub mod monitor;
+/// 电影 / 剧集制作向导（0.3.5）：15 步流程、两条生成链、DAG 脏镜头。
+pub mod movie;
 pub mod pace;
 pub mod project;
 pub mod relink;
@@ -70,6 +72,8 @@ pub enum Msg {
     Media(media_bin::MediaMsg),
     /// To the monitor.
     Monitor(monitor::MonitorMsg),
+    /// 到电影 / 剧集制作向导。
+    Movie(movie::MovieMsg),
     /// To the timeline's view.
     Timeline(timeline::TimelineMsg),
     /// To the voiceover take.

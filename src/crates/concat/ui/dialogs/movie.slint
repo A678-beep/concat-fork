@@ -1,0 +1,1102 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 XingLai contributors
+
+// 星籁电影 / 剧集制作向导（0.3.5）。
+//
+// 15 步照真实剧组的制作流程 SOP 排列：每步左边写「这一步在真实剧组叫什么」，
+// 右边是默认值 + 可改的表单；简单模式只填一句话 premise、一键全流程，专业模式
+// 每步都能改。改任一步只重跑受影响的东西（DAG，见 Rust 侧的脏数据计算）；
+// 平台侧「只重跑受影响镜头」用导演编排器的 shot_nos 断点续跑实现。
+//
+// 所有字段由 Rust 写好，输入框的回写与按钮都汇成一条 action(action, index, text)。
+
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { Button, Field, Modal, Progress } from "../primitives/modal.slint";
+import { SegmentedControl } from "../primitives/segmented-control.slint";
+import { Select } from "../primitives/select.slint";
+import { PaneScroll } from "../workspace/pane.slint";
+
+/// 电影 / 剧集向导的状态。字段由 Rust 写好；输入框的回写走 action 回调。
+export struct MovieData {
+    open: bool,
+    /// 0..14，对应 15 步。
+    step: int,
+    /// 简单模式（true）/ 专业模式（false）。
+    simple: bool,
+    busy: bool,
+    progress: float,
+    stage: string,
+    message: string,
+    account-line: string,
+    signed-in: bool,
+    admin: bool,
+    web: string,
+    limits: string,
+    /// 这一步在真实剧组叫什么 + 一句说明。
+    step-name: string,
+    step-note: string,
+    // ── ① 类型 ──
+    type-index: int,
+    type-count: int,
+    type-desc: string,
+    aspect-line: string,
+    // ── ② 一句话 / 剧本 ──
+    premise: string,
+    title: string,
+    logline: string,
+    has-plan: bool,
+    // ── ③⑥ 分镜（镜头号 / 景别 / 运镜 / 时长 / 台词）──
+    shot-index: int,
+    shot-count: int,
+    shot-size: string,
+    shot-camera: string,
+    shot-scene: string,
+    shot-action: string,
+    shot-line: string,
+    shot-dur: float,
+    shot-dur-text: string,
+    // ── ④ 角色 ──
+    char-index: int,
+    char-count: int,
+    char-name: string,
+    char-look: string,
+    char-voice: string,
+    // ── ⑤ 场景 / 服化道 ──
+    scene-index: int,
+    scene-count: int,
+    scene-text: string,
+    wardrobe: string,
+    // ── ⑦ 预演 ──
+    preview-line: string,
+    // ── ⑧ 档位 / 预算 ──
+    tier: int,
+    budget: string,
+    estimate: string,
+    credits: string,
+    /// 0 导演编排器（可单镜重拍）/ 1 电影成片管线（2.39:1）
+    engine: int,
+    engine-line: string,
+    // ── ⑨ 生成 ──
+    has-task: bool,
+    task-stage: string,
+    task-status: string,
+    task-progress: float,
+    task-line: string,
+    can-cancel: bool,
+    // ── ⑩ 审片 ──
+    take-index: int,
+    take-count: int,
+    take-state: string,
+    take-note: string,
+    dirty: string,
+    // ── ⑪ 调色 ──
+    lut: int,
+    contrast: string,
+    saturation: string,
+    grain: int,
+    grain-text: string,
+    // ── ⑫ 声音 ──
+    music: bool,
+    lipsync: bool,
+    loudness: int,
+    // ── ⑬ 字幕 / 演职人员表 ──
+    subtitles: bool,
+    ai-mark: bool,
+    cast: string,
+    crew: string,
+    // ── ⑭ 成片预览 ──
+    film-url: string,
+    vertical-url: string,
+    qc-line: string,
+    cost-line: string,
+    has-film: bool,
+    has-qc: bool,
+    // ── ⑮ 交付 ──
+    pack-line: string,
+    pack-url: string,
+    pack-id: string,
+    interop-line: string,
+    has-pack: bool,
+    // ── 全局 ──
+    can-back: bool,
+    can-next: bool,
+    current-name: string,
+}
+
+component Note inherits Text {
+    color: Theme.fg-dim;
+    font-size: Theme.fs-xs;
+    wrap: word-wrap;
+}
+
+component Hint inherits Text {
+    color: Theme.fg-muted;
+    font-size: Theme.fs-sm;
+    wrap: word-wrap;
+}
+
+component AreaText inherits Rectangle {
+    in property <string> value;
+    in property <string> placeholder;
+    in property <length> box-height: 72px;
+    callback edited(text: string);
+
+    property <string> draft;
+    init => { root.draft = root.value; }
+    changed value => { if (!input.has-focus) { root.draft = root.value; } }
+
+    min-height: root.box-height;
+    max-height: root.box-height;
+    background: Theme.field;
+    border-radius: Theme.r;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Colors.transparent;
+    clip: true;
+
+    input := TextInput {
+        x: 9px;
+        y: 7px;
+        width: parent.width - 18px;
+        height: parent.height - 14px;
+        text <=> root.draft;
+        edited => { root.edited(self.text); }
+        color: Theme.fg;
+        font-size: Theme.fs;
+        single-line: false;
+        wrap: word-wrap;
+        selection-background-color: Theme.accent;
+        selection-foreground-color: Theme.on-accent;
+    }
+
+    if root.draft == "" && !input.has-focus: Text {
+        x: 9px;
+        y: 7px;
+        width: parent.width - 18px;
+        text: root.placeholder;
+        color: Theme.fg-dim;
+        font-size: Theme.fs;
+        wrap: word-wrap;
+    }
+}
+
+component Choice inherits VerticalLayout {
+    in property <string> title;
+    in property <[string]> options;
+    in property <int> current;
+    in property <length> field-width: 130px;
+    callback changed(index: int);
+
+    spacing: 2px;
+
+    Text { text: root.title; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+    Select {
+        width: root.field-width;
+        options: root.options;
+        current: root.current;
+        changed(index) => { root.changed(index); }
+    }
+}
+
+component PickRow inherits Rectangle {
+    in property <string> text;
+    in property <bool> current;
+    callback picked();
+
+    height: 26px;
+    border-radius: Theme.r-sm;
+    background: root.current ? Theme.accent-soft
+        : touch.has-hover ? Theme.field-hover
+        : Colors.transparent;
+
+    Text {
+        x: 6px;
+        width: parent.width - 12px;
+        height: parent.height;
+        text: root.text;
+        color: root.current ? Theme.accent : Theme.fg-muted;
+        font-size: Theme.fs-sm;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+}
+
+/// 左边的一步：序号 + 名字 + 真实剧组叫法；当前项高亮，做完的打勾。
+component StepRow inherits Rectangle {
+    in property <int> index;
+    in property <string> label;
+    in property <bool> current;
+    in property <bool> done;
+    callback picked();
+
+    height: 38px;
+    border-radius: Theme.r-sm;
+    background: root.current ? Theme.accent-soft
+        : touch.has-hover ? Theme.field-hover
+        : Colors.transparent;
+
+    HorizontalLayout {
+        padding-left: 7px;
+        padding-right: 6px;
+        spacing: 7px;
+
+        Text {
+            width: 20px;
+            text: root.index < 9 ? "0" + (root.index + 1) : "\{root.index + 1}";
+            color: root.current ? Theme.accent : Theme.fg-dim;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.label;
+            color: root.current ? Theme.accent : (root.done ? Theme.fg-muted : Theme.fg);
+            font-size: Theme.fs-sm;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Icon {
+            glyph: Glyph.check;
+            size: 10px;
+            tint: Theme.fg-dim;
+            visible: root.done && !root.current;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+}
+
+export component MovieDialog inherits Modal {
+    in property <MovieData> data;
+    /// 类型名（9 类）。
+    in property <[string]> type-labels;
+    /// 分镜行。
+    in property <[string]> shot-rows;
+    /// 角色行。
+    in property <[string]> char-rows;
+    /// 场景行。
+    in property <[string]> scene-rows;
+    /// 生成时逐镜状态行。
+    in property <[string]> task-rows;
+    /// 审片 take 行。
+    in property <[string]> take-rows;
+    /// 交付清单行。
+    in property <[string]> delivery-rows;
+    /// 15 步的完成标记（0/1）。
+    in property <[int]> done;
+
+    /// 面板上的每个动作。
+    callback action(action: string, index: int, text: string);
+
+    open: root.data.open;
+    title: "电影 · 剧集制作向导";
+    glyph: Glyph.film;
+    surface-width: 1040px;
+    surface-height: 780px;
+
+    property <[string]> step-labels: [
+        "类型与规格", "一句话 premise", "剧本定稿", "角色设定", "场景 / 服化道",
+        "分镜表", "预演", "模型档位与预算", "生成（逐镜）", "审片（take 板）",
+        "调色", "声音", "字幕 / 演职人员表", "成片预览", "交付",
+    ];
+    property <[string]> tier-labels: ["标准档 · 720P 量产", "高级档 · 720P 质量", "旗舰档 · 1080P 口型"];
+    property <[string]> engine-labels: [
+        "导演编排器（可单镜重拍、断点续跑）", "电影成片管线（2.39:1 / LUT / 片头尾 / QC）",
+    ];
+    property <[string]> lut-labels: [
+        "青橙电影", "柯达 2383", "冷夜", "暖剧", "漂白旁路", "干净品牌", "不调色",
+    ];
+    property <[string]> loudness-labels: ["流媒体 -16 LUFS", "广播 -23 LUFS"];
+    property <[string]> premise-samples: [
+        "都市情感：加班到凌晨的女主，在天台遇到同样没回家的邻居，两个人聊起了留下还是离开。",
+        "悬疑：深夜值班的保安在监控里看见一个不存在的人，走廊的灯一盏盏熄灭。",
+        "品牌广告：一双跑鞋从清晨的街道跑进山里，最后停在日出前的山顶。",
+    ];
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 8px;
+
+        // ── 标题行：模式开关 / 账号 / 平台限制 ──
+        HorizontalLayout {
+            height: 30px;
+            spacing: 10px;
+
+            Text {
+                text: "电影 · 剧集制作向导";
+                color: Theme.fg;
+                font-size: Theme.fs-xl;
+                font-weight: Theme.weight-title;
+                vertical-alignment: center;
+            }
+
+            SegmentedControl {
+                width: 190px;
+                options: ["简单模式", "专业模式"];
+                current: root.data.simple ? 0 : 1;
+                changed(index) => { root.action("mode", index, ""); }
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Text {
+                text: root.data.account-line;
+                color: root.data.signed-in ? Theme.fg-muted : Theme.warn;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+                overflow: elide;
+                max-width: 300px;
+            }
+            if root.data.admin: Text {
+                text: "内部账号 · 免扣积分";
+                color: Theme.accent;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+            }
+            Button {
+                label: "刷新类型表";
+                ghost: true;
+                enabled: !root.data.busy;
+                clicked => { root.action("refresh", 0, ""); }
+            }
+        }
+
+        Hint { text: root.data.limits; }
+
+        Rectangle { height: 1px; background: Theme.line; }
+
+        // ── 主体：左 15 步，右这一步 ──
+        HorizontalLayout {
+            vertical-stretch: 1;
+            spacing: 12px;
+
+            // 左栏
+            Rectangle {
+                width: 214px;
+                background: Theme.panel;
+                border-radius: Theme.r;
+                clip: true;
+
+                PaneScroll {
+                    width: parent.width;
+                    height: parent.height;
+                    VerticalLayout {
+                        padding: 6px;
+                        spacing: 1px;
+
+                        for label[index] in root.step-labels: StepRow {
+                            index: index;
+                            label: label;
+                            current: index == root.data.step;
+                            done: root.done.length > index && root.done[index] == 1;
+                            picked => { root.action("step", index, ""); }
+                        }
+
+                        Rectangle { height: 6px; }
+                        Note {
+                            text: "点任意一步就能回头改。改完只重跑下游：角色 → 涉及该角色的镜头；一镜 → 只重跑这一镜（平台侧 shot_nos 续跑）。";
+                        }
+                    }
+                }
+            }
+
+            // 右栏：这一步的内容
+            Rectangle {
+                horizontal-stretch: 1;
+                background: Theme.panel;
+                border-radius: Theme.r;
+                clip: true;
+
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 8px;
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: "步骤 " + (root.data.step + 1) + "/15 · " + root.data.current-name;
+                            color: Theme.fg;
+                            font-size: Theme.fs-lg;
+                            font-weight: Theme.weight-title;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text {
+                            text: "真实剧组： " + root.data.step-name;
+                            color: Theme.accent;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                        }
+                    }
+                    Note { text: root.data.step-note; }
+
+                    Rectangle { height: 1px; background: Theme.line; }
+
+                    PaneScroll {
+                        vertical-stretch: 1;
+                        height: 476px;
+
+                        VerticalLayout {
+                            padding-right: 6px;
+                            spacing: 8px;
+
+                            // ═══════ ① 类型与规格 ═══════
+                            if root.data.step == 0: VerticalLayout {
+                                spacing: 8px;
+                                Hint {
+                                    text: "先定片种：电影 / 剧集 / 广告 / 宣传片 / 纪录片 / 短视频 / 动画 / 游戏CG / MV。类型决定画幅、帧率、调色倾向、镜头语言配比与默认响度，后 14 步都以它为默认值，随时可回来改。";
+                                }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    for label[i] in root.type-labels: Button {
+                                        label: label;
+                                        primary: i == root.data.type-index;
+                                        ghost: i != root.data.type-index;
+                                        clicked => { root.action("type", i, ""); }
+                                    }
+                                }
+                                Rectangle { height: 4px; }
+                                Text {
+                                    text: "已选： " + (root.type-labels.length > root.data.type-index ? root.type-labels[root.data.type-index] : "—");
+                                    color: Theme.fg;
+                                    font-size: Theme.fs;
+                                    font-weight: Theme.weight-title;
+                                }
+                                Hint { text: root.data.type-desc; }
+                                Note { text: root.data.aspect-line; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { label: "下一步：写一句话 →"; primary: true; clicked => { root.action("step", 1, ""); } }
+                                }
+                            }
+
+                            // ═══════ ② 一句话 premise ═══════
+                            if root.data.step == 1: VerticalLayout {
+                                spacing: 8px;
+                                Hint {
+                                    text: "写一句人话，平台按类型把它扩成 3–6 镜、15–30 秒的电影化分镜（含景别 / 运镜 / 声音设计 / 调色意图），再把每一镜的时长、台词、角色给你改。这一步只做规划，不产生模型费用。";
+                                }
+                                AreaText {
+                                    box-height: 96px;
+                                    value: root.data.premise;
+                                    placeholder: "例：雨夜，一个外卖员在地铁末班车上遇到多年未见的初恋，两人只有一站路的时间把误会说开。";
+                                    edited(text) => { root.action("premise", 0, text); }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    for sample[i] in root.premise-samples: Button {
+                                        label: "示例 " + (i + 1);
+                                        ghost: true;
+                                        clicked => { root.action("premise-sample", i, ""); }
+                                    }
+                                    Button {
+                                        label: root.data.busy ? "正在生成分镜…" : "AI 生成剧本与分镜";
+                                        primary: true;
+                                        enabled: !root.data.busy && root.data.premise != "";
+                                        clicked => { root.action("generate-plan", 0, ""); }
+                                    }
+                                    Button {
+                                        label: "一键全流程（简单模式）";
+                                        primary: true;
+                                        enabled: !root.data.busy && root.data.premise != "";
+                                        clicked => { root.action("generate-all", 0, ""); }
+                                    }
+                                }
+                                if root.data.has-plan: VerticalLayout {
+                                    spacing: 4px;
+                                    Text {
+                                        text: "《" + root.data.title + "》 · " + root.data.logline;
+                                        color: Theme.fg;
+                                        font-size: Theme.fs-sm;
+                                        wrap: word-wrap;
+                                    }
+                                    Note { text: "分镜方案已就绪（" + root.data.shot-count + " 镜）。往下到「剧本定稿」「角色」「分镜表」逐项改，或直接去「生成」。"; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button { label: "看分镜表 →"; clicked => { root.action("step", 5, ""); } }
+                                        Button { label: "直接生成 →"; primary: true; clicked => { root.action("step", 8, ""); } }
+                                    }
+                                }
+                            }
+
+                            // ═══════ ③ 剧本定稿 ═══════
+                            if root.data.step == 2: VerticalLayout {
+                                spacing: 8px;
+                                Hint {
+                                    text: "真实剧组这一步叫「剧本定稿 / 分场」。片名、一句话卖点、每一镜的画面与台词都在这里定稿；改镜头改的是分镜数据，生成时按它出图出片。";
+                                }
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    VerticalLayout {
+                                        width: 260px;
+                                        spacing: 4px;
+                                        Field { value: root.data.title; placeholder: "片名"; edited(text) => { root.action("title", 0, text); } }
+                                        Field { value: root.data.logline; placeholder: "一句话卖点 / logline"; edited(text) => { root.action("logline", 0, text); } }
+                                    }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 4px;
+                                        Text { text: "分镜（" + root.data.shot-count + " 镜）"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                                        PaneScroll {
+                                            height: 150px;
+                                            VerticalLayout {
+                                                alignment: start;
+                                                for row[index] in root.shot-rows: PickRow {
+                                                    text: row;
+                                                    current: index == root.data.shot-index;
+                                                    picked => { root.action("shot", index, ""); }
+                                                }
+                                            }
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 6px;
+                                            Button { label: "＋镜头"; ghost: true; clicked => { root.action("shot-add", 0, ""); } }
+                                            Button { label: "删镜头"; ghost: true; enabled: root.data.shot-count > 1; clicked => { root.action("shot-remove", 0, ""); } }
+                                            Button { label: "上移"; ghost: true; clicked => { root.action("shot-up", 0, ""); } }
+                                            Button { label: "下移"; ghost: true; clicked => { root.action("shot-down", 0, ""); } }
+                                        }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Text { text: "当前镜："; color: Theme.fg-dim; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                    Text { text: "景别 " + root.data.shot-size + " · 运镜 " + root.data.shot-camera; color: Theme.fg-muted; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                }
+                                AreaText {
+                                    box-height: 54px;
+                                    value: root.data.shot-scene;
+                                    placeholder: "这一镜的画面描述（场景 / 人物 / 光线）";
+                                    edited(text) => { root.action("shot-scene", 0, text); }
+                                }
+                                AreaText {
+                                    box-height: 44px;
+                                    value: root.data.shot-action;
+                                    placeholder: "动作 / 表演（画面里发生什么）";
+                                    edited(text) => { root.action("shot-action", 0, text); }
+                                }
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    Field {
+                                        width: 360px;
+                                        value: root.data.shot-line;
+                                        placeholder: "台词（空着 = 无对白）";
+                                        edited(text) => { root.action("shot-line", 0, text); }
+                                    }
+                                    Field {
+                                        width: 92px;
+                                        value: root.data.shot-dur-text;
+                                        placeholder: "时长秒";
+                                        edited(text) => { root.action("shot-dur", 0, text); }
+                                    }
+                                    Text {
+                                        text: "对白镜会自动配口型（旗舰档）";
+                                        color: Theme.fg-dim;
+                                        font-size: Theme.fs-xs;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                Note { text: root.data.dirty; }
+                                Button { label: "下一步：角色设定 →"; primary: true; clicked => { root.action("step", 3, ""); } }
+                            }
+
+                            // ═══════ ④ 角色设定 ═══════
+                            if root.data.step == 3: VerticalLayout {
+                                spacing: 8px;
+                                Hint {
+                                    text: "真实剧组这一步叫「选角 / 定妆」。角色卡的外貌会写进每一镜的提示词，定妆照作为参考图保证同一张脸；改一个角色只重跑涉及该角色的镜头。";
+                                }
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    VerticalLayout {
+                                        width: 220px;
+                                        spacing: 4px;
+                                        Text { text: "角色卡（" + root.data.char-count + " 张）"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                                        PaneScroll {
+                                            height: 140px;
+                                            VerticalLayout {
+                                                alignment: start;
+                                                for row[index] in root.char-rows: PickRow {
+                                                    text: row;
+                                                    current: index == root.data.char-index;
+                                                    picked => { root.action("char", index, ""); }
+                                                }
+                                            }
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 6px;
+                                            Button { label: "＋角色"; ghost: true; clicked => { root.action("char-add", 0, ""); } }
+                                            Button { label: "删角色"; ghost: true; clicked => { root.action("char-remove", 0, ""); } }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 6px;
+                                        Field { value: root.data.char-name; placeholder: "姓名"; edited(text) => { root.action("char-name", 0, text); } }
+                                        AreaText {
+                                            box-height: 64px;
+                                            value: root.data.char-look;
+                                            placeholder: "外貌 / 年龄 / 气质 / 服装（写进提示词）";
+                                            edited(text) => { root.action("char-look", 0, text); }
+                                        }
+                                        Field { value: root.data.char-voice; placeholder: "音色（对白配音用，如：女声·温柔叙事）"; edited(text) => { root.action("char-voice", 0, text); } }
+                                    }
+                                }
+                                Note { text: root.data.dirty; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { label: "下一步：场景 / 服化道 →"; primary: true; clicked => { root.action("step", 4, ""); } }
+                                }
+                            }
+
+                            // ═══════ ⑤ 场景 / 服化道 ═══════
+                            if root.data.step == 4: VerticalLayout {
+                                spacing: 8px;
+                                Hint {
+                                    text: "真实剧组这一步叫「堪景 / 美术 & 服化道」。场景卡由分镜自动归类，统一风格与光线；服化道写这一部的整体质感，会并进每一镜的提示词。";
+                                }
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    VerticalLayout {
+                                        width: 280px;
+                                        spacing: 4px;
+                                        Text { text: "场景卡（" + root.data.scene-count + " 个）"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                                        PaneScroll {
+                                            height: 150px;
+                                            VerticalLayout {
+                                                alignment: start;
+                                                for row[index] in root.scene-rows: PickRow {
+                                                    text: row;
+                                                    current: index == root.data.scene-index;
+                                                    picked => { root.action("scene", index, ""); }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 6px;
+                                        AreaText {
+                                            box-height: 82px;
+                                            value: root.data.scene-text;
+                                            placeholder: "场景描述（内 / 外景、时间、天气、空间）";
+                                            edited(text) => { root.action("scene-text", 0, text); }
+                                        }
+                                        AreaText {
+                                            box-height: 62px;
+                                            value: root.data.wardrobe;
+                                            placeholder: "服化道：服装、化妆、道具、整体质感";
+                                            edited(text) => { root.action("wardrobe", 0, text); }
+                                        }
+                                    }
+                                }
+                                Note { text: "改场景 / 服化道会让所有用到它的镜头变脏；生成时只重跑这些镜头。"; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { label: "下一步：分镜表 →"; primary: true; clicked => { root.action("step", 5, ""); } }
+                                }
+                            }
+
+                            // ═══════ ⑥ 分镜表 ═══════
+                            if root.data.step == 5: VerticalLayout {
+                                spacing: 8px;
+                                Hint {
+                                    text: "真实剧组这一步叫「故事板 / shot list」。一镜一行：景别、运镜、时长、台词；改任一格，下次生成只重跑这一镜。";
+                                }
+                                PaneScroll {
+                                    height: 160px;
+                                    VerticalLayout {
+                                        alignment: start;
+                                        for row[index] in root.shot-rows: PickRow {
+                                            text: row;
+                                            current: index == root.data.shot-index;
+                                            picked => { root.action("shot", index, ""); }
+                                        }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Button { label: "＋镜头"; ghost: true; clicked => { root.action("shot-add", 0, ""); } }
+                                    Button { label: "删镜头"; ghost: true; enabled: root.data.shot-count > 1; clicked => { root.action("shot-remove", 0, ""); } }
+                                    Button { label: "上移"; ghost: true; clicked => { root.action("shot-up", 0, ""); } }
+                                    Button { label: "下移"; ghost: true; clicked => { root.action("shot-down", 0, ""); } }
+                                }
+                                AreaText {
+                                    box-height: 48px;
+                                    value: root.data.shot-scene;
+                                    placeholder: "画面描述";
+                                    edited(text) => { root.action("shot-scene", 0, text); }
+                                }
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    Field { width: 150px; value: root.data.shot-size; placeholder: "景别"; edited(text) => { root.action("shot-size", 0, text); } }
+                                    Field { width: 260px; value: root.data.shot-camera; placeholder: "运镜"; edited(text) => { root.action("shot-camera", 0, text); } }
+                                    Field { width: 76px; value: root.data.shot-dur-text; placeholder: "秒"; edited(text) => { root.action("shot-dur", 0, text); } }
+                                }
+                                Field { value: root.data.shot-line; placeholder: "台词（空着 = 无对白）"; edited(text) => { root.action("shot-line", 0, text); } }
+                                Note { text: root.data.dirty; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { label: "下一步：预演 →"; primary: true; clicked => { root.action("step", 6, ""); } }
+                                }
+                            }
+
+                            // ═══════ ⑦ 预演 ═══════
+                            if root.data.step == 6: VerticalLayout {
+                                spacing: 8px;
+                                Hint {
+                                    text: "真实剧组这一步叫「动态预演 / previz」。本版的预演是故事板卡片 + 低配快速出片：选中「低清预演」时按标准档先出 720P 小样，确认节奏后再出正式片；赶时间可以直接跳过。";
+                                }
+                                Text { text: root.data.preview_line; color: Theme.fg-muted; font-size: Theme.fs-sm; wrap: word-wrap; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { label: "跳过预演 →"; primary: true; clicked => { root.action("step", 7, ""); } }
+                                    Button { label: "低清预演（标准档 720P）"; clicked => { root.action("preview-run", 0, ""); } }
+                                }
+                                Note { text: "预演不产生额外费用：它和正式生成走同一条渲染链，只是档位低、镜头少。"; }
+                            }
+
+                            // ═══════ ⑧ 档位与预算 ═══════
+                            if root.data.step == 7: VerticalLayout {
+                                spacing: 8px;
+                                Hint {
+                                    text: "真实剧组这一步叫「预算会 / 排产」。选模型档位与预算：规划免费，执行前会给出预估积分（1 积分 = ¥1）；片种、镜头数、对白镜、口型都会影响成本。";
+                                }
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    Choice {
+                                        title: "模型档位";
+                                        options: root.tier-labels;
+                                        current: root.data.tier;
+                                        field-width: 200px;
+                                        changed(index) => { root.action("tier", index, ""); }
+                                    }
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        Text { text: "预算（元）"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                                        Field {
+                                            width: 96px;
+                                            value: root.data.budget;
+                                            placeholder: "25";
+                                            edited(text) => { root.action("budget", 0, text); }
+                                        }
+                                    }
+                                }
+                                VerticalLayout {
+                                    spacing: 2px;
+                                    Text { text: "生成引擎"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                                    Select {
+                                        options: root.engine-labels;
+                                        current: root.data.engine;
+                                        changed(index) => { root.action("engine", index, ""); }
+                                    }
+                                }
+                                Note { text: root.data.engine-line; }
+                                Text { text: "预估：" + root.data.estimate; color: Theme.fg; font-size: Theme.fs; font-weight: Theme.weight-title; }
+                                Text { text: root.data.credits; color: Theme.fg-muted; font-size: Theme.fs-sm; }
+                                Note { text: "规划阶段免费；点「开始生成」才产生模型费用。超预算会先被平台拒绝并给出去哪儿调。"; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { label: "开始生成 →"; primary: true; enabled: !root.data.busy && root.data.has-plan; clicked => { root.action("run", 0, ""); } }
+                                }
+                            }
+
+                            // ═══════ ⑨ 生成 ═══════
+                            if root.data.step == 8: VerticalLayout {
+                                spacing: 8px;
+                                Hint {
+                                    text: "真实剧组这一步叫「拍摄 / 制作进行」。逐镜生成，每镜都能看到状态；2C2G 单机串行，30 秒短片约 8–20 分钟，可离开这一步去做别的，任务在平台上继续跑。";
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        text: root.data.task-line;
+                                        color: Theme.fg-muted;
+                                        font-size: Theme.fs-sm;
+                                        vertical-alignment: center;
+                                        wrap: word-wrap;
+                                    }
+                                    Button {
+                                        label: root.data.busy ? "生成中…" : (root.data.has-task ? "查进度" : "开始生成");
+                                        primary: true;
+                                        enabled: !root.data.busy && root.data.has-plan;
+                                        clicked => { root.action("run", 0, ""); }
+                                    }
+                                    Button {
+                                        label: "停止等待";
+                                        ghost: true;
+                                        enabled: root.data.has-task && root.data.can-cancel;
+                                        clicked => { root.action("stop-wait", 0, ""); }
+                                    }
+                                }
+                                Progress { value: root.data.task-progress; }
+                                Text { text: root.data.task-stage; color: Theme.accent; font-size: Theme.fs-sm; wrap: word-wrap; }
+                                PaneScroll {
+                                    height: 180px;
+                                    VerticalLayout {
+                                        alignment: start;
+                                        for row in root.task-rows: Text {
+                                            text: row;
+                                            color: Theme.fg-muted;
+                                            font-size: Theme.fs-sm;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { label: "去审片 →"; primary: true; enabled: root.data.has-task; clicked => { root.action("step", 9, ""); } }
+                                }
+                                Note { text: "暂停 / 取消：平台任务一旦开跑不能从桌面暂停；「停止等待」只停这台机器的轮询，任务在服务端继续，回这一步点「查进度」还能接上。排队中的任务可由平台侧取消。如实说明，不做假按钮。"; }
+                            }
+
+                            // ═══════ ⑩ 审片 ═══════
+                            if root.data.step == 9: VerticalLayout {
+                                spacing: 8px;
+                                Hint {
+                                    text: "真实剧组这一步叫「看样片 / take 会」。逐镜看：通过 / 退回 / 批注；退回或改过的镜头点「重拍」只重跑这一镜（导演编排器 shot_nos 续跑），其余镜头与成片结构不动。";
+                                }
+                                PaneScroll {
+                                    height: 170px;
+                                    VerticalLayout {
+                                        alignment: start;
+                                        for row[index] in root.take-rows: PickRow {
+                                            text: row;
+                                            current: index == root.data.take-index;
+                                            picked => { root.action("take", index, ""); }
+                                        }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Text { text: root.data.take-state; color: Theme.fg-muted; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-stretch: 1; wrap: word-wrap; }
+                                    Button { label: "通过"; clicked => { root.action("take-pass", 0, ""); } }
+                                    Button { label: "退回"; danger: true; clicked => { root.action("take-reject", 0, ""); } }
+                                }
+                                AreaText {
+                                    box-height: 44px;
+                                    value: root.data.take-note;
+                                    placeholder: "批注：这一镜哪里不对（写给人看，也写进重拍原因）";
+                                    edited(text) => { root.action("take-note", 0, text); }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        label: "重拍这一镜（只重跑此镜）";
+                                        primary: true;
+                                        enabled: root.data.has-task && !root.data.busy;
+                                        clicked => { root.action("retake-shot", 0, ""); }
+                                    }
+                                    Button {
+                                        label: "重跑全部脏镜头";
+                                        enabled: root.data.has-task && !root.data.busy;
+                                        clicked => { root.action("retake-dirty", 0, ""); }
+                                    }
+                                    Rectangle { horizontal-stretch: 1; }
+                                    Button { label: "下一步：调色 →"; clicked => { root.action("step", 10, ""); } }
+                                }
+                                Note { text: root.data.dirty; }
+                            }
+
+                            // ═══════ ⑪ 调色 ═══════
+                            if root.data.step == 10: VerticalLayout {
+                                spacing: 8px;
+                                Hint {
+                                    text: "真实剧组这一步叫「调色 DI」。选 LUT 与曲线/对比/饱和/颗粒；入口再往下走是桌面调色页（导入工程包后逐镜精调、示波器监看）。电影成片管线会在服务端按这里的设置调色；导演编排器产物可导入时间线后在桌面调。";
+                                }
+                                Choice {
+                                    title: "LUT（电影成片管线）";
+                                    options: root.lut-labels;
+                                    current: root.data.lut;
+                                    field-width: 200px;
+                                    changed(index) => { root.action("lut", index, ""); }
+                                }
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    VerticalLayout { spacing: 2px; Text { text: "对比度"; color: Theme.fg-dim; font-size: Theme.fs-xs; } Field { width: 88px; value: root.data.contrast; placeholder: "1.05"; edited(text) => { root.action("contrast", 0, text); } } }
+                                    VerticalLayout { spacing: 2px; Text { text: "饱和度"; color: Theme.fg-dim; font-size: Theme.fs-xs; } Field { width: 88px; value: root.data.saturation; placeholder: "1.0"; edited(text) => { root.action("saturation", 0, text); } } }
+                                    VerticalLayout { spacing: 2px; Text { text: "颗粒"; color: Theme.fg-dim; font-size: Theme.fs-xs; } Field { width: 72px; value: root.data.grain-text; placeholder: "4"; edited(text) => { root.action("grain", 0, text); } } }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { label: "去桌面调色页（导入工程包后）"; clicked => { root.action("goto-grade", 0, ""); } }
+                                    Button { label: "下一步：声音 →"; primary: true; clicked => { root.action("step", 11, ""); } }
+                                }
+                            }
+
+                            // ═══════ ⑫ 声音 ═══════
+                            if root.data.step == 11: VerticalLayout {
+                                spacing: 8px;
+                                Hint {
+                                    text: "真实剧组这一步叫「声音设计 / 混录」。对白配音、环境底噪、音效、BGM 与 ducking 由管线自动做；响度按交付标准（流媒体 -16 / 广播 -23 LUFS）。AI 音频导演可逐句改配音与音效。";
+                                }
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    Choice { title: "对白 / 口型"; options: ["自动（对白镜配口型）", "关（不出对白）"]; current: root.data.lipsync ? 0 : 1; field-width: 170px; changed(index) => { root.action("lipsync", index, ""); } }
+                                    Choice { title: "BGM"; options: ["AI 配乐（自动 ducking）", "不用 BGM"]; current: root.data.music ? 0 : 1; field-width: 180px; changed(index) => { root.action("music", index, ""); } }
+                                    Choice { title: "交付响度"; options: root.loudness-labels; current: root.data.loudness; field-width: 160px; changed(index) => { root.action("loudness", index, ""); } }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { label: "打开 AI 音频导演"; clicked => { root.action("goto-audio", 0, ""); } }
+                                    Button { label: "下一步：字幕 / 演职人员表 →"; primary: true; clicked => { root.action("step", 12, ""); } }
+                                }
+                                Note { text: "配音 / 配乐 / 环境声 / 音效 / 响度在成片管线里是本地 ffmpeg 混录，不另收模型费；AI 音频导演是桌面插件（逐句改、可试听）。"; }
+                            }
+
+                            // ═══════ ⑬ 字幕 / 演职人员表 ═══════
+                            if root.data.step == 12: VerticalLayout {
+                                spacing: 8px;
+                                Hint {
+                                    text: "真实剧组这一步叫「字幕 / 上片尾」。字幕会同时给出烧录版与 SRT 文件；片尾演职人员表写 AI 生成声明与制作名单，合规要求必须留「AI 生成」标识。";
+                                }
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    Choice { title: "字幕"; options: ["烧录 + SRT（推荐）", "只要 SRT"]; current: root.data.subtitles ? 0 : 1; field-width: 180px; changed(index) => { root.action("subtitles", index, ""); } }
+                                    Choice { title: "AI 标识"; options: ["片尾 + 画面角标（合规）", "只在片尾"]; current: root.data.ai-mark ? 0 : 1; field-width: 190px; changed(index) => { root.action("ai-mark", index, ""); } }
+                                }
+                                Field { value: root.data.cast; placeholder: "主演（一行一个：角色 = 演员）"; edited(text) => { root.action("cast", 0, text); } }
+                                AreaText {
+                                    box-height: 64px;
+                                    value: root.data.crew;
+                                    placeholder: "演职人员表（一行一个：职位 = 姓名；AI 生成声明会自动补）";
+                                    edited(text) => { root.action("crew", 0, text); }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { label: "下一步：成片预览 →"; primary: true; clicked => { root.action("step", 13, ""); } }
+                                }
+                            }
+
+                            // ═══════ ⑭ 成片预览 ═══════
+                            if root.data.step == 13: VerticalLayout {
+                                spacing: 8px;
+                                Hint {
+                                    text: "真实剧组这一步叫「看片 / 终混确认」。横版 2.39:1 与竖版 9:16（若类型需要）各一条；预览用系统播放器/浏览器打开，也可以下载后丢进时间轴逐帧看。";
+                                }
+                                if !root.data.has-film: Text {
+                                    text: "还没有成片：先到「生成」把片子跑出来（或点下面的查询，任务可能已经完成）。";
+                                    color: Theme.warn;
+                                    font-size: Theme.fs-sm;
+                                    wrap: word-wrap;
+                                }
+                                if root.data.has-film: VerticalLayout {
+                                    spacing: 6px;
+                                    Text { text: "横版 / 主成片"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                                    Text { text: root.data.film-url; color: Theme.fg-muted; font-size: Theme.fs-xs; wrap: word-wrap; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button { label: "在浏览器预览"; primary: true; clicked => { root.action("preview-film", 0, ""); } }
+                                        Button { label: "下载并放进时间轴"; clicked => { root.action("import-film", 0, ""); } }
+                                    }
+                                    if root.data.vertical-url != "": VerticalLayout {
+                                        spacing: 4px;
+                                        Text { text: "竖版 / 9:16"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                                        Text { text: root.data.vertical-url; color: Theme.fg-muted; font-size: Theme.fs-xs; wrap: word-wrap; }
+                                        Button { label: "在浏览器预览竖版"; clicked => { root.action("preview-vertical", 0, ""); } }
+                                    }
+                                }
+                                if root.data.has-qc: VerticalLayout {
+                                    spacing: 4px;
+                                    Text { text: "QC 质检"; color: Theme.fg-dim; font-size: Theme.fs-xs; }
+                                    Hint { text: root.data.qc-line; }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { label: "下一步：交付 →"; primary: true; clicked => { root.action("step", 14, ""); } }
+                                }
+                            }
+
+                            // ═══════ ⑮ 交付 ═══════
+                            if root.data.step == 14: VerticalLayout {
+                                spacing: 8px;
+                                Hint {
+                                    text: "真实剧组这一步叫「交付 / DIT 交接」。成片、工程包（可回桌面改）、QC 报告、EDL/OTIO 交接文件与字幕 SRT 一起交；工程包可直接导入本软件，素材按相对路径随包。";
+                                }
+                                Text { text: root.data.pack-line; color: Theme.fg; font-size: Theme.fs-sm; wrap: word-wrap; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        label: "下载工程包";
+                                        primary: true;
+                                        enabled: root.data.has-pack;
+                                        clicked => { root.action("download-pack", 0, ""); }
+                                    }
+                                    Button {
+                                        label: "导入工程包到时间轴";
+                                        enabled: root.data.has-pack;
+                                        clicked => { root.action("import-pack", 0, ""); }
+                                    }
+                                    Button {
+                                        label: "在浏览器打开成片";
+                                        enabled: root.data.has-film;
+                                        clicked => { root.action("preview-film", 0, ""); }
+                                    }
+                                }
+                                PaneScroll {
+                                    height: 150px;
+                                    VerticalLayout {
+                                        alignment: start;
+                                        for row in root.delivery-rows: Text {
+                                            text: row;
+                                            color: Theme.fg-muted;
+                                            font-size: Theme.fs-sm;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                }
+                                Note { text: "工程包里含 project.json（完整交接清单）、原生工程文档、逐镜素材、字幕 SRT、extras 里的 EDL/OTIO/QC/LUT；文件名带 AI 生成标识。"; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { label: "重新检查任务"; ghost: true; clicked => { root.action("refresh-task", 0, ""); } }
+                                    Button { label: "完成 · 回到第一步看看" ; clicked => { root.action("step", 0, ""); } }
+                                }
+                            }
+
+                            Rectangle { height: 2px; }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 底部：进度 + 消息 + 上一步/下一步 ──
+        Rectangle {
+            height: 1px;
+            background: Theme.line;
+        }
+        HorizontalLayout {
+            height: 30px;
+            spacing: 8px;
+            Progress { width: 180px; value: root.data.progress; }
+            Text {
+                horizontal-stretch: 1;
+                text: root.data.message;
+                color: root.data.busy ? Theme.accent : Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Button {
+                label: "← 上一步";
+                ghost: true;
+                enabled: root.data.can-back;
+                clicked => { root.action("step", root.data.step - 1, ""); }
+            }
+            Button {
+                label: "下一步 →";
+                primary: true;
+                enabled: root.data.can-next;
+                clicked => { root.action("step", root.data.step + 1, ""); }
+            }
+        }
+    }
+}

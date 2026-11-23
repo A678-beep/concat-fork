@@ -110,6 +110,10 @@ export struct ExportData {
     matrix-plan: string,
     /// 矩阵导完之后的结果清单：一句「已导出 N 个版本」，下面列文件名。
     matrix-done: string,
+    /// AI 成片「4K 超分」：源低于 4K 时按 4K 导出（插值放大，非原生 4K）。
+    upscale: bool,
+    /// 超分那一行的小字：目标分辨率 + 「非原生」合规标注。
+    upscale-note: string,
 }
 
 // One tile of the summary block.
@@ -321,6 +325,7 @@ component OutputSection inherits DialogSection {
     callback ten-bit-changed(on: bool);
     callback hdr-changed(on: bool);
     callback quality-changed(index: int);
+    callback upscale-changed(on: bool);
 
     title: I18n.t("export.output");
 
@@ -365,6 +370,23 @@ component OutputSection inherits DialogSection {
             ];
             changed(index) => { root.quality-changed(index); }
         }
+    }
+
+    // AI 成片 4K 超分（0.3.5）：4K/2K/1080P/720P 都在上面的分辨率梯子里；
+    // 这一行把低于 4K 的 AI 成片按 4K 导出，标注「超分非原生」。
+    DialogRow {
+        label: "AI 成片 4K 超分";
+        Select {
+            current: root.data.upscale ? 1 : 0;
+            options: ["关（按工程分辨率）", "开：4K 超分（非原生）"];
+            changed(index) => { root.upscale-changed(index == 1); }
+        }
+    }
+    if root.data.upscale: Text {
+        text: root.data.upscale-note;
+        color: Theme.fg-muted;
+        font-size: Theme.fs-xs;
+        wrap: word-wrap;
     }
 
     // 编码器：硬件优先，不可用自动回退 CPU。
@@ -735,6 +757,7 @@ export component ExportDialog inherits Rectangle {
     callback quality-changed(index: int);
     callback matrix-toggled(on: bool);
     callback matrix-count-changed(delta: int);
+    callback upscale-changed(on: bool);
 
     property <bool> running: root.data.phase == ExportPhase.running;
     /// How many columns the width holds. Three groups a column wide need
@@ -899,6 +922,7 @@ export component ExportDialog inherits Rectangle {
                             ten-bit-changed(on) => { root.ten-bit-changed(on); }
                             hdr-changed(on) => { root.hdr-changed(on); }
                             quality-changed(index) => { root.quality-changed(index); }
+                            upscale-changed(on) => { root.upscale-changed(on); }
                         }
                     }
 
@@ -940,6 +964,7 @@ export component ExportDialog inherits Rectangle {
                                 ten-bit-changed(on) => { root.ten-bit-changed(on); }
                                 hdr-changed(on) => { root.hdr-changed(on); }
                                 quality-changed(index) => { root.quality-changed(index); }
+                                upscale-changed(on) => { root.upscale-changed(on); }
                             }
                         }
                     }
@@ -976,6 +1001,7 @@ export component ExportDialog inherits Rectangle {
                                 ten-bit-changed(on) => { root.ten-bit-changed(on); }
                                 hdr-changed(on) => { root.hdr-changed(on); }
                                 quality-changed(index) => { root.quality-changed(index); }
+                                upscale-changed(on) => { root.upscale-changed(on); }
                             }
                         }
 

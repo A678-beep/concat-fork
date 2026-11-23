@@ -843,6 +843,15 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         app.set_ai_drama_characters(ModelRc::from(models.ai_drama_characters.clone()));
         app.set_ai_drama_outputs(ModelRc::from(models.ai_drama_outputs.clone()));
         app.set_ai_drama_history(ModelRc::from(models.ai_drama_history.clone()));
+        // 电影 / 剧集制作向导（0.3.5）：面板状态与六列，懒加载（列表空着不占启动时间）。
+        app.set_movie_types(ModelRc::from(models.movie_types.clone()));
+        app.set_movie_shots(ModelRc::from(models.movie_shots.clone()));
+        app.set_movie_chars(ModelRc::from(models.movie_chars.clone()));
+        app.set_movie_scenes(ModelRc::from(models.movie_scenes.clone()));
+        app.set_movie_tasks(ModelRc::from(models.movie_tasks.clone()));
+        app.set_movie_takes(ModelRc::from(models.movie_takes.clone()));
+        app.set_movie_delivery(ModelRc::from(models.movie_delivery.clone()));
+        app.set_movie_done(ModelRc::from(models.movie_done.clone()));
         app.set_assistant_messages(ModelRc::from(models.assistant_messages.clone()));
         app.set_app_menu_items(ModelRc::from(models.bar.clone()));
         app.set_transcribers(ModelRc::from(models.transcribers.clone()));
@@ -1395,6 +1404,16 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                     text: text.to_string(),
                 },
             ));
+        }
+    ));
+    // 电影 / 剧集制作向导（0.3.5）：15 步的每个动作汇成一条。
+    app.on_movie_action(on_window!(
+        |state, action: SharedString, index: i32, text: SharedString| {
+            state.handle(Msg::Movie(crate::panes::movie::MovieMsg::Action {
+                action: action.to_string(),
+                index,
+                text: text.to_string(),
+            }));
         }
     ));
     // 左侧 AI 助手常驻栏（0.3.1）：开关、输入、发送、快捷指令。
@@ -3031,6 +3050,10 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     app.on_export_matrix_count_changed(on_window!(|state, delta: i32| {
         state.handle(Msg::Export(ExportMsg::MatrixCountChanged(delta)));
     }));
+    // AI 成片 4K 超分（0.3.5）：打开即把导出分辨率切到 4K 档。
+    app.on_export_upscale_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Export(ExportMsg::UpscaleChanged(on)));
+    }));
     app.on_export_cancel(on_window!(|state| {
         state.handle(Msg::Export(ExportMsg::Cancel));
     }));
@@ -3518,6 +3541,60 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                         "ai-drama-web" => {
                             let _ = opener::open(concat_host::aidrama::DRAMA_WEB);
                         }
+                        // 电影 / 剧集制作向导（0.3.5）：顶级入口。
+                        "movie-wizard" => state.handle(Msg::Movie(
+                            crate::panes::movie::MovieMsg::Open(0),
+                        )),
+                        "movie-generate" => state.handle(Msg::Movie(
+                            crate::panes::movie::MovieMsg::Open(8),
+                        )),
+                        "movie-review" => state.handle(Msg::Movie(
+                            crate::panes::movie::MovieMsg::Open(9),
+                        )),
+                        "movie-web" => {
+                            let _ = opener::open(format!(
+                                "{}/ai-nav/monitor/",
+                                concat_host::movie::SITE
+                            ));
+                        }
+                        // 导入 AI 工程包（0.3.5）：选 zip → 解压成桌面工程并打开。
+                        "import-ai-pack" => host::pick_files_then(
+                            "导入 AI 工程包(.zip)".to_owned(),
+                            Some(("AI 工程包".to_string(), &["zip"])),
+                            |studio, _, _, paths| {
+                                let Some(path) = paths.into_iter().next() else {
+                                    return;
+                                };
+                                if !concat_host::projectpack::is_pack(&path) {
+                                    studio.notify(
+                                        "这不是星籁 AI 工程包：zip 里缺少 project.xinglai.json / project.json",
+                                        true,
+                                    );
+                                    return;
+                                }
+                                studio.notify("正在解压 AI 工程包…", false);
+                                host::spawn(
+                                    move || {
+                                        concat_host::projectpack::import(&path, None, "")
+                                    },
+                                    |studio, _, _, result| match result {
+                                        Ok(pack) => {
+                                            match studio.open_project_at(&pack.project_path) {
+                                                Ok(()) => studio.notify(&pack.summary(), false),
+                                                Err(error) => studio.notify(
+                                                    &format!(
+                                                        "工程包已解压到 {}，但打开失败：{error}",
+                                                        pack.project_path
+                                                    ),
+                                                    true,
+                                                ),
+                                            }
+                                        }
+                                        Err(error) => studio.notify(&error, true),
+                                    },
+                                );
+                            },
+                        ),
                         // 帮助菜单：设置/诊断/缓存/快捷键/关于/开源许可。
                         "help-guides" => {
                             if let Some(url) = crate::panes::start::link("guides") {

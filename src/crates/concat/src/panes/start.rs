@@ -122,6 +122,12 @@ pub fn link(name: &str) -> Option<String> {
         // The fork's releases page: 星籁剪辑的安装包与发行说明都挂在这里，
         // 上游的 tag 在 fork 里没有。
         "release-notes" => format!("{REPOSITORY}/releases"),
+        // 创作中心（0.3.5）：桌面还没有独立页的，先到网页版（失败降级）。
+        "doc-to-video" => format!("{SITE}/explainer/"),
+        "templates" => format!("{SITE}/templates/"),
+        "assets" => format!("{SITE}/studio/"),
+        "live" => format!("{SITE}/live/"),
+        "plugins" => format!("{SITE}/plugins/"),
         _ => return None,
     })
 }
@@ -367,6 +373,66 @@ impl StartPane {
                 };
             }
             StartMsg::Link(name) => {
+                // 创作中心（0.3.5）：一个功能一个入口。桌面内已有的直接开面板；
+                // 桌面还没有的先跳网页版（失败降级的去处在这里写明）。
+                match name.as_str() {
+                    "movie-wizard" => {
+                        studio.handle(crate::panes::Msg::Movie(
+                            crate::panes::movie::MovieMsg::Open(0),
+                        ));
+                        return;
+                    }
+                    "ai-studio" => {
+                        studio.handle(crate::panes::Msg::AiStudio(
+                            crate::panes::ai_studio::AiStudioMsg::Open(0),
+                        ));
+                        return;
+                    }
+                    "ai-studio-explainer" => {
+                        studio.handle(crate::panes::Msg::AiStudio(
+                            crate::panes::ai_studio::AiStudioMsg::Open(1),
+                        ));
+                        return;
+                    }
+                    "ai-studio-replicate" => {
+                        studio.handle(crate::panes::Msg::AiStudio(
+                            crate::panes::ai_studio::AiStudioMsg::Open(2),
+                        ));
+                        return;
+                    }
+                    "ai-drama" => {
+                        studio.handle(crate::panes::Msg::AiDrama(
+                            crate::panes::aidrama::AiDramaMsg::Open(0),
+                        ));
+                        return;
+                    }
+                    "smartcut" => {
+                        studio.notify(
+                            "智能粗剪在编辑器里：顶部 tab「智能粗剪」（新建/打开工程后可用）",
+                            false,
+                        );
+                        return;
+                    }
+                    "tasks" => {
+                        studio.notify(
+                            "任务在各自面板里看进度：AI 工作室 / AI 短剧 / 电影·剧集向导的「生成」；统一任务中心下一版接",
+                            false,
+                        );
+                        return;
+                    }
+                    "edit" => {
+                        if let Some(recent) = studio.recents.first() {
+                            let path = recent.info.path.clone();
+                            if let Err(error) = studio.open_project_at(&path) {
+                                studio.notify(&format!("打开最近工程失败：{error}"), true);
+                            }
+                        } else {
+                            studio.notify("还没有工程：先点「新建工程」", false);
+                        }
+                        return;
+                    }
+                    _ => {}
+                }
                 if name == "shortcuts" {
                     use crate::panes::settings::{SHORTCUTS_PAGE, SettingsMsg};
                     studio.handle(crate::panes::Msg::Settings(SettingsMsg::Open));

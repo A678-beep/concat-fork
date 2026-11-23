@@ -162,7 +162,7 @@ fn login(body: &str) -> Result<(u16, String), String> {
 /// 工程云同步（[`crate::cloud`]）复用它：同样是 Windows 上 OpenSSL 直连，
 /// 不走系统代理，不碰 rustls。`read` 是读等待，上传成片要给它足够的时间。
 #[cfg(windows)]
-pub(crate) fn api_call(
+pub fn api_call(
     method: &str,
     url: &str,
     content_type: &str,
@@ -246,7 +246,7 @@ pub(crate) fn api_call(
 /// 二进制下载：同一条 OpenSSL 直连，GET 一个接口把正文写进 `dest`。给整剧
 /// zip（`/aidrama/download/{id}`，带 Bearer）用。返回落盘字节数。
 #[cfg(windows)]
-pub(crate) fn api_download(
+pub fn api_download(
     url: &str,
     token: Option<&str>,
     dest: &std::path::Path,
@@ -373,7 +373,7 @@ pub(crate) fn api_download(
 
 /// 别的平台：短剧整剧下载只在 Windows 桌面版上做（平台的 TLS 形状要求）。
 #[cfg(not(windows))]
-pub(crate) fn api_download(
+pub fn api_download(
     _url: &str,
     _token: Option<&str>,
     _dest: &std::path::Path,
@@ -411,7 +411,7 @@ fn decode_chunk_bytes(body: &[u8]) -> Vec<u8> {
 
 /// 别的平台：工程云同步只在 Windows 桌面版上做（平台的 TLS 形状要求）。
 #[cfg(not(windows))]
-pub(crate) fn api_call(
+pub fn api_call(
     method: &str,
     _url: &str,
     _content_type: &str,

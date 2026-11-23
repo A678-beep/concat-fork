@@ -824,6 +824,16 @@ pub struct Models {
     pub ai_drama_characters: Rc<VecModel<SharedString>>,
     pub ai_drama_outputs: Rc<VecModel<SharedString>>,
     pub ai_drama_history: Rc<VecModel<SharedString>>,
+    /// 电影 / 剧集制作向导（0.3.5）：类型表、分镜行、审片 take 行、交付清单。
+    pub movie_types: Rc<VecModel<SharedString>>,
+    pub movie_shots: Rc<VecModel<SharedString>>,
+    pub movie_chars: Rc<VecModel<SharedString>>,
+    pub movie_scenes: Rc<VecModel<SharedString>>,
+    pub movie_tasks: Rc<VecModel<SharedString>>,
+    pub movie_takes: Rc<VecModel<SharedString>>,
+    pub movie_delivery: Rc<VecModel<SharedString>>,
+    /// 15 步的完成标记。
+    pub movie_done: Rc<VecModel<i32>>,
     /// 左侧 AI 助手的对话。
     pub assistant_messages: Rc<VecModel<SharedString>>,
     /// 智能粗剪（0.3.2）：计划的片段行，一镜一行。
@@ -927,6 +937,14 @@ impl Models {
             ai_drama_characters: Rc::new(VecModel::default()),
             ai_drama_outputs: Rc::new(VecModel::default()),
             ai_drama_history: Rc::new(VecModel::default()),
+            movie_types: Rc::new(VecModel::default()),
+            movie_shots: Rc::new(VecModel::default()),
+            movie_chars: Rc::new(VecModel::default()),
+            movie_scenes: Rc::new(VecModel::default()),
+            movie_tasks: Rc::new(VecModel::default()),
+            movie_takes: Rc::new(VecModel::default()),
+            movie_delivery: Rc::new(VecModel::default()),
+            movie_done: Rc::new(VecModel::default()),
             assistant_messages: Rc::new(VecModel::default()),
             smartcut_segments: Rc::new(VecModel::default()),
             speech_sample_waves: Rc::new(VecModel::default()),
@@ -1309,6 +1327,8 @@ pub struct Studio {
     pub ai_studio: crate::panes::ai_studio::AiStudioPane,
     /// AI 短剧：分集剧本 / 分镜 / 逐集成片，懒加载（打开面板才探后端）。
     pub ai_drama: crate::panes::aidrama::AiDramaPane,
+    /// 电影 / 剧集制作向导（0.3.5）。
+    pub movie: crate::panes::movie::MoviePane,
     /// 左侧 AI 助手常驻栏：建议类对话 + 快捷指令。
     pub assistant: crate::panes::assistant::AssistantPane,
     /// 星籁 AI 账号：本机登录着的那一份，登录/退出/过期都更新它，发布时
@@ -3275,6 +3295,7 @@ impl Studio {
             ai,
             ai_studio: crate::panes::ai_studio::AiStudioPane::default(),
             ai_drama: crate::panes::aidrama::AiDramaPane::default(),
+            movie: crate::panes::movie::MoviePane::default(),
             assistant: crate::panes::assistant::AssistantPane::default(),
             account: concat_host::account::load(),
             account_sheet: false,

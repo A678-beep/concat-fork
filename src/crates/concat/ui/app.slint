@@ -59,6 +59,7 @@ import { AiData, AiDialog, AiPluginItem, AiVoiceItem, AiWizard } from "dialogs/a
 import { AiVideoData } from "dialogs/ai-video.slint";
 import { AiStudioData, AiStudioDialog } from "dialogs/ai-studio.slint";
 import { AiDramaData, AiDramaDialog } from "dialogs/aidrama.slint";
+import { MovieData, MovieDialog } from "dialogs/movie.slint";
 import { AssistantData, AssistantRail } from "workspace/assistant-rail.slint";
 import { CaptionsDialog, CaptionsSheetData } from "dialogs/captions.slint";
 import { SpeechDialog, SpeechSheetData } from "dialogs/speech.slint";
@@ -394,6 +395,18 @@ export component App inherits Window {
     in property <[string]> ai-drama-outputs;
     in property <[string]> ai-drama-history;
     callback ai-drama-action(action: string, index: int, text: string);
+    // 电影 / 剧集制作向导（0.3.5）：15 步傻瓜式流程 + 两条生成链。面板懒加载：
+    // 类型表只在打开时取一次，启动路径上没有它的网络工作。
+    in property <MovieData> movie;
+    in property <[string]> movie-types;
+    in property <[string]> movie-shots;
+    in property <[string]> movie-chars;
+    in property <[string]> movie-scenes;
+    in property <[string]> movie-tasks;
+    in property <[string]> movie-takes;
+    in property <[string]> movie-delivery;
+    in property <[int]> movie-done;
+    callback movie-action(action: string, index: int, text: string);
     // 左侧 AI 助手常驻栏（0.3.1，简版）：建议类对话 + 快捷指令。
     in property <AssistantData> assistant;
     in property <[string]> assistant-messages;
@@ -453,7 +466,7 @@ export component App inherits Window {
     property <bool> sheet-up: root.start.composing || root.export.open || root.settings.open
         || root.project-sheet.open || root.new-voice.open || root.relink.open
         || root.confirm.open || root.ai.open || root.ai-studio.open
-        || root.ai-drama.open || root.ai.wizard-open || root.account-sheet;
+        || root.ai-drama.open || root.movie.open || root.ai.wizard-open || root.account-sheet;
     /// Which floating tool card is in front: "captions" or "speech". The
     /// one opened or grabbed last; Escape closes it first.
     property <string> front-tool: "captions";
@@ -523,6 +536,8 @@ export component App inherits Window {
     callback export-quality-changed(index: int);
     callback export-matrix-toggled(on: bool);
     callback export-matrix-count-changed(delta: int);
+    /// AI 成片 4K 超分（0.3.5）：打开时按 4K 导出，标注「超分非原生」。
+    callback export-upscale-changed(on: bool);
     callback export-again();
 
     callback settings-closed();
@@ -1212,6 +1227,7 @@ export component App inherits Window {
         quality-changed(index) => { root.export-quality-changed(index); }
         matrix-toggled(on) => { root.export-matrix-toggled(on); }
         matrix-count-changed(delta) => { root.export-matrix-count-changed(delta); }
+        upscale-changed(on) => { root.export-upscale-changed(on); }
     }
 
     SettingsDialog {
@@ -1505,6 +1521,34 @@ export component App inherits Window {
         }
 
         closed => { root.ai-studio-action("close", 0, ""); }
+    }
+
+    // 电影 / 剧集制作向导（0.3.5）：15 步（真实剧组 SOP）＋简单/专业模式。
+    // 生成走导演编排器（可单镜重拍 = DAG）或电影成片管线（2.39:1 + QC + 工程包）。
+    MovieDialog {
+        inset-top: root.safe-area-insets.top;
+        inset-bottom: root.safe-area-insets.bottom;
+        inset-left: root.safe-area-insets.left;
+        inset-right: root.safe-area-insets.right;
+        x: 0;
+        y: root.sheets-top;
+        width: root.width;
+        height: root.height - root.sheets-top;
+        data: root.movie;
+        type-labels: root.movie-types;
+        shot-rows: root.movie-shots;
+        char-rows: root.movie-chars;
+        scene-rows: root.movie-scenes;
+        task-rows: root.movie-tasks;
+        take-rows: root.movie-takes;
+        delivery-rows: root.movie-delivery;
+        done: root.movie-done;
+
+        action(action, index, text) => {
+            root.movie-action(action, index, text);
+        }
+
+        closed => { root.movie-action("close", 0, ""); }
     }
 
     // AI 短剧（0.3.1）：桌面内的多集短剧工作台。设定 → 剧本（可逐集逐镜编辑）

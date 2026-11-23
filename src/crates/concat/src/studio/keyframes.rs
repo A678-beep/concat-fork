@@ -2122,6 +2122,23 @@ impl Studio {
         sync(&models.ai_drama_characters, self.ai_drama.character_rows());
         sync(&models.ai_drama_outputs, self.ai_drama.output_rows());
         sync(&models.ai_drama_history, self.ai_drama.history_rows());
+        // 电影 / 剧集制作向导（0.3.5）：面板状态与六列（类型、分镜、角色、场景、
+        // 逐镜任务、审片 take、交付清单）。类型表只在打开面板时取一次，启动路径
+        // 上没有任何网络工作。
+        set_changed(
+            app.get_movie(),
+            self.movie.data(),
+            |a, b| a == b,
+            |data| app.set_movie(data),
+        );
+        sync(&models.movie_types, self.movie.type_labels());
+        sync(&models.movie_shots, self.movie.shot_rows());
+        sync(&models.movie_chars, self.movie.char_rows());
+        sync(&models.movie_scenes, self.movie.scene_rows());
+        sync(&models.movie_takes, self.movie.take_rows());
+        sync(&models.movie_tasks, self.movie.task_rows());
+        sync(&models.movie_delivery, self.movie.delivery_rows());
+        sync(&models.movie_done, self.movie.done_mask());
         // 左侧 AI 助手：状态与对话行。上下文按剪映助手的口径带上当前草稿与选中片段。
         let assistant_context = format!(
             "上下文：草稿《{}》· 选中 {} 个片段",
@@ -2718,6 +2735,13 @@ impl Studio {
                     true,
                 ),
                 row(
+                    "import-ai-pack",
+                    "导入 AI 工程包(.zip)…".to_owned(),
+                    Glyph::Import,
+                    "",
+                    true,
+                ),
+                row(
                     "save",
                     t("studio.save"),
                     Glyph::Import,
@@ -3084,6 +3108,35 @@ impl Studio {
                     "ai-drama-open",
                     "AI 短剧 · 多集剧本 → 分镜 → 逐集成片".to_owned(),
                     Glyph::Film,
+                    "",
+                    true,
+                ),
+                rule(),
+                row(
+                    "movie-wizard",
+                    "电影 · 剧集制作向导（15 步 · 一句话出片）".to_owned(),
+                    Glyph::Film,
+                    "",
+                    true,
+                ),
+                row(
+                    "movie-generate",
+                    "电影向导 · 生成 / 任务进度".to_owned(),
+                    Glyph::Export,
+                    "",
+                    true,
+                ),
+                row(
+                    "movie-review",
+                    "电影向导 · 审片 take 板 / 单镜重拍".to_owned(),
+                    Glyph::Image,
+                    "",
+                    true,
+                ),
+                row(
+                    "movie-web",
+                    "网页版导演监视器（备用）".to_owned(),
+                    Glyph::Sparkle,
                     "",
                     true,
                 ),

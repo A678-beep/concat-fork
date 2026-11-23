@@ -74,6 +74,8 @@ pub enum ExportMsg {
     MatrixToggled(bool),
     /// 矩阵的版本数量加减：`delta` 是 +1 或 -1，数量收在 2..=5。
     MatrixCountChanged(i32),
+    /// AI 成片 4K 超分：按 4K 档导出（源低于 4K 时是插值放大，界面标注非原生）。
+    UpscaleChanged(bool),
     /// 矩阵里一个版本的进度：第 `index` 个（0 起）、共 `count` 个，
     /// `fraction` 是这个版本自己的进度（0..=1），`stage` 是中文阶段名。
     MatrixProgress {
@@ -131,6 +133,8 @@ pub struct ExportPane {
     pub matrix_count: usize,
     /// 矩阵写出的成片，按版本顺序；普通导出时为空。结果区用它列出文件。
     matrix_outputs: Vec<String>,
+    /// AI 成片「4K 超分」：按 4K 档导出（源低于 4K，插值放大，非原生）。
+    upscale: bool,
 }
 
 impl Default for ExportPane {
@@ -165,6 +169,7 @@ impl Default for ExportPane {
             matrix: false,
             matrix_count: 3,
             matrix_outputs: Vec::new(),
+            upscale: false,
         }
     }
 }
@@ -201,6 +206,20 @@ impl ExportPane {
             }
             ExportMsg::TenBitChanged(on) => self.ten_bit = on,
             ExportMsg::HdrChanged(on) => self.sdr = !on,
+            ExportMsg::UpscaleChanged(on) => {
+                self.upscale = on;
+                if on {
+                    // 分辨率梯子第一档就是 4K（短边 2160）。
+                    self.resolution = 0;
+                    let (width, height) = self.size(studio);
+                    studio.notify(
+                        &format!("已切到 4K 超分导出：{width}×{height}（插值放大，非原生 4K）"),
+                        false,
+                    );
+                } else {
+                    self.resolution = Self::own_rung(studio);
+                }
+            }
             ExportMsg::QualityChanged(index) => {
                 self.quality = (index.max(0) as usize).min(QUALITY_PRESETS.len() - 1);
                 log::info!("export: quality tier {}", self.quality);
@@ -1042,11 +1061,14 @@ impl ExportPane {
                     .iter()
                     .map(|rung| {
                         let (width, height) = Self::frame_for(studio, *rung);
-                        format!(
-                            "{width} × {height}{}",
-                            platform_label(width, height)
-                        )
-                        .into()
+                        let tier = match *rung {
+                            2160 => " · 4K",
+                            1440 => " · 2K",
+                            1080 => " · 1080P",
+                            720 => " · 720P",
+                            _ => "",
+                        };
+                        format!("{width} × {height}{tier}{}", platform_label(width, height)).into()
                     })
                     .collect();
                 ModelRc::new(VecModel::from(sizes))
@@ -1146,6 +1168,14 @@ impl ExportPane {
             matrix_count: self.matrix_count() as i32,
             matrix_plan: self.matrix_plan(studio).into(),
             matrix_done: self.matrix_done().into(),
+            upscale: self.upscale,
+            upscale_note: {
+                let (width, height) = self.size(studio);
+                format!(
+                    "本次按 {width}×{height} 写出：源片段低于 4K，画面为插值/AI 放大（超分非原生，细节不会凭空增加）；交付说明里请保留这句标注。"
+                )
+            }
+            .into(),
             empty: clips == 0,
         }
     }

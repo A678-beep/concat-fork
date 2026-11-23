@@ -2063,6 +2063,17 @@ component WideHome inherits Rectangle {
     /// 点右上角的账号入口：没登录开登录卡，登录了就开/关账号菜单。
     callback account-clicked();
 
+    /// 创作中心（0.3.5）：一个功能一个入口。桌面内已有的直接开面板，桌面还没有的
+    /// 先跳网页版（失败降级）；「编辑」回到最近一个工程。
+    property <[string]> center-labels: [
+        "一键成片", "动态解说", "爆款复刻", "AI 短剧", "电影 · 剧集",
+        "智能粗剪", "文档转视频", "模板市场", "素材库", "直播助播", "插件市场", "任务中心",
+    ];
+    property <[string]> center-links: [
+        "ai-studio", "ai-studio-explainer", "ai-studio-replicate", "ai-drama", "movie-wizard",
+        "smartcut", "doc-to-video", "templates", "assets", "live", "plugins", "tasks",
+    ];
+
     /// The margin the page keeps from the window's edges.
     property <length> pad: Math.max(24px, Math.min(64px, root.width / 18));
     property <length> pad-top: Math.max(28px, Math.min(72px, root.height / 12));
@@ -2108,6 +2119,16 @@ component WideHome inherits Rectangle {
                     spacing: 12px;
                     BrandLockup { horizontal-stretch: 1; }
 
+                    Chip {
+                        label: "首页 · 创作中心";
+                        selected: true;
+                    }
+
+                    Chip {
+                        label: "编辑";
+                        clicked => { root.link("edit"); }
+                    }
+
                     VerticalLayout {
                         alignment: center;
                         AccountChip {
@@ -2120,7 +2141,19 @@ component WideHome inherits Rectangle {
                     }
                 }
 
-                Rectangle { height: 30px; }
+                Rectangle { height: 16px; }
+
+                // ── 创作中心（0.3.5）：一个功能一个入口 ─────────────
+                HorizontalLayout {
+                    height: 34px;
+                    spacing: 6px;
+                    for label[i] in root.center-labels: Chip {
+                        label: label;
+                        clicked => { root.link(root.center-links[i]); }
+                    }
+                }
+
+                Rectangle { height: 22px; }
 
                 // ── the greeting ─────────────────────────────────────
                 // Its own width, not the column's, so the gradient runs
