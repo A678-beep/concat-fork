@@ -65,6 +65,9 @@ pub mod net;
 /// 本地配音引擎：Piper 插件的一次生成。
 pub mod piper;
 pub mod playback;
+/// 专业后期底座（0.3.6）：平台 `/api/post/*` 与本地 EDL / OTIO / QC /
+/// 交付包的兜底。
+pub mod post;
 /// 本地 AI 插件：安装、导入、删除、扫描。
 pub mod plugins;
 pub mod preview;

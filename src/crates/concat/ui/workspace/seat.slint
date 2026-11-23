@@ -204,6 +204,8 @@ export component Seat inherits Rectangle {
             pane-seat: root.index;
             pane-removable: Editor.seats.length > 1;
             pane-removed => { root.removed(); }
+            // 0.3.6 专业后期：预览右上角的按钮，交给窗口根那一层。
+            post-open => { Editor.post-open(); }
 
             previewing: Editor.library-audition != "";
             preview-ended => { Editor.library-audition-filter(Editor.library-audition); }

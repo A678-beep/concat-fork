@@ -55,6 +55,13 @@ import {
 import { ConfirmData, ConfirmDialog } from "dialogs/confirm.slint";
 import { CloudData, CloudDialog, CloudItem } from "dialogs/cloud.slint";
 import { InteropDialog } from "dialogs/interop.slint";
+import {
+    PostData,
+    PostDialog,
+    PostLutItem,
+    PostRow,
+} from "dialogs/post.slint";
+import { CommandItem, CommandPalette } from "dialogs/palette.slint";
 import { AiData, AiDialog, AiPluginItem, AiVoiceItem, AiWizard } from "dialogs/ai.slint";
 import { AiVideoData } from "dialogs/ai-video.slint";
 import { AiStudioData, AiStudioDialog } from "dialogs/ai-studio.slint";
@@ -370,6 +377,25 @@ export component App inherits Window {
     callback interop-reveal();
     callback interop-sync();
 
+    // 专业后期底座（0.3.6）：示波器 / 色彩管理 / QC / 媒体校验 / 快照 /
+    // 交付包。数据全由 Rust 写进 PostData 与四张表；动作合成一条
+    // post-action 回调，接线方式与电影向导相同。
+    in property <PostData> post;
+    in property <[PostLutItem]> post-luts;
+    in property <[PostRow]> post-qc-rows;
+    in property <[PostRow]> post-check-rows;
+    in property <[PostRow]> post-snapshot-rows;
+    in property <[CommandItem]> command-items;
+    in property <string> command-first;
+    in property <bool> palette-open;
+    callback post-closed();
+    callback post-action(action: string, index: int, text: string);
+    /// 示波器 / 调色预览的定时取帧：面板开着才由 Slint 的 Timer 打过来。
+    callback post-tick();
+    callback palette-closed();
+    callback palette-query-edited(text: string);
+    callback palette-chosen(id: string);
+
     // 鏄熺眮 AI锛氭湰鍦颁紭鍏堢殑绠楀姏閫夋嫨銆佹湰鍦伴厤闊筹紙Piper 鎻掍欢锛夈€佺収鐗囨暟瀛椾汉銆?
     // 鎻掍欢绠＄悊锛屼互鍙婇粯璁ゅ叧闂殑浜戠鍏滃簳銆傜姸鎬佷笌涓ゅ垪鐢?Rust 鍐欏ソ锛涜繖閲屽彧杞彂銆?
     in property <AiData> ai;
@@ -466,7 +492,8 @@ export component App inherits Window {
     property <bool> sheet-up: root.start.composing || root.export.open || root.settings.open
         || root.project-sheet.open || root.new-voice.open || root.relink.open
         || root.confirm.open || root.ai.open || root.ai-studio.open
-        || root.ai-drama.open || root.movie.open || root.ai.wizard-open || root.account-sheet;
+        || root.ai-drama.open || root.movie.open || root.ai.wizard-open || root.account-sheet
+        || root.post.open || root.palette-open;
     /// Which floating tool card is in front: "captions" or "speech". The
     /// one opened or grabbed last; Escape closes it first.
     property <string> front-tool: "captions";
@@ -1452,6 +1479,48 @@ export component App inherits Window {
         reveal => { root.interop-reveal(); }
         sync => { root.interop-sync(); }
         dismiss => { root.interop-closed(); }
+    }
+
+    // 专业后期底座（0.3.6）：示波器 / 调色 / QC / 校验 / 快照 / 交付。
+    // 一张大表，左侧六页；页签与按钮都收成 post-action 一条回调。整张表
+    // 只在开着时实例化：启动路径上没有它。
+    if root.post.open: PostDialog {
+        inset-top: root.safe-area-insets.top;
+        inset-bottom: root.safe-area-insets.bottom;
+        inset-left: root.safe-area-insets.left;
+        inset-right: root.safe-area-insets.right;
+        x: 0;
+        y: root.sheets-top;
+        width: root.width;
+        height: root.height - root.sheets-top;
+        data: root.post;
+        luts: root.post-luts;
+        qc-rows: root.post-qc-rows;
+        check-rows: root.post-check-rows;
+        snapshot-rows: root.post-snapshot-rows;
+
+        action(action, index, text) => { root.post-action(action, index, text); }
+        tick => { root.post-tick(); }
+        closed => { root.post-closed(); }
+    }
+
+    // 命令面板（Ctrl+K）：同样按需实例化，浮在后期面板上面。
+    if root.palette-open: CommandPalette {
+        inset-top: root.safe-area-insets.top;
+        inset-bottom: root.safe-area-insets.bottom;
+        inset-left: root.safe-area-insets.left;
+        inset-right: root.safe-area-insets.right;
+        x: 0;
+        y: root.sheets-top;
+        width: root.width;
+        height: root.height - root.sheets-top;
+        visible-flag: true;
+        items: root.command-items;
+        first: root.command-first;
+
+        query-edited(text) => { root.palette-query-edited(text); }
+        chosen(id) => { root.palette-chosen(id); }
+        dismissed => { root.palette-closed(); }
     }
 
     // 鏄熺眮 AI 闈㈡澘锛氭湰鍦颁紭鍏堬紝浜戠鍏滃簳銆傛诞鍦ㄧ紪杈戝櫒鍜屽凡鏈夐潰鏉夸箣涓婏紱鍚戝

@@ -1,0 +1,169 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 XingLai contributors
+
+// 命令面板（Ctrl+K）：一个输入框 + 一张过滤后的命令表。命令表由 Rust
+// 按当前工程状态拼好（打开面板 / 导出交付包 / 质检 / 快照 / 各面板与
+// 菜单命令），这里只负责输入、过滤后的显示与选择。
+//
+// 顶部标题栏带快捷键提示；输入框自动拿焦点，回车执行第一条匹配。
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { Modal } from "../primitives/modal.slint";
+
+/// 一条命令：id 由 Rust 解释，名字与快捷键由 Rust 写好。
+export struct CommandItem {
+    id: string,
+    label: string,
+    category: string,
+    shortcut: string,
+}
+
+export component CommandPalette inherits Modal {
+    in property <bool> visible-flag: false;
+    in property <[CommandItem]> items;
+    /// 输入框里的字；查询变化时回给 Rust 重新过滤。
+    in-out property <string> query;
+    /// 第一条匹配命令的 id，回车执行它。
+    in property <string> first;
+    /// 高亮的一条（键盘上下键由 Rust 推来的第一条即可，点选直接执行）。
+    in property <int> active: 0;
+
+    callback query-edited(text: string);
+    callback chosen(id: string);
+    callback dismissed();
+
+    open: root.visible-flag;
+    title: "命令面板";
+    glyph: Glyph.search;
+    surface-width: 640px;
+
+    changed visible-flag => {
+        if (root.visible-flag) {
+            root.query = "";
+            input.focus();
+        }
+    }
+
+    init => {
+        root.query = "";
+        input.focus();
+    }
+
+    // 点遮罩或 × 都是关：命令面板的关闭只有一个出口。
+    closed => { root.dismissed(); }
+
+    VerticalLayout {
+        padding-top: 0px;
+        padding-bottom: 14px;
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 8px;
+
+        Rectangle {
+            height: 40px;
+            background: Theme.field;
+            border-radius: Theme.r;
+            border-width: 1px;
+            border-color: Theme.accent;
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 8px;
+
+                Icon {
+                    glyph: Glyph.search;
+                    size: 15px;
+                    tint: Theme.accent;
+                }
+
+                input := TextInput {
+                    horizontal-stretch: 1;
+                    text <=> root.query;
+                    edited => { root.query-edited(self.text); }
+                    accepted => {
+                        if (root.first != "") {
+                            root.chosen(root.first);
+                        }
+                    }
+                    color: Theme.fg;
+                    font-size: Theme.fs-input;
+                    single-line: true;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "Esc 关闭 · Enter 执行";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        for item[index] in root.items : Rectangle {
+            height: 32px;
+            border-radius: Theme.r-sm;
+            background: index == root.active ? Theme.accent-soft
+                : (touch.has-hover ? Theme.field-hover : transparent);
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 8px;
+                spacing: 8px;
+
+                Text {
+                    width: 92px;
+                    text: item.category;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: item.label;
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                Text {
+                    text: item.shortcut;
+                    color: Theme.fg-muted;
+                    font-family: Theme.font-technical;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                }
+            }
+
+            touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.chosen(item.id); }
+            }
+        }
+
+        if root.items.length == 0 : Rectangle {
+            height: 34px;
+
+            Text {
+                text: "没有匹配的命令";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        Rectangle { height: 1px; background: Theme.line; }
+
+        Text {
+            text: "提示：Ctrl+K 随时开 / 关；输入「示波器」「交付」「快照」「质检」「主题」试试。";
+            color: Theme.fg-dim;
+            font-size: Theme.fs-xs;
+            wrap: word-wrap;
+        }
+    }
+}

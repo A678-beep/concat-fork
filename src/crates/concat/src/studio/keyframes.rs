@@ -2777,6 +2777,14 @@ impl Studio {
                     &keymap::label(&self.prefs, "export"),
                     !self.timeline().clips.is_empty(),
                 ),
+                // 0.3.6 专业交接：一键交付包（EDL / OTIO / QC / 工程 JSON）。
+                row(
+                    "handoff",
+                    "导出交付包（EDL / OTIO / QC / 工程）…".to_owned(),
+                    Glyph::Export,
+                    "",
+                    !self.timeline().clips.is_empty(),
+                ),
                 // 剪映草稿互通与 XML：导出到别的剪辑软件继续编辑，以及
                 // 读回剪映 / CapCut 的草稿。菜单只有一层（见 context-menu），
                 // 所以「导出」下面这两行就是「文件 → 导出 → …」那两条。
@@ -2993,6 +3001,37 @@ impl Studio {
                     t("shortcuts.nextEdit"),
                     Glyph::None,
                     &keymap::label(&self.prefs, "next-edit"),
+                    true,
+                ),
+                // 0.3.6 专业后期底座：示波器 / 调色 / QC / 校验 / 快照 / 交付，
+                // 命令面板与快捷键查看页也从这里进。
+                rule(),
+                row(
+                    "post-panel",
+                    "专业后期面板（示波器 · 调色 · QC · 交付）…".to_owned(),
+                    Glyph::Waveform,
+                    "",
+                    true,
+                ),
+                row(
+                    "command-palette",
+                    "命令面板（搜索所有命令）…".to_owned(),
+                    Glyph::Search,
+                    "Ctrl+K",
+                    true,
+                ),
+                row(
+                    "shortcuts-page",
+                    "快捷键查看 / 改键…".to_owned(),
+                    Glyph::Keyboard,
+                    "",
+                    true,
+                ),
+                row(
+                    "layout-save",
+                    "保存当前布局为自定义布局".to_owned(),
+                    Glyph::Frame,
+                    "",
                     true,
                 ),
                 // 0.3.2 布局预设（剪映式：左素材 | 中预览+时间线 | 右属性）。

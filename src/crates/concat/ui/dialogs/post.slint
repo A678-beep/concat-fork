@@ -1,0 +1,1244 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 XingLai contributors
+
+// 星籁剪辑 0.3.6 专业后期底座：示波器 / 色彩管理 / QC / 媒体校验 /
+// 工程快照 / 交付。所有数据由 Rust 写进 PostData；面板上每个动作都汇总
+// 成一条 action(action, index, text) 回给 Rust（与电影向导同一种接法），
+// 这里只负责画和收手势。
+//
+// 原创界面：左侧竖向页签（示波器 / 调色 / 质检 / 校验 / 快照 / 交付），
+// 每页一张卡片；配色与圆角都用主题变量，跟随 31 套皮肤与浅色模式。
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { Button, Modal } from "../primitives/modal.slint";
+import { SegmentedControl } from "../primitives/segmented-control.slint";
+import { Select } from "../primitives/select.slint";
+import { PaneScroll } from "../workspace/pane.slint";
+import { Rail } from "../inspector/controls.slint";
+
+/// 一行专业后期数据：QC 问题 / 校验行 / 快照行共用。
+export struct PostRow {
+    label: string,
+    detail: string,
+    /// "ok" / "warn" / "fail" / "info"
+    level: string,
+    /// 可跳转的时间轴秒数；没有跳转时是 -1
+    at: float,
+    /// 行的附带值（路径 / id / 快照名）
+    value: string,
+}
+
+/// 一个导入的 LUT。
+export struct PostLutItem {
+    id: string,
+    name: string,
+    space: string,
+}
+
+/// 专业后期面板的全部状态。字段由 Rust 写。
+export struct PostData {
+    open: bool,
+    /// 0 示波器 / 1 调色 / 2 质检 / 3 校验 / 4 快照 / 5 交付
+    tab: int,
+    busy: bool,
+    /// 平台后期接口的一句话状态
+    backend: string,
+    hint: string,
+    // ── 示波器 ──
+    scope-view: int,
+    scope-live: bool,
+    scope-image: image,
+    scope-info: string,
+    frame-info: string,
+    // ── 调色 ──
+    project-space: int,
+    clip-space: int,
+    clip-line: string,
+    space-info: string,
+    lut-selected: int,
+    lut-strength: float,
+    lut-line: string,
+    // ASC CDL
+    cdl-slope-r: float,
+    cdl-slope-g: float,
+    cdl-slope-b: float,
+    cdl-offset-r: float,
+    cdl-offset-g: float,
+    cdl-offset-b: float,
+    cdl-power-r: float,
+    cdl-power-g: float,
+    cdl-power-b: float,
+    cdl-sat: float,
+    preview-before: image,
+    preview-after: image,
+    preview-info: string,
+    // ── 质检 ──
+    qc-status: string,
+    qc-line: string,
+    qc-target: string,
+    qc-busy: bool,
+    // ── 校验 / 快照 / 交付 ──
+    check-line: string,
+    check-busy: bool,
+    snapshot-line: string,
+    handoff-line: string,
+    handoff-path: string,
+    status-line: string,
+    status-level: string,
+}
+
+// 页签：一枚竖排的标签，选中时描边与底色都亮起来。
+component TabItem inherits Rectangle {
+    in property <string> label;
+    in property <Glyph> glyph;
+    in property <bool> current;
+    in property <string> note;
+
+    callback picked();
+
+    height: 46px;
+    border-radius: Theme.r;
+    background: root.current ? Theme.accent-soft : (touch.has-hover ? Theme.field-hover : transparent);
+    border-width: 1px;
+    border-color: root.current ? Theme.accent : transparent;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 8px;
+        spacing: 8px;
+
+        Icon {
+            glyph: root.glyph;
+            size: 15px;
+            tint: root.current ? Theme.accent : Theme.fg-muted;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            vertical-stretch: 1;
+
+            Text {
+                text: root.label;
+                color: root.current ? Theme.fg : Theme.fg-muted;
+                font-size: Theme.fs;
+                font-weight: root.current ? Theme.weight-title : Theme.weight-body;
+                vertical-alignment: center;
+            }
+
+            if root.note != "" : Text {
+                text: root.note;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                overflow: elide;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+}
+
+// 一块带标题的卡片。
+component Card inherits Rectangle {
+    in property <string> title;
+
+    background: Theme.panel;
+    border-radius: Theme.r;
+    border-width: 1px;
+    border-color: Theme.line;
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+
+        Text {
+            text: root.title;
+            color: Theme.fg;
+            font-size: Theme.fs-lg;
+            font-weight: Theme.weight-title;
+        }
+
+        @children
+    }
+}
+
+// 小标题。
+component SubHead inherits Text {
+    color: Theme.fg-muted;
+    font-size: Theme.fs-sm;
+    font-weight: Theme.weight-title;
+}
+
+// 说明文字。
+component Note inherits Text {
+    color: Theme.fg-dim;
+    font-size: Theme.fs-sm;
+    wrap: word-wrap;
+    vertical-alignment: center;
+}
+
+// 一个滑块行：名字 + 数值 + 可拖的轨。
+component KnobRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <float> value;
+    in property <float> minimum: -4;
+    in property <float> maximum: 4;
+    in property <float> step: 0.01;
+    in property <float> default-value: 0;
+    /// 显示时乘的倍数（offset 用 0.1）
+    in property <float> display-scale: 1;
+
+    callback changed(value: float);
+
+    spacing: 8px;
+    height: Theme.h;
+
+    Text {
+        width: 64px;
+        text: root.label;
+        color: Theme.fg-muted;
+        font-size: Theme.fs-sm;
+        vertical-alignment: center;
+    }
+
+    Text {
+        width: 44px;
+        text: "\{Math.round(root.value * root.display-scale * 100) / 100}";
+        color: Theme.fg;
+        font-size: Theme.fs-sm;
+        font-family: Theme.font-technical;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+    }
+
+    Rail {
+        horizontal-stretch: 1;
+        value: root.value;
+        minimum: root.minimum;
+        maximum: root.maximum;
+        step: root.step;
+        default-value: root.default-value;
+        changed(value) => { root.changed(value); }
+    }
+}
+
+// 一行结果：QC 问题 / 校验行 / 快照行。
+component ResultRow inherits Rectangle {
+    in property <PostRow> entry;
+    in property <bool> jumpable;
+    in property <string> action-label;
+    in property <bool> action-visible: true;
+
+    callback clicked();
+    callback acted();
+
+    height: 34px;
+    border-radius: Theme.r-sm;
+    background: touch.has-hover ? Theme.field-hover : Theme.field;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 6px;
+        spacing: 8px;
+
+        Rectangle {
+            width: 4px;
+            height: 18px;
+            border-radius: 2px;
+            background: root.entry.level == "fail" ? Theme.danger
+                : root.entry.level == "warn" ? Theme.warn
+                : root.entry.level == "ok" ? Theme.green
+                : Theme.accent;
+        }
+
+        Text {
+            width: 118px;
+            text: root.entry.label;
+            color: Theme.fg;
+            font-size: Theme.fs-sm;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+
+        Text {
+            horizontal-stretch: 1;
+            text: root.entry.detail;
+            color: root.entry.level == "fail" ? Theme.danger
+                : root.entry.level == "warn" ? Theme.warn
+                : Theme.fg-muted;
+            font-size: Theme.fs-sm;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+
+        if root.jumpable && root.entry.at >= 0 : Text {
+            text: "⏱ 跳转";
+            color: Theme.accent;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+        }
+
+        if root.action-visible : Button {
+            label: root.action-label;
+            ghost: true;
+            clicked => { root.acted(); }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: root.jumpable ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component PostDialog inherits Modal {
+    in property <PostData> data;
+    in property <[PostLutItem]> luts;
+    in property <[PostRow]> qc-rows;
+    in property <[PostRow]> check-rows;
+    in property <[PostRow]> snapshot-rows;
+
+    callback action(action: string, index: int, text: string);
+    callback tick();
+
+    open: root.data.open;
+    title: "专业后期面板";
+    glyph: Glyph.sliders;
+    surface-width: 1180px;
+    surface-height: 800px;
+
+    // 面板开着且停在示波器页时，才让 Rust 去读预览帧。
+    Timer {
+        interval: 900ms;
+        running: root.data.open && root.data.scope-live;
+        triggered => { root.tick(); }
+    }
+
+    property <[string]> space-labels: ["sRGB", "Rec.709", "ACEScct", "ACEScg", "HLG", "PQ"];
+    property <[string]> scope-labels: ["波形图", "RGB Parade", "矢量示波器", "直方图"];
+
+    HorizontalLayout {
+        padding: 12px;
+        spacing: 12px;
+
+        // ── 左侧页签 ──
+        Rectangle {
+            width: 176px;
+            background: Theme.well;
+            border-radius: Theme.r;
+            border-width: 1px;
+            border-color: Theme.line;
+
+            VerticalLayout {
+                padding: 8px;
+                spacing: 4px;
+
+                Text {
+                    text: "专业后期";
+                    color: Theme.fg;
+                    font-size: Theme.fs-lg;
+                    font-weight: Theme.weight-display;
+                }
+
+                Text {
+                    text: "为影视 / 短剧公司的交付底座";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                Rectangle { height: 6px; }
+
+                TabItem {
+                    label: "示波器";
+                    note: "预览帧 · 256×144 采样";
+                    glyph: Glyph.waveform;
+                    current: root.data.tab == 0;
+                    picked => { root.action("tab", 0, ""); }
+                }
+                TabItem {
+                    label: "调色 / LUT";
+                    note: "色彩空间 · CDL";
+                    glyph: Glyph.sun;
+                    current: root.data.tab == 1;
+                    picked => { root.action("tab", 1, ""); }
+                }
+                TabItem {
+                    label: "交付质检 QC";
+                    note: "响度 · 真峰 · 黑帧";
+                    glyph: Glyph.check;
+                    current: root.data.tab == 2;
+                    picked => { root.action("tab", 2, ""); }
+                }
+                TabItem {
+                    label: "媒体校验";
+                    note: "sha256 · 重链";
+                    glyph: Glyph.link;
+                    current: root.data.tab == 3;
+                    picked => { root.action("tab", 3, ""); }
+                }
+                TabItem {
+                    label: "版本快照";
+                    note: "保存前自动留档";
+                    glyph: Glyph.clock;
+                    current: root.data.tab == 4;
+                    picked => { root.action("tab", 4, ""); }
+                }
+                TabItem {
+                    label: "交付包";
+                    note: "EDL / OTIO / zip";
+                    glyph: Glyph.export;
+                    current: root.data.tab == 5;
+                    picked => { root.action("tab", 5, ""); }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                Rectangle {
+                    background: Theme.field;
+                    border-radius: Theme.r-sm;
+
+                    VerticalLayout {
+                        padding: 6px;
+
+                        Text {
+                            text: root.data.backend;
+                            color: Theme.fg-dim;
+                            font-size: Theme.fs-xs;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 右侧内容 ──
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 8px;
+
+            // 标题行：当前页 + 关闭
+            HorizontalLayout {
+                height: 32px;
+                spacing: 8px;
+
+                Text {
+                    text: root.data.tab == 0 ? "示波器 · 预览帧监看"
+                        : root.data.tab == 1 ? "色彩管理 · LUT · CDL"
+                        : root.data.tab == 2 ? "交付质检 QC"
+                        : root.data.tab == 3 ? "媒体校验"
+                        : root.data.tab == 4 ? "工程版本快照"
+                        : "专业交接 · 交付包";
+                    color: Theme.fg;
+                    font-size: Theme.fs-xl;
+                    font-weight: Theme.weight-title;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.data.hint;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+
+                Button {
+                    label: "关闭";
+                    clicked => { root.closed(); }
+                }
+            }
+
+            Rectangle {
+                vertical-stretch: 1;
+                background: Theme.well;
+                border-radius: Theme.r;
+                border-width: 1px;
+                border-color: Theme.line;
+                clip: true;
+
+                PaneScroll {
+                    width: parent.width;
+                    height: parent.height;
+
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 10px;
+
+                        // ══════════ 示波器 ══════════
+                        if root.data.tab == 0 : VerticalLayout {
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+
+                                SegmentedControl {
+                                    width: 460px;
+                                    tabs: true;
+                                    options: root.scope-labels;
+                                    current: root.data.scope-view;
+                                    changed(index) => { root.action("scope-view", index, ""); }
+                                }
+
+                                Rectangle { horizontal-stretch: 1; }
+
+                                Button {
+                                    label: root.data.scope-live ? "暂停刷新" : "继续刷新";
+                                    ghost: true;
+                                    clicked => { root.action("scope-live", root.data.scope-live ? 0 : 1, ""); }
+                                }
+
+                                Button {
+                                    label: "立即刷新";
+                                    primary: true;
+                                    enabled: !root.data.busy;
+                                    clicked => { root.action("scope-refresh", 0, ""); }
+                                }
+                            }
+
+                            Rectangle {
+                                vertical-stretch: 1;
+                                min-height: 420px;
+                                background: #08090c;
+                                border-radius: Theme.r-sm;
+                                border-width: 1px;
+                                border-color: Theme.line;
+
+                                Image {
+                                    x: 8px;
+                                    y: 8px;
+                                    width: parent.width - 16px;
+                                    height: parent.height - 16px;
+                                    source: root.data.scope-image;
+                                    image-fit: contain;
+                                }
+
+                                if root.data.scope-info == "" : Text {
+                                    text: "时间线上没有可读的预览帧：把播放头放到一段视频上。";
+                                    color: Theme.fg-dim;
+                                    font-size: Theme.fs;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    width: parent.width;
+                                    height: parent.height;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 12px;
+
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: root.data.scope-info;
+                                    color: Theme.fg-muted;
+                                    font-size: Theme.fs-sm;
+                                    wrap: word-wrap;
+                                }
+
+                                Text {
+                                    text: root.data.frame-info;
+                                    color: Theme.fg-dim;
+                                    font-size: Theme.fs-sm;
+                                    font-family: Theme.font-technical;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            Note {
+                                text: "示波器读的是预览画面那一帧：随包 ffmpeg 取帧后降到 256×144 再由 CPU 算波形 / 通道 / 矢量 / 直方图，画面不离开本机；播放在走时约每秒更新一次，暂停时只在换帧或换视图时重算。";
+                            }
+                        }
+
+                        // ══════════ 调色 ══════════
+                        if root.data.tab == 1 : HorizontalLayout {
+                            spacing: 10px;
+
+                            // 左列：色彩空间 + LUT
+                            VerticalLayout {
+                                width: 400px;
+                                spacing: 8px;
+
+                                Card {
+                                    title: "色彩管理";
+
+                                    HorizontalLayout {
+                                        spacing: 8px;
+
+                                        Text {
+                                            width: 88px;
+                                            text: "项目色彩空间";
+                                            color: Theme.fg-muted;
+                                            font-size: Theme.fs-sm;
+                                            vertical-alignment: center;
+                                        }
+
+                                        Select {
+                                            horizontal-stretch: 1;
+                                            options: root.space-labels;
+                                            current: root.data.project-space;
+                                            changed(index) => { root.action("space-project", index, ""); }
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 8px;
+
+                                        Text {
+                                            width: 88px;
+                                            text: "选中片段";
+                                            color: Theme.fg-muted;
+                                            font-size: Theme.fs-sm;
+                                            vertical-alignment: center;
+                                        }
+
+                                        Select {
+                                            horizontal-stretch: 1;
+                                            options: root.space-labels;
+                                            current: root.data.clip-space;
+                                            changed(index) => { root.action("space-clip", index, ""); }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: root.data.clip-line;
+                                        color: Theme.fg;
+                                        font-size: Theme.fs-sm;
+                                        overflow: elide;
+                                    }
+
+                                    Note { text: root.data.space-info; }
+                                }
+
+                                Card {
+                                    title: "LUT 面板";
+
+                                    Text {
+                                        text: root.data.lut-line;
+                                        color: Theme.fg-muted;
+                                        font-size: Theme.fs-sm;
+                                        wrap: word-wrap;
+                                    }
+
+                                    if root.luts.length == 0 : Text {
+                                        text: "还没有导入 LUT。点「导入 .cube」选一个 3D LUT 表，导入后本机缓存、可反复套用。";
+                                        color: Theme.fg-dim;
+                                        font-size: Theme.fs-sm;
+                                        wrap: word-wrap;
+                                    }
+
+                                    for lut[index] in root.luts : Rectangle {
+                                        height: 30px;
+                                        border-radius: Theme.r-sm;
+                                        background: index == root.data.lut-selected ? Theme.accent-soft
+                                            : (touch.has-hover ? Theme.field-hover : Theme.field);
+
+                                        HorizontalLayout {
+                                            padding-left: 8px;
+                                            padding-right: 6px;
+                                            spacing: 8px;
+
+                                            Text {
+                                                horizontal-stretch: 1;
+                                                text: lut.name;
+                                                color: index == root.data.lut-selected ? Theme.fg : Theme.fg-muted;
+                                                font-size: Theme.fs-sm;
+                                                overflow: elide;
+                                                vertical-alignment: center;
+                                            }
+
+                                            Text {
+                                                text: lut.space;
+                                                color: Theme.fg-dim;
+                                                font-size: Theme.fs-xs;
+                                                vertical-alignment: center;
+                                            }
+
+                                            if index == root.data.lut-selected : Icon {
+                                                glyph: Glyph.check;
+                                                size: 12px;
+                                                tint: Theme.accent;
+                                            }
+                                        }
+
+                                        touch := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.action("lut-select", index, ""); }
+                                        }
+                                    }
+
+                                    KnobRow {
+                                        label: "LUT 强度";
+                                        value: root.data.lut-strength;
+                                        minimum: 0;
+                                        maximum: 100;
+                                        step: 1;
+                                        default-value: 100;
+                                        changed(value) => { root.action("lut-strength", 0, "\{value}"); }
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 8px;
+
+                                        Button {
+                                            label: "导入 .cube…";
+                                            clicked => { root.action("lut-import", 0, ""); }
+                                        }
+
+                                        Button {
+                                            label: "应用到选中片段";
+                                            primary: true;
+                                            enabled: !root.data.busy;
+                                            clicked => { root.action("lut-apply", 0, ""); }
+                                        }
+                                    }
+
+                                    Note {
+                                        text: "LUT 走引擎的 GPU 调色链：套上后编辑器预览就是真实效果，导出与工程文件一并保存；强度就是这条 look 的 intensity。";
+                                    }
+                                }
+                            }
+
+                            // 右列：CDL + 实时预览
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 8px;
+
+                                Card {
+                                    title: "ASC CDL · slope / offset / power / 饱和";
+
+                                    HorizontalLayout {
+                                        spacing: 14px;
+
+                                        // slope
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            spacing: 2px;
+                                            SubHead { text: "Slope（斜率 / 白平衡）"; }
+                                            KnobRow {
+                                                label: "R";
+                                                value: root.data.cdl-slope-r;
+                                                minimum: 0;
+                                                maximum: 2;
+                                                step: 0.01;
+                                                default-value: 1;
+                                                changed(value) => { root.action("cdl-slope-r", 0, "\{value}"); }
+                                            }
+                                            KnobRow {
+                                                label: "G";
+                                                value: root.data.cdl-slope-g;
+                                                minimum: 0;
+                                                maximum: 2;
+                                                step: 0.01;
+                                                default-value: 1;
+                                                changed(value) => { root.action("cdl-slope-g", 0, "\{value}"); }
+                                            }
+                                            KnobRow {
+                                                label: "B";
+                                                value: root.data.cdl-slope-b;
+                                                minimum: 0;
+                                                maximum: 2;
+                                                step: 0.01;
+                                                default-value: 1;
+                                                changed(value) => { root.action("cdl-slope-b", 0, "\{value}"); }
+                                            }
+                                        }
+
+                                        // offset
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            spacing: 2px;
+                                            SubHead { text: "Offset（偏移 / 黑位）"; }
+                                            KnobRow {
+                                                label: "R";
+                                                value: root.data.cdl-offset-r;
+                                                minimum: -0.5;
+                                                maximum: 0.5;
+                                                step: 0.005;
+                                                default-value: 0;
+                                                changed(value) => { root.action("cdl-offset-r", 0, "\{value}"); }
+                                            }
+                                            KnobRow {
+                                                label: "G";
+                                                value: root.data.cdl-offset-g;
+                                                minimum: -0.5;
+                                                maximum: 0.5;
+                                                step: 0.005;
+                                                default-value: 0;
+                                                changed(value) => { root.action("cdl-offset-g", 0, "\{value}"); }
+                                            }
+                                            KnobRow {
+                                                label: "B";
+                                                value: root.data.cdl-offset-b;
+                                                minimum: -0.5;
+                                                maximum: 0.5;
+                                                step: 0.005;
+                                                default-value: 0;
+                                                changed(value) => { root.action("cdl-offset-b", 0, "\{value}"); }
+                                            }
+                                        }
+
+                                        // power
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            spacing: 2px;
+                                            SubHead { text: "Power（伽马 / 中间调）"; }
+                                            KnobRow {
+                                                label: "R";
+                                                value: root.data.cdl-power-r;
+                                                minimum: 0.2;
+                                                maximum: 3;
+                                                step: 0.01;
+                                                default-value: 1;
+                                                changed(value) => { root.action("cdl-power-r", 0, "\{value}"); }
+                                            }
+                                            KnobRow {
+                                                label: "G";
+                                                value: root.data.cdl-power-g;
+                                                minimum: 0.2;
+                                                maximum: 3;
+                                                step: 0.01;
+                                                default-value: 1;
+                                                changed(value) => { root.action("cdl-power-g", 0, "\{value}"); }
+                                            }
+                                            KnobRow {
+                                                label: "B";
+                                                value: root.data.cdl-power-b;
+                                                minimum: 0.2;
+                                                maximum: 3;
+                                                step: 0.01;
+                                                default-value: 1;
+                                                changed(value) => { root.action("cdl-power-b", 0, "\{value}"); }
+                                            }
+                                        }
+
+                                        // sat
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            spacing: 2px;
+                                            SubHead { text: "饱和度"; }
+                                            KnobRow {
+                                                label: "Sat";
+                                                value: root.data.cdl-sat;
+                                                minimum: 0;
+                                                maximum: 2;
+                                                step: 0.01;
+                                                default-value: 1;
+                                                changed(value) => { root.action("cdl-sat", 0, "\{value}"); }
+                                            }
+
+                                            Rectangle { height: 4px; }
+
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                Button {
+                                                    label: "重置 CDL";
+                                                    ghost: true;
+                                                    clicked => { root.action("cdl-reset", 0, ""); }
+                                                }
+                                                Button {
+                                                    label: "应用并保存";
+                                                    primary: true;
+                                                    enabled: !root.data.busy;
+                                                    clicked => { root.action("cdl-apply", 0, ""); }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Card {
+                                    title: "调色预览（当前帧 · 前 / 后）";
+
+                                    HorizontalLayout {
+                                        spacing: 10px;
+
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            spacing: 4px;
+                                            Text {
+                                                text: "原片";
+                                                color: Theme.fg-muted;
+                                                font-size: Theme.fs-xs;
+                                            }
+                                            Rectangle {
+                                                height: 170px;
+                                                background: #08090c;
+                                                border-radius: Theme.r-sm;
+                                                border-width: 1px;
+                                                border-color: Theme.line;
+                                                Image {
+                                                    x: 0;
+                                                    y: 0;
+                                                    width: parent.width;
+                                                    height: parent.height;
+                                                    source: root.data.preview-before;
+                                                    image-fit: contain;
+                                                }
+                                            }
+                                        }
+
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            spacing: 4px;
+                                            Text {
+                                                text: "调色后（CDL → LUT）";
+                                                color: Theme.fg-muted;
+                                                font-size: Theme.fs-xs;
+                                            }
+                                            Rectangle {
+                                                height: 170px;
+                                                background: #08090c;
+                                                border-radius: Theme.r-sm;
+                                                border-width: 1px;
+                                                border-color: Theme.accent;
+                                                Image {
+                                                    x: 0;
+                                                    y: 0;
+                                                    width: parent.width;
+                                                    height: parent.height;
+                                                    source: root.data.preview-after;
+                                                    image-fit: contain;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: root.data.preview-info;
+                                        color: Theme.fg-dim;
+                                        font-size: Theme.fs-sm;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                            }
+                        }
+
+                        // ══════════ 质检 ══════════
+                        if root.data.tab == 2 : VerticalLayout {
+                            spacing: 10px;
+
+                            Card {
+                                title: "一键质检";
+
+                                HorizontalLayout {
+                                    spacing: 8px;
+
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        text: root.data.qc-target;
+                                        color: Theme.fg;
+                                        font-size: Theme.fs-sm;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Button {
+                                        label: "选择文件…";
+                                        ghost: true;
+                                        clicked => { root.action("qc-pick", 0, ""); }
+                                    }
+
+                                    Button {
+                                        label: "一键质检";
+                                        primary: true;
+                                        large: true;
+                                        enabled: !root.data.qc-busy;
+                                        clicked => { root.action("qc-run", 0, ""); }
+                                    }
+                                }
+
+                                Text {
+                                    text: root.data.qc-status == "" ? "还没跑过质检"
+                                        : root.data.qc-status == "PASS" ? "PASS · 通过"
+                                        : root.data.qc-status == "WARN" ? "WARN · 复核项"
+                                        : root.data.qc-status == "FAIL" ? "FAIL · 有阻断项"
+                                        : root.data.qc-status;
+                                    color: root.data.qc-status == "FAIL" ? Theme.danger
+                                        : root.data.qc-status == "WARN" ? Theme.warn
+                                        : root.data.qc-status == "PASS" ? Theme.green
+                                        : Theme.fg-muted;
+                                    font-size: Theme.fs-xl;
+                                    font-weight: Theme.weight-display;
+                                }
+
+                                Text {
+                                    text: root.data.qc-line;
+                                    color: Theme.fg-muted;
+                                    font-size: Theme.fs-sm;
+                                    wrap: word-wrap;
+                                }
+
+                                Note {
+                                    text: "优先走平台 /api/post/qc（上传当前片源真跑一遍 ebur128 + blackdetect + silencedetect + freezedetect）；平台不可用时自动落到本机随包 ffmpeg 同一条算法，来源在结果里写明。阈值：EBU R128 · -23 LUFS ±1 LU · 真峰 ≤ -1 dBTP。";
+                                }
+                            }
+
+                            Text {
+                                text: "问题清单（点一行把播放头跳到那个时间码）";
+                                color: Theme.fg-muted;
+                                font-size: Theme.fs-sm;
+                                font-weight: Theme.weight-title;
+                            }
+
+                            for entry[index] in root.qc-rows : ResultRow {
+                                entry: entry;
+                                jumpable: entry.at >= 0;
+                                action-label: "";
+                                action-visible: false;
+                                clicked => {
+                                    if (entry.at >= 0) {
+                                        root.action("qc-jump", index, "");
+                                    }
+                                }
+                            }
+
+                            if root.qc-rows.length == 0 : Note {
+                                text: root.data.qc-busy ? "正在质检：平台优先，失败会落到本机，读一遍画面与声音要几秒到几十秒…" : "没有问题项（或还没跑）。";
+                            }
+                        }
+
+                        // ══════════ 媒体校验 ══════════
+                        if root.data.tab == 3 : VerticalLayout {
+                            spacing: 10px;
+
+                            Card {
+                                title: "时间线素材校验和";
+
+                                HorizontalLayout {
+                                    spacing: 8px;
+
+                                    Button {
+                                        label: "计算校验和并比对";
+                                        primary: true;
+                                        enabled: !root.data.check-busy;
+                                        clicked => { root.action("check-run", 0, ""); }
+                                    }
+
+                                    Button {
+                                        label: "生成 / 覆盖清单";
+                                        ghost: true;
+                                        enabled: !root.data.check-busy;
+                                        clicked => { root.action("check-manifest-save", 0, ""); }
+                                    }
+
+                                    Button {
+                                        label: "打开清单";
+                                        ghost: true;
+                                        clicked => { root.action("check-manifest-open", 0, ""); }
+                                    }
+
+                                    Rectangle { horizontal-stretch: 1; }
+
+                                    Text {
+                                        text: root.data.check-line;
+                                        color: Theme.fg-muted;
+                                        font-size: Theme.fs-sm;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                Note {
+                                    text: "sha256 + 文件大小 + 时长 / 分辨率逐条比对清单：一致 = 清单里同路径同哈希；重链 = 原路径不在但清单里同名同哈希的文件找到了；缺失 = 找不到；不一致 = 同名不同哈希（换过片）。清单存工程文件夹 media_manifest.json，可交给下游复核。";
+                                }
+                            }
+
+                            for entry[index] in root.check-rows : ResultRow {
+                                entry: entry;
+                                jumpable: false;
+                                action-label: entry.level == "relinked" ? "查看路径" : "";
+                                action-visible: entry.level == "relinked";
+                                clicked => { }
+                                acted => { root.action("check-reveal", index, ""); }
+                            }
+
+                            if root.check-rows.length == 0 : Note {
+                                text: root.data.check-busy ? "正在逐个文件算 sha256…" : "还没有校验结果：点「计算校验和并比对」。";
+                            }
+                        }
+
+                        // ══════════ 快照 ══════════
+                        if root.data.tab == 4 : VerticalLayout {
+                            spacing: 10px;
+
+                            Card {
+                                title: "工程版本快照";
+
+                                HorizontalLayout {
+                                    spacing: 8px;
+
+                                    Button {
+                                        label: "立即快照";
+                                        primary: true;
+                                        clicked => { root.action("snapshot-create", 0, ""); }
+                                    }
+
+                                    Button {
+                                        label: "刷新列表";
+                                        ghost: true;
+                                        clicked => { root.action("snapshot-refresh", 0, ""); }
+                                    }
+
+                                    Rectangle { horizontal-stretch: 1; }
+
+                                    Text {
+                                        text: root.data.snapshot-line;
+                                        color: Theme.fg-muted;
+                                        font-size: Theme.fs-sm;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                Note {
+                                    text: "每次保存前自动留一份（同一分钟内只留一份），也可以手动快照。快照是工程文档 concat.json 的副本，存在工程文件夹 snapshots/ 下；回滚只覆盖工程文档，不碰素材。";
+                                }
+                            }
+
+                            for entry[index] in root.snapshot-rows : ResultRow {
+                                entry: entry;
+                                jumpable: false;
+                                action-label: "对比 / 回滚";
+                                action-visible: true;
+                                clicked => { root.action("snapshot-diff", index, ""); }
+                                acted => { root.action("snapshot-diff", index, ""); }
+                            }
+
+                            if root.snapshot-rows.length == 0 : Note {
+                                text: "还没有快照：保存一次工程，或点「立即快照」。";
+                            }
+
+                            Note {
+                                text: "回滚：在上面点「对比 / 回滚」进入对比结果后，再按「确认回滚到这一版」；回滚前会先把当前状态再快照一份，回错了还能退回来。";
+                            }
+                        }
+
+                        // ══════════ 交付 ══════════
+                        if root.data.tab == 5 : VerticalLayout {
+                            spacing: 10px;
+
+                            Card {
+                                title: "专业交接 · 交付包";
+
+                                Text {
+                                    text: "把工程交给下游（达芬奇 / PR / Avid / Nuke）：一个 zip，含 project.json、EDL（CMX3600）、OTIO、QC 报告、媒体清单（sha256）、色彩说明 / CDL / LUT、README 与 checksums.sha256。平台 /api/post/handoff 可用时走平台打包并下载；不可用时本机按同一结构生成。";
+                                    color: Theme.fg-muted;
+                                    font-size: Theme.fs-sm;
+                                    wrap: word-wrap;
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 8px;
+
+                                    Button {
+                                        label: "导出交付包…";
+                                        primary: true;
+                                        large: true;
+                                        enabled: !root.data.busy;
+                                        clicked => { root.action("handoff", 0, ""); }
+                                    }
+
+                                    Button {
+                                        label: "打开文件夹";
+                                        enabled: root.data.handoff-path != "";
+                                        clicked => { root.action("handoff-reveal", 0, ""); }
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 8px;
+
+                                    Button {
+                                        label: "导出 EDL(.edl)…";
+                                        ghost: true;
+                                        enabled: !root.data.busy;
+                                        clicked => { root.action("export-edl", 0, ""); }
+                                    }
+
+                                    Button {
+                                        label: "导出 OTIO(.otio)…";
+                                        ghost: true;
+                                        enabled: !root.data.busy;
+                                        clicked => { root.action("export-otio", 0, ""); }
+                                    }
+
+                                    Button {
+                                        label: "导出 QC 报告(JSON)…";
+                                        ghost: true;
+                                        enabled: !root.data.busy;
+                                        clicked => { root.action("export-qc", 0, ""); }
+                                    }
+                                }
+
+                                Text {
+                                    text: root.data.handoff-line;
+                                    color: Theme.fg;
+                                    font-size: Theme.fs-sm;
+                                    wrap: word-wrap;
+                                }
+
+                                Text {
+                                    text: root.data.handoff-path;
+                                    color: Theme.accent;
+                                    font-size: Theme.fs-sm;
+                                    overflow: elide;
+                                }
+
+                                Note {
+                                    text: "EDL / OTIO 的时间码按工程帧率折算，起点 01:00:00:00（CMX3600 惯例）；转场在本地 EDL 里按切点导出并注释，OTIO 里保留色彩空间标记。交付包里的 CDL 写成 .cdl 与 .ccc，Resolve / Baselight 可直接载入。";
+                                }
+                            }
+
+                            Card {
+                                title: "平台后期接口";
+
+                                Text {
+                                    text: root.data.backend;
+                                    color: Theme.fg-muted;
+                                    font-size: Theme.fs-sm;
+                                    wrap: word-wrap;
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        label: "检测平台接口";
+                                        ghost: true;
+                                        clicked => { root.action("backend-check", 0, ""); }
+                                    }
+                                }
+
+                                Note {
+                                    text: "平台接口：/api/post/{edl,otio,lut,cdl,apply-lut,checksum,verify,qc,handoff,health,standards}。桌面端不改服务端；平台不通时全部有本地兜底，状态栏会写明这次用的是哪一边。";
+                                }
+                            }
+                        }
+
+                        // 状态行
+                        if root.data.status-line != "" : Rectangle {
+                            height: 30px;
+                            border-radius: Theme.r-sm;
+                            background: root.data.status-level == "fail" ? Theme.danger-soft : Theme.field;
+
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                spacing: 6px;
+
+                                Text {
+                                    vertical-stretch: 1;
+                                    text: root.data.status-line;
+                                    color: root.data.status-level == "fail" ? Theme.danger : Theme.fg;
+                                    font-size: Theme.fs-sm;
+                                    overflow: elide;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -50,6 +50,9 @@ mod maintenance;
 mod meters;
 mod motion_tiles;
 mod platform;
+/// 专业后期底座（0.3.6）：示波器 / 色彩管理 / QC / 媒体校验 / 快照 /
+/// 交付包，以及命令面板；窗口这一半。
+mod post;
 /// How a phone keeps its screen on while a job runs; see
 /// `concat_host::awake`.
 #[cfg(target_os = "android")]
@@ -1070,6 +1073,13 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
 
     let editor = app.global::<Editor>();
 
+    // 专业后期面板：预览区右上角的按钮（0.3.6）。按钮在 PreviewPane 里，
+    // 经 Editor 全局转到这儿，落到 post 模块。
+    {
+        let weak = app.as_weak();
+        editor.on_post_open(move || post::open_tab(weak.clone(), 0));
+    }
+
     // ── the launch screen ──
     app.on_start_compose(on_window!(|state| {
         state.handle(Msg::Start(StartMsg::Compose));
@@ -1297,6 +1307,38 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
             let weak = weak.clone();
             move || interop::sync_jianying(weak.clone())
         });
+    }
+
+    // ── 专业后期底座（0.3.6）──
+    // 面板只有一条 action 回调：页签、按钮、滑块都汇成 (动作, 行号, 文本)；
+    // 示波器定时取帧走 post-tick；命令面板的三条回调也落在 post。
+    {
+        let weak = app.as_weak();
+        app.on_post_closed(move || post::close(weak.clone()));
+    }
+    {
+        let weak = app.as_weak();
+        app.on_post_action(move |action, index, text| {
+            post::action(weak.clone(), action.to_string(), index, text.to_string())
+        });
+    }
+    {
+        let weak = app.as_weak();
+        app.on_post_tick(move || post::tick(weak.clone()));
+    }
+    {
+        let weak = app.as_weak();
+        app.on_palette_closed(move || post::palette_close(weak.clone()));
+    }
+    {
+        let weak = app.as_weak();
+        app.on_palette_query_edited(move |text| {
+            post::palette_query(weak.clone(), text.to_string())
+        });
+    }
+    {
+        let weak = app.as_weak();
+        app.on_palette_chosen(move |id| post::palette_chosen(weak.clone(), id.to_string()));
     }
 
     // ── 星籁 AI ──
@@ -2600,6 +2642,18 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                 return;
             }
 
+            // 0.3.6：Ctrl+K 在哪儿都开 / 关命令面板；面板开着时 Esc 先关它。
+            if chord.as_deref() == Some("ctrl+k") {
+                handled = true;
+                post::toggle_palette(app.as_weak());
+                return;
+            }
+            if chord.as_deref() == Some("escape") && app.get_palette_open() {
+                handled = true;
+                post::palette_close(app.as_weak());
+                return;
+            }
+
             // ── dispatch ──
             let Some(chord) = chord else {
                 return;
@@ -3407,6 +3461,10 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
             Shell::with(|shell, app| {
                 let mut cloud_action = 0u8;
                 let mut interop_action = 0u8;
+                // 0.3.6 专业后期：菜单行的动作等 Studio 的 borrow 放掉再做。
+                let mut post_action: Option<(String, i32)> = None;
+                let mut palette_action = false;
+                let mut shortcuts_page = false;
                 {
                     // The edits a row makes say they were asked from the
                     // menu, unless a shortcut came in through here first.
@@ -3503,7 +3561,11 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                         }
                         // 一键踩点：按选中音频的节拍把时间轴切开。
                         "beat-cut" => state.beat_cut(),
-                        "save" => state.save(true),
+                        // 0.3.6 保存前自动留一份工程快照（同一分钟只留一份）。
+                        "save" => {
+                            post::snapshot_before_save(&state);
+                            state.save(true);
+                        }
                         // 工程云同步：菜单收起后（此处仍借着 Studio）只记下
                         // 要做哪一件，等 borrow 放掉再交给后台。
                         "cloud-save" => cloud_action = 1,
@@ -3630,6 +3692,22 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                             state.ai.wizard_open = true;
                         }
                         "ai-settings" => state.handle(Msg::Settings(SettingsMsg::Open)),
+                        // 0.3.6 专业后期底座：菜单行只记下要做什么，Studio
+                        // 的 borrow 放掉之后才开面板 / 开文件对话框。
+                        "post-panel" | "post-scope" => {
+                            post_action = Some(("panel".to_owned(), 0))
+                        }
+                        "post-color" => post_action = Some(("panel".to_owned(), 1)),
+                        "qc" => post_action = Some(("panel".to_owned(), 2)),
+                        "checks" => post_action = Some(("panel".to_owned(), 3)),
+                        "snapshots" => post_action = Some(("panel".to_owned(), 4)),
+                        "handoff" => post_action = Some(("handoff".to_owned(), 5)),
+                        "command-palette" => palette_action = true,
+                        "shortcuts-page" => shortcuts_page = true,
+                        "layout-save" => {
+                            state.remember_layout_soon();
+                            state.notify("当前布局已保存：下次启动按这套打开", false);
+                        }
                         _ => {}
                     }
                 }
@@ -3674,6 +3752,22 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                         1 => interop::export_jianying(weak),
                         2 => interop::export_xml(weak),
                         _ => interop::import_draft(),
+                    }
+                }
+                // 0.3.6 专业后期：命令面板 / 后期面板 / 快捷键页。
+                if palette_action {
+                    post::toggle_palette(app.as_weak());
+                }
+                if shortcuts_page {
+                    post::open_shortcuts(app.as_weak());
+                }
+                if let Some((what, tab)) = post_action {
+                    let weak = app.as_weak();
+                    if what == "handoff" {
+                        post::open_tab(weak.clone(), tab);
+                        post::action(weak, "handoff".to_owned(), 0, String::new());
+                    } else {
+                        post::open_tab(weak, tab);
                     }
                 }
             });

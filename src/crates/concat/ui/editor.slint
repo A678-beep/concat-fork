@@ -69,6 +69,9 @@ export global Editor {
     callback divider-pressed(index: int);
     callback divider-dragged(index: int, delta: length);
 
+    /// 0.3.6 专业后期：预览区右上角的按钮打开的后期面板（示波器页）。
+    callback post-open();
+
     // ── the library ──
     in-out property <[MediaItemData]> media;
     in-out property <int> media-count-all;

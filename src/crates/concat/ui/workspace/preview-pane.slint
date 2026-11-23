@@ -806,6 +806,9 @@ export component PreviewPane inherits Rectangle {
     /// That row was used.
     callback pane-removed();
 
+    /// 预览区右上角的「专业后期」按钮（0.3.6）：示波器 / 调色 / QC 的大表。
+    callback post-open();
+
     /// The stage alone: no header over it and no transport under it. The
     /// phone's monitor, which has a transport of its own on the row below
     /// and states the output nowhere - see ui/phone/. The stage keeps
@@ -862,6 +865,18 @@ export component PreviewPane inherits Rectangle {
                     removable: root.pane-removable;
                     picked(kind) => { root.pane-picked(kind); }
                     removed => { root.pane-removed(); }
+                }
+            }
+
+            // 0.3.6：专业后期入口。预览右上角，示波器图标；与视图菜单
+            // 里的同一行进的是同一张表。
+            VerticalLayout {
+                alignment: center;
+
+                IconButton {
+                    glyph: Glyph.waveform;
+                    label: "专业后期面板";
+                    clicked => { root.post-open(); }
                 }
             }
         }
