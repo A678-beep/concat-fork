@@ -1,0 +1,2389 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 XingLai AI and Concat contributors
+
+// 首页两侧的主题装饰（0.3.4）。
+//
+// 启动页的内容列最大 1360px，宽屏上左右各留出一大片空白。这里把那些空白
+// 变成一套全高、向中间渐隐的主题画：每个皮肤（`skins.slint` 的 style）
+// 一套场景，全部由矢量与粒子现画 —— 没有图片、视频或 GIF，不引入素材，
+// 也就不存在版权与解码开销。
+//
+// 布局怎么算：装饰只画在内容列之外的那条带子上，带宽 = 内容列两侧的空白，
+// 夹在屏宽的 8% 到 18% 之间。窗宽 < 1200px 时整块不实例化（`backdrop.slint`
+// 的 HomeBackdrop 判断），所以窄窗只留背景、不会挡内容；带子的内侧一半用
+// 页面底色做渐变遮罩，向中间渐隐，文字对比度不变。
+//
+// 层次：每个场景都分「后景（云、山、雾、远光）、中景（主体）、前景（粒子、
+// 光点）」三层，各层走不同速度形成视差；指针靠近某一侧时那一侧亮一档，
+// 没人看的一侧更暗。
+//
+// 动态：本身没有定时器 —— 相位由 `HomeBackdrop` 传给背景风景的那一个 30fps
+// 定时器一起驱动，所以两侧装饰和背景永远同一帧、不会把重绘次数翻倍。
+// 低配模式 / 失焦 / 最小化时相位冻结，画的是静态一帧。`Theme.side-art`
+// 是开关：0 关、1 动态、2 静态。
+
+import { Theme } from "theme.slint";
+
+/// 场景底稿的公共算法：确定性伪随机（没有 Math.random，同一指数永远给
+/// 同一个数，重启后场景不会换一张脸）、呼吸、镜像。
+export global SideArt {
+    /// `[0, 1)` 的确定性伪随机：`i` 是序号，`salt` 是这一组数的种子。
+    public pure function rnd(i: int, salt: int) -> float {
+        return Math.mod(Math.abs(Math.sin((i * 127.1 + salt * 311.7) * 1deg)) * 43758.5453, 1.0);
+    }
+
+    /// `[-1, 1)` 的确定性伪随机。
+    public pure function rnd2(i: int, salt: int) -> float {
+        return rnd(i, salt) * 2.0 - 1.0;
+    }
+
+    /// 呼吸：0.45..1，`i` 让同一层里的东西不同步。
+    public pure function breathe(phase: float, i: int, speed: float) -> float {
+        return 0.45 + 0.55 * Math.abs(Math.sin((phase * 360.0 * speed + i * 61.0) * 1deg));
+    }
+
+    /// 左镜右：`side` 0 原样、1 翻转。
+    public pure function mx(side: int, f: float) -> float {
+        return side == 0 ? f : 1.0 - f;
+    }
+}
+
+// ── 1 / 8 / 11 · 中国龙 · 赤金 / 纯金 · 龙纹 / 金龙腾云 ─────────────────────
+//
+// 一条由鳞节叠成的长龙从下往上穿行，偶尔从顶部游出画面；后景是云海与
+// 一抹极淡的龙形长线，前景是金粉。纯金·龙纹（style 8）是浮雕版：金底
+// 金纹、不点金粉，加一道缓慢扫过的光。
+
+component SceneDragon inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+    in property <bool> relief: false;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> gold: root.relief
+        ? Theme.skin.seed.mix(#fff0c4, 0.42)
+        : Theme.skin.signature;
+    property <color> warm: root.gold.mix(#ffffff, 0.56);
+    property <color> deep: root.gold.mix(#000000, 0.66);
+    property <float> body-op: root.relief ? 0.62 : 0.94;
+
+    // 后景：三团云纹，慢速横移并轻轻起伏。
+    for i in 3: Path {
+        width: root.width * 1.15;
+        height: root.width * 0.44;
+        x: Math.mod(root.phase * (0.08 + Math.mod(i, 2) * 0.05) + i * 0.33, 1.25) * root.width
+            - root.width * 0.40;
+        y: root.height * (0.20 + i * 0.25)
+            + Math.sin((root.phase * 360 + i * 120) * 1deg) * root.width * 0.03;
+        viewbox-width: 100;
+        viewbox-height: 40;
+        fit: fill;
+        stroke: root.warm.with-alpha(0.13 + 0.03 * i);
+        stroke-width: root.width * 0.011;
+        stroke-line-cap: round;
+        commands: "M 4 26 C 9 16 21 17 25 27 C 27 33 21 37 16 34 C 13 32 13 28 16 27 M 34 26 C 39 16 51 17 55 27 C 57 33 51 37 46 34 C 43 32 43 28 46 27 M 64 26 C 69 16 81 17 85 27 C 87 33 81 37 76 34 C 73 32 73 28 76 27";
+    }
+
+    // 后景：一条很淡的龙形长线。
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        fit: fill;
+        stroke: root.warm.with-alpha(root.relief ? 0.10 : 0.09);
+        stroke-width: root.width * 0.048;
+        stroke-line-cap: round;
+        commands: "M 22 118 C 78 96 8 74 62 54 C 100 40 30 20 66 2 C 82 -6 88 -12 84 -20";
+    }
+
+    // 中景：龙身。一节一节向上游，节间叠压，连成一条会扭动的光带。
+    for i in 20: Rectangle {
+        width: root.width * (0.21 - 0.0068 * i
+            + 0.012 * Math.sin((i * 43 + root.phase * 80) * 1deg));
+        height: root.height / 14.0;
+        border-radius: self.width / 2;
+        x: root.width * (0.5 + 0.26 * Math.sin((i * 33.0 + root.phase * 300.0) * 1deg))
+            - self.width / 2;
+        y: Math.mod(i / 20.0 - root.phase, 1.0) * (root.height + root.height * 0.14)
+            - root.height * 0.07;
+        opacity: root.body-op;
+        background: @radial-gradient(circle,
+            root.warm.with-alpha(0.88) 0%,
+            root.gold.with-alpha(0.64) 46%,
+            root.deep.with-alpha(0.0) 78%);
+
+        // 鳞光：每个鳞节上沿的一道亮弧。
+        Rectangle {
+            x: parent.width * 0.14;
+            y: parent.height * 0.10;
+            width: parent.width * 0.72;
+            height: parent.height * 0.22;
+            border-radius: self.height / 2;
+            background: @linear-gradient(90deg,
+                root.warm.with-alpha(0.0) 0%,
+                root.warm.with-alpha(0.66) 46%,
+                root.warm.with-alpha(0.0) 100%);
+        }
+    }
+
+    // 中景：龙头。跟着龙身最前面那一节，从顶部游出、再自底部游回来。
+    Rectangle {
+        width: root.width * 0.46;
+        height: root.width * 0.46;
+        x: root.width * (0.5 + 0.26 * Math.sin((root.phase * 300.0) * 1deg))
+            - self.width / 2;
+        y: Math.mod(0.0 - root.phase, 1.0) * (root.height + root.height * 0.14)
+            - root.height * 0.07 - self.height * 0.42;
+        opacity: root.body-op;
+
+        Rectangle {
+            x: -self.width * 0.55;
+            y: -self.height * 0.55;
+            width: 210%;
+            height: 210%;
+            background: @radial-gradient(circle,
+                root.warm.with-alpha(root.relief ? 0.10 : 0.20) 0%,
+                Colors.transparent 62%);
+        }
+
+        // 双角
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            fit: fill;
+            stroke: root.warm.with-alpha(0.85);
+            stroke-width: root.width * 0.017;
+            stroke-line-cap: round;
+            commands: "M 37 32 C 28 20 32 10 44 4 M 63 32 C 72 20 68 10 56 4";
+        }
+
+        // 眼
+        Rectangle {
+            x: parent.width * 0.24;
+            y: parent.height * 0.40;
+            width: parent.width * 0.15;
+            height: parent.width * 0.10;
+            border-radius: self.width / 2;
+            background: #fff6d8.with-alpha(0.95);
+        }
+        Rectangle {
+            x: parent.width * 0.61;
+            y: parent.height * 0.40;
+            width: parent.width * 0.15;
+            height: parent.width * 0.10;
+            border-radius: self.width / 2;
+            background: #fff6d8.with-alpha(0.95);
+        }
+
+        // 须
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            fit: fill;
+            stroke: root.warm.with-alpha(0.70);
+            stroke-width: root.width * 0.012;
+            stroke-line-cap: round;
+            commands: "M 30 60 C 16 64 10 74 12 86 M 70 60 C 84 64 90 74 88 86";
+        }
+
+        // 口
+        Rectangle {
+            x: parent.width * 0.36;
+            y: parent.height * 0.68;
+            width: parent.width * 0.28;
+            height: parent.width * 0.055;
+            border-radius: self.width / 2;
+            background: root.deep.with-alpha(0.85);
+        }
+    }
+
+    // 前景：金粉（浮雕版不点粉，改一道光扫）。
+    if !root.relief: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: Colors.transparent;
+
+        for i in 14: Rectangle {
+            width: 2px;
+            height: 2px;
+            border-radius: 1px;
+            x: root.width * (0.12 + 0.76 * SideArt.rnd(i, 5))
+                + Math.sin((root.phase * 360 + i * 83) * 1deg) * root.width * 0.05;
+            y: Math.mod(SideArt.rnd(i, 9) - root.phase * (0.16 + 0.10 * SideArt.rnd(i, 3)), 1.0)
+                * root.height;
+            opacity: 0.25 + 0.50 * SideArt.breathe(root.phase, i, 1.0);
+            background: root.warm;
+        }
+    }
+
+    // 浮雕版：一道很慢的光扫过龙纹。
+    if root.relief: Rectangle {
+        width: root.width * 0.55;
+        height: 100%;
+        x: (Math.mod(root.phase * 1.15, 1.7) - 0.35) * root.width;
+        background: @linear-gradient(90deg,
+            Colors.transparent 0%,
+            #fff3c8.with-alpha(0.16) 50%,
+            Colors.transparent 100%);
+    }
+}
+
+// ── 2 · 科技蓝 ───────────────────────────────────────────────────────────────
+
+component SceneTech inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> line: (#5fc8ff).with-alpha(0.16);
+    property <color> hot: (#a8ecff);
+
+    // 竖轨
+    for i in 4: Rectangle {
+        x: root.width * (0.16 + i * 0.24);
+        width: 1px;
+        height: 100%;
+        background: @linear-gradient(180deg,
+            Colors.transparent 0%,
+            root.line 18%,
+            root.line 82%,
+            Colors.transparent 100%);
+    }
+    // 横刻度
+    for i in 9: Rectangle {
+        y: root.height * (0.08 + i * 0.10);
+        width: root.width * (Math.mod(i, 2) == 0 ? 0.56 : 0.34);
+        x: root.width * 0.22;
+        height: 1px;
+        background: root.line;
+    }
+
+    // 数据点：沿竖轨上下浮。
+    for i in 7: Rectangle {
+        width: 3px;
+        height: 3px;
+        border-radius: 1.5px;
+        x: root.width * (0.16 + Math.mod(i, 4) * 0.24) + Math.sin((i * 71 + root.phase * 90) * 1deg) * 3px;
+        y: Math.mod(SideArt.rnd(i, 21) + root.phase * (0.20 + 0.08 * Math.mod(i, 3)), 1.0) * root.height;
+        opacity: 0.20 + 0.60 * SideArt.breathe(root.phase, i, 0.8);
+        background: root.hot;
+    }
+
+    // 扫描线：一个循环从上到下。
+    Rectangle {
+        width: 100%;
+        height: 90px;
+        y: Math.mod(root.phase, 1.0) * (root.height + 90px) - 90px;
+        background: @linear-gradient(180deg,
+            Colors.transparent 0%,
+            (#6fd8ff).with-alpha(0.10) 50%,
+            Colors.transparent 100%);
+    }
+
+    // 前景粒子
+    for i in 9: Rectangle {
+        width: 1.6px;
+        height: 1.6px;
+        border-radius: 0.8px;
+        x: root.width * SideArt.rnd(i, 31);
+        y: Math.mod(SideArt.rnd(i, 33) - root.phase * 0.10, 1.0) * root.height;
+        opacity: 0.20 + 0.40 * SideArt.breathe(root.phase, i, 1.4);
+        background: root.hot;
+    }
+}
+
+// ── 3 · 赛博紫 ───────────────────────────────────────────────────────────────
+
+component SceneCyber inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> violet: (#c07aff).with-alpha(0.30);
+    property <color> cyan: (#5fe8ff).with-alpha(0.26);
+
+    // 两条长的霓虹光轨 + 两条细的。
+    for i in 2: Rectangle {
+        x: root.width * (i == 0 ? 0.28 : 0.66);
+        width: i == 0 ? 3px : 1.4px;
+        height: 100%;
+        background: @linear-gradient(180deg,
+            Colors.transparent 0%,
+            (i == 0 ? root.violet : root.cyan) 30%,
+            (i == 0 ? root.violet : root.cyan) 70%,
+            Colors.transparent 100%);
+    }
+
+    // 故障横条：每块只在自己的循环里亮一下。
+    for i in 7: Rectangle {
+        y: root.height * (0.09 + i * 0.12);
+        height: 2px;
+        width: root.width * (0.16 + 0.10 * Math.mod(i, 3));
+        x: root.width * SideArt.rnd(i, 41);
+        opacity: Math.mod(root.phase * 8.0 + i * 0.29, 1.0) > 0.74
+            ? (Math.mod(i, 3) == 0 ? 0.55 : 0.30)
+            : 0.0;
+        background: Math.mod(i, 2) == 0 ? root.cyan : root.violet;
+    }
+
+    // 扫描光块
+    Rectangle {
+        width: 100%;
+        height: root.height * 0.24;
+        y: Math.mod(root.phase * 0.6, 1.0) * (root.height + root.height * 0.24) - root.height * 0.24;
+        background: @linear-gradient(180deg,
+            Colors.transparent 0%,
+            (#ff7ae0).with-alpha(0.07) 50%,
+            Colors.transparent 100%);
+    }
+
+    for i in 10: Rectangle {
+        width: 1.6px;
+        height: 1.6px;
+        border-radius: 0.8px;
+        x: root.width * SideArt.rnd(i, 43);
+        y: Math.mod(SideArt.rnd(i, 47) - root.phase * 0.12, 1.0) * root.height;
+        opacity: 0.20 + 0.55 * SideArt.breathe(root.phase, i, 1.2);
+        background: Math.mod(i, 2) == 0 ? root.cyan : root.violet;
+    }
+}
+
+// ── 4 / 18 · 青绿山水 / 水墨山河 ─────────────────────────────────────────────
+
+component SceneInk inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <bool> pale: !Theme.dark;
+    property <color> ink: Theme.dark ? (#dceee4) : (#26333a);
+    property <color> moon: Theme.skin.signature.mix(#ffffff, 0.55);
+
+    // 远月
+    Rectangle {
+        width: root.width * 0.34;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: root.width * SideArt.mx(root.side, 0.30);
+        y: root.height * 0.10;
+        background: @radial-gradient(circle,
+            root.moon.with-alpha(0.34) 0%,
+            root.moon.with-alpha(0.10) 46%,
+            Colors.transparent 72%);
+    }
+    Rectangle {
+        width: root.width * 0.16;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: root.width * SideArt.mx(root.side, 0.39);
+        y: root.height * 0.135;
+        background: root.moon.with-alpha(0.50);
+    }
+
+    // 三层山影：从远到近越来越深，慢慢左右漂。
+    for i in 3: Path {
+        width: root.width * 1.25;
+        height: root.height * (0.26 + i * 0.03);
+        x: (Math.mod(root.phase * (0.04 + i * 0.02) + i * 0.17, 1.3) - 0.15) * root.width;
+        y: root.height * (0.44 + i * 0.13);
+        viewbox-width: 100;
+        viewbox-height: 40;
+        fit: fill;
+        fill: root.ink.with-alpha(0.10 + i * 0.06);
+        commands: "M 0 40 L 0 30 L 10 20 L 18 26 L 28 12 L 38 25 L 48 17 L 58 27 L 70 14 L 80 24 L 90 18 L 100 27 L 100 40 Z";
+    }
+
+    // 雾气：三条横着慢慢走的淡带。
+    for i in 3: Rectangle {
+        width: root.width * 1.3;
+        height: root.height * (0.10 + i * 0.02);
+        x: (Math.mod(root.phase * (0.10 + i * 0.05) + i * 0.29, 1.3) - 0.15) * root.width;
+        y: root.height * (0.30 + i * 0.17);
+        background: @linear-gradient(90deg,
+            Colors.transparent 0%,
+            root.ink.with-alpha(0.10) 38%,
+            root.ink.with-alpha(0.06) 62%,
+            Colors.transparent 100%);
+    }
+
+    // 飞鸟：三只小小的「人」字，从下往右上飘。
+    for i in 3: Path {
+        width: root.width * 0.30;
+        height: root.width * 0.12;
+        x: Math.mod(root.phase * (0.25 + i * 0.08) + i * 0.37, 1.25) * root.width - root.width * 0.15;
+        y: root.height * (0.16 + i * 0.10)
+            + Math.sin((root.phase * 360 + i * 120) * 1deg) * 3px;
+        viewbox-width: 30;
+        viewbox-height: 12;
+        fit: fill;
+        stroke: root.ink.with-alpha(0.55);
+        stroke-width: 1.6px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+        commands: "M 1 10 C 6 1 12 1 15 10 M 15 10 C 18 1 24 1 29 10";
+    }
+
+    // 前景：几粒水气/尘土。
+    for i in 8: Rectangle {
+        width: 1.6px;
+        height: 1.6px;
+        border-radius: 0.8px;
+        x: root.width * SideArt.rnd(i, 53);
+        y: Math.mod(SideArt.rnd(i, 57) - root.phase * 0.07, 1.0) * root.height;
+        opacity: 0.12 + 0.22 * SideArt.breathe(root.phase, i, 0.6);
+        background: root.ink;
+    }
+}
+
+// ── 5 · 星空深空 ─────────────────────────────────────────────────────────────
+
+component SceneStars inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> star: #dfe8ff;
+
+    // 后景：两团星云。
+    for i in 2: Rectangle {
+        width: root.width * (i == 0 ? 1.1 : 0.8);
+        height: self.width;
+        x: root.width * SideArt.mx(root.side, i == 0 ? 0.30 : 0.66) - self.width / 2;
+        y: root.height * (i == 0 ? 0.26 : 0.68);
+        background: @radial-gradient(circle,
+            (i == 0 ? (#8a7aff) : (#4fc3ff)).with-alpha(0.13) 0%,
+            Colors.transparent 62%);
+    }
+
+    // 星星：大小、明暗、呼吸各不相同。
+    for i in 26: Rectangle {
+        width: (1.0 + 2.0 * SideArt.rnd(i, 61)) * 1px;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: root.width * SideArt.rnd(i, 63);
+        y: root.height * SideArt.rnd(i, 67);
+        opacity: 0.20 + 0.70 * SideArt.breathe(root.phase, i, 0.25 + 0.4 * SideArt.rnd(i, 69));
+        background: Math.mod(i, 7) == 0 ? (#ffd9a0) : root.star;
+    }
+
+    // 一颗缓慢划过的流星：一串逐渐变淡的点，斜着走。
+    for i in 5: Rectangle {
+        width: (2.6 - i * 0.4) * 1px;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: Math.mod(root.phase * 0.35 + 0.10, 1.3) * root.width
+            - i * root.width * 0.06 - root.width * 0.1;
+        y: root.height * (0.16 + Math.mod(root.phase * 0.35 + 0.10, 1.3) * 0.20)
+            + i * root.width * 0.035;
+        opacity: (0.55 - i * 0.09) * Math.max(0.0, 1.0 - Math.mod(root.phase * 0.35 + 0.10, 1.3));
+        background: #fff6e0;
+    }
+
+    // 前景：漂浮的亮点。
+    for i in 7: Rectangle {
+        width: 1.4px;
+        height: 1.4px;
+        border-radius: 0.7px;
+        x: root.width * SideArt.rnd(i, 71);
+        y: Math.mod(SideArt.rnd(i, 73) - root.phase * 0.05, 1.0) * root.height;
+        opacity: 0.20 + 0.45 * SideArt.breathe(root.phase, i, 1.6);
+        background: root.star;
+    }
+}
+
+// ── 6 · 暖金晨曦 ─────────────────────────────────────────────────────────────
+
+component SceneDawn inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> warm: #ffd9a0;
+
+    // 后景：一团暖光从底部升起来。
+    Rectangle {
+        width: root.width * 2.0;
+        height: self.width;
+        x: root.width * 0.5 - self.width / 2;
+        y: root.height * 0.72;
+        background: @radial-gradient(circle,
+            (#ffb24e).with-alpha(0.16) 0%,
+            Colors.transparent 62%);
+    }
+
+    // 几道斜着的光带（竖着画，靠透视读成斜光）。
+    for i in 3: Rectangle {
+        width: root.width * (0.10 + i * 0.05);
+        height: 100%;
+        x: root.width * (0.20 + i * 0.22)
+            + Math.sin((root.phase * 360 + i * 70) * 1deg) * root.width * 0.03;
+        background: @linear-gradient(90deg,
+            Colors.transparent 0%,
+            root.warm.with-alpha(0.08) 50%,
+            Colors.transparent 100%);
+    }
+
+    // 尘光：从下往上慢慢升。
+    for i in 18: Rectangle {
+        width: (1.2 + 1.8 * SideArt.rnd(i, 79)) * 1px;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: root.width * SideArt.rnd(i, 81)
+            + Math.sin((root.phase * 360 + i * 91) * 1deg) * root.width * 0.04;
+        y: Math.mod(SideArt.rnd(i, 83) - root.phase * (0.05 + 0.05 * SideArt.rnd(i, 85)), 1.0)
+            * root.height;
+        opacity: 0.16 + 0.40 * SideArt.breathe(root.phase, i, 0.5);
+        background: root.warm;
+    }
+}
+
+// ── 7 · 墨玉青砂 ─────────────────────────────────────────────────────────────
+
+component SceneJade inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> jade: Theme.skin.signature;
+
+    // 后景：三颗青玉光球，慢慢呼吸。
+    for i in 3: Rectangle {
+        width: root.width * (0.75 - i * 0.13);
+        height: self.width;
+        border-radius: self.width / 2;
+        x: root.width * SideArt.mx(root.side, 0.28 + i * 0.20) - self.width / 2;
+        y: root.height * (0.16 + i * 0.27)
+            + Math.sin((root.phase * 360 + i * 90) * 1deg) * root.width * 0.03;
+        opacity: 0.62 + 0.30 * SideArt.breathe(root.phase, i, 0.4);
+        background: @radial-gradient(circle,
+            root.jade.with-alpha(0.22) 0%,
+            root.jade.with-alpha(0.08) 48%,
+            Colors.transparent 72%);
+    }
+
+    // 雾气：两条横着飘的淡青带。
+    for i in 2: Rectangle {
+        width: root.width * 1.25;
+        height: root.height * 0.12;
+        x: (Math.mod(root.phase * (0.06 + i * 0.04) + i * 0.31, 1.2) - 0.1) * root.width;
+        y: root.height * (0.34 + i * 0.30);
+        background: @linear-gradient(90deg,
+            Colors.transparent 0%,
+            (#6fd8c4).with-alpha(0.10) 50%,
+            Colors.transparent 100%);
+    }
+
+    for i in 9: Rectangle {
+        width: 1.8px;
+        height: 1.8px;
+        border-radius: 0.9px;
+        x: root.width * SideArt.rnd(i, 87);
+        y: Math.mod(SideArt.rnd(i, 89) - root.phase * 0.05, 1.0) * root.height;
+        opacity: 0.18 + 0.30 * SideArt.breathe(root.phase, i, 0.8);
+        background: root.jade;
+    }
+}
+
+// ── 8 的浮雕龙在 SceneDragon 里（relief）；9 · 纯青 ──────────────────────────
+
+component SceneIce inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> ice: (#9fe8dc);
+
+    // 后景：两道大冰裂，细枝分叉。
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        fit: fill;
+        stroke: root.ice.with-alpha(0.20);
+        stroke-width: 1.4px;
+        stroke-line-cap: round;
+        commands: "M 32 0 L 38 14 L 30 26 L 40 40 L 34 56 L 44 72 L 38 88 L 46 100 M 38 14 L 54 20 M 40 40 L 58 46 M 34 56 L 20 66";
+    }
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        fit: fill;
+        stroke: root.ice.with-alpha(0.12);
+        stroke-width: 1.2px;
+        stroke-line-cap: round;
+        commands: "M 72 0 L 66 12 L 78 24 L 70 38 L 80 54 L 72 70 L 82 86 L 76 100 M 66 12 L 52 18 M 70 38 L 54 44 M 80 54 L 92 60";
+    }
+
+    // 冰面微光：一块慢慢扫过的亮带。
+    Rectangle {
+        width: root.width * 0.7;
+        height: 100%;
+        x: (Math.mod(root.phase * 0.8, 1.6) - 0.3) * root.width;
+        background: @linear-gradient(90deg,
+            Colors.transparent 0%,
+            root.ice.with-alpha(0.10) 50%,
+            Colors.transparent 100%);
+    }
+
+    // 两圈冰纹
+    for i in 2: Rectangle {
+        width: root.width * (0.46 + i * 0.10);
+        height: self.width * 1.4;
+        x: root.width * SideArt.mx(root.side, 0.5) - self.width / 2;
+        y: root.height * (0.30 + i * 0.28);
+        border-radius: self.width / 2;
+        border-width: 1px;
+        border-color: root.ice.with-alpha(0.14);
+        background: Colors.transparent;
+    }
+
+    for i in 7: Rectangle {
+        width: 1.6px;
+        height: 1.6px;
+        border-radius: 0.8px;
+        x: root.width * SideArt.rnd(i, 91);
+        y: Math.mod(SideArt.rnd(i, 93) - root.phase * 0.04, 1.0) * root.height;
+        opacity: 0.16 + 0.26 * SideArt.breathe(root.phase, i, 0.7);
+        background: root.ice;
+    }
+}
+
+// ── 10 · 纯金 ────────────────────────────────────────────────────────────────
+
+component SceneGold inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> gold: Theme.skin.signature;
+    property <color> warm: #fff0c8;
+
+    // 两道很慢的金色光带，一前一后。
+    Rectangle {
+        width: root.width * 0.80;
+        height: 100%;
+        x: (Math.mod(root.phase * 0.55, 1.4) - 0.25) * root.width;
+        background: @linear-gradient(90deg,
+            Colors.transparent 0%,
+            root.warm.with-alpha(0.13) 48%,
+            Colors.transparent 100%);
+    }
+    Rectangle {
+        width: root.width * 0.45;
+        height: 100%;
+        x: (Math.mod(root.phase * 0.85 + 0.42, 1.4) - 0.25) * root.width;
+        background: @linear-gradient(90deg,
+            Colors.transparent 0%,
+            root.gold.with-alpha(0.10) 50%,
+            Colors.transparent 100%);
+    }
+
+    // 一条很淡的金线。
+    Rectangle {
+        x: root.width * 0.5;
+        width: 1px;
+        height: 100%;
+        background: @linear-gradient(180deg,
+            Colors.transparent 0%,
+            root.warm.with-alpha(0.30) 30%,
+            root.warm.with-alpha(0.30) 70%,
+            Colors.transparent 100%);
+    }
+
+    for i in 8: Rectangle {
+        width: 2px;
+        height: 2px;
+        border-radius: 1px;
+        x: root.width * SideArt.rnd(i, 95);
+        y: Math.mod(SideArt.rnd(i, 97) - root.phase * 0.04, 1.0) * root.height;
+        opacity: 0.14 + 0.28 * SideArt.breathe(root.phase, i, 0.9);
+        background: root.warm;
+    }
+}
+
+// ── 12 / 28 · 中国红灯笼 / 灯笼长廊 ──────────────────────────────────────────
+
+component Lantern inherits Rectangle {
+    in property <length> size: 54px;
+    in property <float> alpha: 1.0;
+    in property <color> hot: #ffb877;
+
+    width: root.size;
+    height: root.size * 1.62;
+    background: Colors.transparent;
+
+    // 光晕
+    Rectangle {
+        x: -root.size * 0.55;
+        y: -root.size * 0.30;
+        width: root.size * 2.1;
+        height: root.size * 2.1;
+        background: @radial-gradient(circle,
+            root.hot.with-alpha(0.18 * root.alpha) 0%,
+            Colors.transparent 62%);
+    }
+    // 绳
+    Rectangle {
+        x: root.width / 2 - 1px;
+        y: 0px;
+        width: 2px;
+        height: root.size * 0.22;
+        background: (#d8a24c).with-alpha(0.35 * root.alpha);
+    }
+    // 灯身
+    Rectangle {
+        x: 0px;
+        y: root.size * 0.20;
+        width: root.size;
+        height: root.size * 0.86;
+        border-radius: self.width * 0.42;
+        background: @radial-gradient(circle,
+            #ffd2a0.with-alpha(0.95 * root.alpha) 0%,
+            #e24a32.with-alpha(0.90 * root.alpha) 55%,
+            #741710.with-alpha(0.92 * root.alpha) 100%);
+    }
+    // 灯身竖光
+    Rectangle {
+        x: root.size * 0.22;
+        y: root.size * 0.27;
+        width: root.size * 0.56;
+        height: root.size * 0.72;
+        border-radius: self.width * 0.46;
+        background: @linear-gradient(180deg,
+            (#ffe0b0).with-alpha(0.55 * root.alpha) 0%,
+            Colors.transparent 42%,
+            (#b83626).with-alpha(0.50 * root.alpha) 100%);
+    }
+    // 上下盖
+    Rectangle {
+        x: root.size * 0.31;
+        y: root.size * 0.165;
+        width: root.size * 0.38;
+        height: root.size * 0.055;
+        border-radius: 2px;
+        background: (#e8b04b).with-alpha(0.90 * root.alpha);
+    }
+    Rectangle {
+        x: root.size * 0.36;
+        y: root.size * 1.045;
+        width: root.size * 0.28;
+        height: root.size * 0.045;
+        border-radius: 2px;
+        background: (#c79236).with-alpha(0.90 * root.alpha);
+    }
+    // 流苏
+    for t in 3: Rectangle {
+        x: root.size * (0.38 + t * 0.10);
+        y: root.size * 1.09;
+        width: 1.4px;
+        height: root.size * 0.34;
+        background: (#e8b04b).with-alpha(0.50 * root.alpha);
+    }
+}
+
+component SceneLantern inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+    in property <bool> many: false;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    // 后景：一条暖光从画面上方落下来。
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @radial-gradient(circle,
+            (#ff8a45).with-alpha(0.12) 0%,
+            Colors.transparent 60%);
+    }
+
+    // 灯笼：大小两层，轻摆。
+    for i in (root.many ? 5 : 3): Lantern {
+        size: root.width * (i == 0 ? 0.44 : (root.many ? 0.30 : 0.34));
+        alpha: i == 0 ? 1.0 : (root.many ? 0.72 : 0.82);
+        x: root.width * (0.5 + 0.26 * Math.sin((i * 1.9 + root.phase * 1.0) * 57deg))
+            - self.width / 2;
+        y: root.height * (0.08 + i * (root.many ? 0.16 : 0.23))
+            + Math.sin((root.phase * 360 + i * 110) * 1deg) * root.width * 0.05;
+    }
+
+    // 前景：飘起来的火星。
+    for i in (root.many ? 14 : 10): Rectangle {
+        width: 1.8px;
+        height: 1.8px;
+        border-radius: 0.9px;
+        x: root.width * SideArt.rnd(i, 99)
+            + Math.sin((root.phase * 360 + i * 77) * 1deg) * root.width * 0.05;
+        y: Math.mod(SideArt.rnd(i, 101) - root.phase * (0.06 + 0.04 * SideArt.rnd(i, 103)), 1.0)
+            * root.height;
+        opacity: 0.18 + 0.42 * SideArt.breathe(root.phase, i, 0.9);
+        background: #ffb877;
+    }
+}
+
+// ── 13 / 30 · 祥云流动 / 赤金云纹 ────────────────────────────────────────────
+
+component SceneCloud inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> gold: Theme.skin.signature;
+    property <color> warm: root.gold.mix(#ffffff, 0.60);
+
+    // 后景：两团大的云气。
+    for i in 2: Rectangle {
+        width: root.width * (1.2 - i * 0.25);
+        height: self.width * 0.55;
+        x: root.width * 0.5 - self.width / 2;
+        y: root.height * (0.18 + i * 0.44);
+        background: @radial-gradient(circle,
+            root.gold.with-alpha(0.10) 0%,
+            Colors.transparent 64%);
+    }
+
+    // 中景：三排云纹，一排慢一排快，错开往上飘。
+    for i in 6: Path {
+        width: root.width * 0.95;
+        height: root.width * 0.42;
+        x: (Math.mod(root.phase * (0.10 + Math.mod(i, 3) * 0.06) + i * 0.21, 1.25) - 0.12)
+            * root.width;
+        y: root.height * (0.10 + Math.floor(i / 2) * 0.29)
+            + Math.sin((root.phase * 360 + i * 83) * 1deg) * root.width * 0.03;
+        viewbox-width: 100;
+        viewbox-height: 40;
+        fit: fill;
+        stroke: root.warm.with-alpha(0.13 + Math.mod(i, 3) * 0.035);
+        stroke-width: root.width * (0.009 + Math.mod(i, 2) * 0.003);
+        stroke-line-cap: round;
+        commands: "M 4 26 C 9 16 21 17 25 27 C 27 33 21 37 16 34 C 13 32 13 28 16 27 M 34 26 C 39 16 51 17 55 27 C 57 33 51 37 46 34 C 43 32 43 28 46 27 M 64 26 C 69 16 81 17 85 27 C 87 33 81 37 76 34 C 73 32 73 28 76 27";
+    }
+
+    // 一道很慢的金色光带。
+    Rectangle {
+        width: root.width * 0.9;
+        height: 100%;
+        x: (Math.mod(root.phase * 0.6, 1.5) - 0.3) * root.width;
+        background: @linear-gradient(90deg,
+            Colors.transparent 0%,
+            root.warm.with-alpha(0.10) 50%,
+            Colors.transparent 100%);
+    }
+
+    for i in 9: Rectangle {
+        width: 1.8px;
+        height: 1.8px;
+        border-radius: 0.9px;
+        x: root.width * SideArt.rnd(i, 105)
+            + Math.sin((root.phase * 360 + i * 61) * 1deg) * root.width * 0.04;
+        y: Math.mod(SideArt.rnd(i, 107) - root.phase * 0.06, 1.0) * root.height;
+        opacity: 0.18 + 0.38 * SideArt.breathe(root.phase, i, 0.8);
+        background: root.warm;
+    }
+}
+
+// ── 14 · 故宫剪影 ────────────────────────────────────────────────────────────
+
+component ScenePalace inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> wall: (#2a080c);
+    property <color> gold: Theme.skin.signature;
+
+    // 后景：一轮淡月 + 雪光。
+    Rectangle {
+        width: root.width * 0.40;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: root.width * SideArt.mx(root.side, 0.36);
+        y: root.height * 0.10;
+        background: @radial-gradient(circle,
+            (#f3e6c8).with-alpha(0.26) 0%,
+            (#f3e6c8).with-alpha(0.08) 52%,
+            Colors.transparent 74%);
+    }
+
+    // 宫墙
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        fit: fill;
+        fill: root.wall.with-alpha(0.62);
+        commands: "M 0 72 L 100 72 L 100 100 L 0 100 Z";
+    }
+
+    // 两层重檐的剪影：两座殿。
+    for i in 2: Path {
+        width: root.width * 0.62;
+        height: root.width * 0.62;
+        x: root.width * (i == 0 ? -0.04 : 0.42);
+        y: root.height * (i == 0 ? 0.62 : 0.58);
+        viewbox-width: 100;
+        viewbox-height: 60;
+        fit: fill;
+        fill: (#160508).with-alpha(0.90);
+        commands: "M 2 52 L 16 34 L 24 38 L 34 20 L 44 34 L 52 30 L 66 52 L 2 52 Z M 8 52 L 8 60 L 58 60 L 58 52 Z";
+    }
+
+    // 檐下瓦当：一排很淡的金点。
+    for i in 8: Rectangle {
+        width: 3px;
+        height: 2px;
+        x: root.width * (0.10 + i * 0.10);
+        y: root.height * (0.73 + Math.mod(i, 2) * 0.02);
+        opacity: 0.20 + 0.16 * SideArt.breathe(root.phase, i, 0.6);
+        background: root.gold;
+    }
+
+    // 前景：雪，缓缓斜落。
+    for i in 14: Rectangle {
+        width: 1.8px;
+        height: 1.8px;
+        border-radius: 0.9px;
+        x: Math.mod(SideArt.rnd(i, 109) + root.phase * 0.01, 1.0) * root.width;
+        y: Math.mod(SideArt.rnd(i, 111) + root.phase * 0.05, 1.0) * root.height;
+        opacity: 0.16 + 0.24 * SideArt.breathe(root.phase, i, 0.7);
+        background: #f3e6c8;
+    }
+}
+
+// ── 15 · 长城暮色 ───────────────────────────────────────────────────────────
+
+component SceneWall inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> ridge: (#1a0e1e);
+    property <color> dusk: (#ff9a5a);
+
+    // 后景：落日余晖。
+    Rectangle {
+        width: root.width * 1.6;
+        height: root.height * 0.30;
+        y: root.height * 0.55;
+        x: -root.width * 0.3;
+        background: @linear-gradient(180deg,
+            root.dusk.with-alpha(0.12) 0%,
+            Colors.transparent 100%);
+    }
+    Rectangle {
+        width: root.width * 0.30;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: root.width * SideArt.mx(root.side, 0.30);
+        y: root.height * 0.38;
+        background: @radial-gradient(circle,
+            #ffcf8a.with-alpha(0.30) 0%,
+            Colors.transparent 70%);
+    }
+
+    // 山脊与城墙：两层，远处淡、近处深。
+    for i in 2: Path {
+        width: root.width * 1.2;
+        height: root.width * 0.42;
+        x: (Math.mod(root.phase * (0.02 + i * 0.015) + i * 0.14, 1.2) - 0.1) * root.width;
+        y: root.height * (0.60 + i * 0.10);
+        viewbox-width: 100;
+        viewbox-height: 46;
+        fit: fill;
+        fill: root.ridge.with-alpha(0.42 + i * 0.28);
+        commands: "M 0 46 L 0 36 L 8 26 L 16 32 L 26 20 L 34 29 L 44 18 L 52 27 L 62 19 L 72 28 L 82 21 L 92 30 L 100 25 L 100 46 Z";
+    }
+
+    // 一座敌楼
+    Path {
+        width: root.width * 0.42;
+        height: root.width * 0.28;
+        x: root.width * 0.28;
+        y: root.height * 0.60;
+        viewbox-width: 60;
+        viewbox-height: 40;
+        fit: fill;
+        fill: (#120a16).with-alpha(0.92);
+        commands: "M 6 38 L 6 18 L 12 18 L 12 12 L 18 12 L 18 6 L 24 6 L 24 12 L 30 12 L 30 6 L 36 6 L 36 12 L 42 12 L 42 18 L 48 18 L 48 38 Z";
+    }
+
+    // 前景：雾带慢慢横移。
+    for i in 2: Rectangle {
+        width: root.width * 1.2;
+        height: root.height * 0.10;
+        x: (Math.mod(root.phase * (0.08 + i * 0.05) + i * 0.33, 1.2) - 0.1) * root.width;
+        y: root.height * (0.62 + i * 0.14);
+        background: @linear-gradient(90deg,
+            Colors.transparent 0%,
+            (#c9a0a8).with-alpha(0.10) 50%,
+            Colors.transparent 100%);
+    }
+
+    for i in 8: Rectangle {
+        width: 1.6px;
+        height: 1.6px;
+        border-radius: 0.8px;
+        x: root.width * SideArt.rnd(i, 113);
+        y: Math.mod(SideArt.rnd(i, 115) - root.phase * 0.04, 1.0) * root.height;
+        opacity: 0.12 + 0.26 * SideArt.breathe(root.phase, i, 0.6);
+        background: #ffe2c0;
+    }
+}
+
+// ── 16 · 窗花剪纸 ───────────────────────────────────────────────────────────
+
+component ScenePaperCut inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> red: (#ff5a48);
+
+    // 两枚团花：圆底 + 对称的剪纸纹 + 呼吸。
+    for i in 2: Rectangle {
+        width: root.width * (0.72 - i * 0.16);
+        height: self.width;
+        x: root.width * SideArt.mx(root.side, 0.5) - self.width / 2;
+        y: root.height * (0.16 + i * 0.38)
+            + Math.sin((root.phase * 360 + i * 120) * 1deg) * root.width * 0.03;
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            border-radius: self.width / 2;
+            background: @radial-gradient(circle,
+                root.red.with-alpha(0.10 * (1.0 - i * 0.3)) 0%,
+                Colors.transparent 68%);
+        }
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            border-radius: self.width / 2;
+            border-width: 1.4px;
+            border-color: root.red.with-alpha(0.34 - i * 0.10);
+            background: Colors.transparent;
+        }
+        // 剪出来的花瓣：四组对称弧。
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            fit: fill;
+            stroke: root.red.with-alpha(0.46 - i * 0.12);
+            stroke-width: 1.6px;
+            stroke-line-cap: round;
+            commands: "M 50 12 C 62 18 66 30 58 40 C 70 38 80 30 82 18 M 88 50 C 82 62 70 66 60 58 C 62 70 70 80 82 82 M 50 88 C 38 82 34 70 42 60 C 30 62 20 70 18 82 M 12 50 C 18 38 30 34 40 42 C 38 30 30 20 18 18";
+        }
+        // 中心
+        Rectangle {
+            width: parent.width * 0.22;
+            height: parent.width * 0.22;
+            x: parent.width * 0.39;
+            y: parent.width * 0.39;
+            border-radius: self.width / 2;
+            border-width: 1.2px;
+            border-color: root.red.with-alpha(0.40 - i * 0.10);
+            background: Colors.transparent;
+        }
+    }
+
+    // 前景：剪落的红色纸屑，打着旋往下飘。
+    for i in 10: Rectangle {
+        width: (3.0 + 3.0 * SideArt.rnd(i, 117)) * 1px;
+        height: self.width * 0.55;
+        border-radius: 1px;
+        x: root.width * SideArt.rnd(i, 119)
+            + Math.sin((root.phase * 360 + i * 93) * 1deg) * root.width * 0.07;
+        y: Math.mod(SideArt.rnd(i, 121) + root.phase * (0.10 + 0.08 * SideArt.rnd(i, 123)), 1.0)
+            * root.height;
+        opacity: 0.20 + 0.34 * SideArt.breathe(root.phase, i, 0.9);
+        background: Math.mod(i, 3) == 0 ? (#ffd0a0) : root.red;
+    }
+}
+
+// ── 17 · 烟花夜景 ───────────────────────────────────────────────────────────
+
+component Burst inherits Rectangle {
+    in property <float> phase: 0;
+    in property <float> offset: 0;
+    in property <color> tint: #ffd98a;
+    in property <color> tint2: #ff7a52;
+    in property <length> reach: 100px;
+    in property <float> alpha: 1.0;
+
+    width: 0px;
+    height: 0px;
+    background: Colors.transparent;
+
+    property <float> t: Math.mod(root.phase + root.offset, 1.0);
+
+    // 爆发的光核
+    Rectangle {
+        width: root.reach * 0.55;
+        height: self.width;
+        x: -self.width / 2;
+        y: -self.height / 2;
+        opacity: Math.max(0.0, 1.0 - root.t * 4.0) * root.alpha;
+        background: @radial-gradient(circle,
+            root.tint.with-alpha(0.75) 0%,
+            Colors.transparent 70%);
+    }
+
+    // 放射的星火
+    for i in 18: Rectangle {
+        width: root.reach * 0.045;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: Math.cos((i * 20.0 + root.offset * 90.0) * 1deg) * root.t * root.reach
+            - self.width / 2;
+        y: Math.sin((i * 20.0 + root.offset * 90.0) * 1deg) * root.t * root.reach
+            - self.height / 2;
+        opacity: Math.max(0.0, 1.0 - root.t) * root.alpha * (i == 0 ? 1.0 : 0.82);
+        background: i == 0 ? #fff4cf : (Math.mod(i, 3) == 0 ? root.tint2 : root.tint);
+    }
+
+    // 外圈光环
+    Rectangle {
+        width: root.t * root.reach * 2.0;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: -self.width / 2;
+        y: -self.height / 2;
+        border-width: Math.max(0.2, 2.0 - root.t * 2.0) * 1px;
+        border-color: root.tint.with-alpha(0.40 * root.alpha * (1.0 - root.t));
+        background: Colors.transparent;
+        opacity: Math.max(0.0, 0.9 - root.t * 0.6);
+    }
+}
+
+component SceneFireworks inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    // 后景：地平线上一片暖色城市光。
+    Rectangle {
+        width: 100%;
+        height: root.height * 0.26;
+        y: root.height * 0.70;
+        background: @linear-gradient(180deg,
+            Colors.transparent 0%,
+            (#4a3a68).with-alpha(0.16) 70%,
+            (#7a5a72).with-alpha(0.10) 100%);
+    }
+
+    // 三朵烟花：不同位置、不同节奏、不同颜色。
+    Burst {
+        x: root.width * (root.side == 0 ? 0.46 : 0.54);
+        y: root.height * 0.20;
+        reach: root.width * 0.72;
+        phase: root.phase;
+        offset: 0.0;
+        tint: (#ffd98a);
+        tint2: (#ff9a72);
+    }
+    Burst {
+        x: root.width * (root.side == 0 ? 0.68 : 0.32);
+        y: root.height * 0.50;
+        reach: root.width * 0.62;
+        phase: root.phase;
+        offset: 0.37;
+        tint: (#8fd8e8);
+        tint2: (#c8a0ff);
+        alpha: 0.78;
+    }
+    Burst {
+        x: root.width * (root.side == 0 ? 0.30 : 0.70);
+        y: root.height * 0.76;
+        reach: root.width * 0.52;
+        phase: root.phase;
+        offset: 0.68;
+        tint: (#ffb8d0);
+        tint2: (#ffd98a);
+        alpha: 0.62;
+    }
+
+    // 落下来的火星。
+    for i in 14: Rectangle {
+        width: 2px;
+        height: 2px;
+        border-radius: 1px;
+        x: root.width * (0.16 + 0.68 * SideArt.rnd(i, 125))
+            + Math.sin((root.phase * 360 + i * 79) * 1deg) * root.width * 0.06;
+        y: Math.mod(SideArt.rnd(i, 127) + root.phase * (0.20 + 0.16 * SideArt.rnd(i, 129)), 1.0)
+            * root.height;
+        opacity: 0.20 + 0.50 * SideArt.breathe(root.phase, i, 1.2);
+        background: Math.mod(i, 2) == 0 ? #ffd98a : #ff9a72;
+    }
+}
+
+// ── 19 · 牡丹花开 ───────────────────────────────────────────────────────────
+
+component Peony inherits Rectangle {
+    in property <length> size: 80px;
+    in property <float> alpha: 1.0;
+    in property <color> petal: #ff8fa8;
+
+    width: root.size;
+    height: root.size;
+    background: Colors.transparent;
+
+    // 外圈花瓣
+    for i in 8: Rectangle {
+        width: root.size * 0.44;
+        height: root.size * 0.34;
+        border-radius: self.height * 0.5;
+        x: root.size * 0.5 + Math.cos((i * 45.0) * 1deg) * root.size * 0.25 - self.width / 2;
+        y: root.size * 0.5 + Math.sin((i * 45.0) * 1deg) * root.size * 0.25 - self.height / 2;
+        opacity: 0.30 * root.alpha;
+        background: root.petal;
+    }
+    // 中圈
+    for i in 6: Rectangle {
+        width: root.size * 0.34;
+        height: root.size * 0.26;
+        border-radius: self.height * 0.5;
+        x: root.size * 0.5 + Math.cos((i * 60.0 + 30.0) * 1deg) * root.size * 0.13 - self.width / 2;
+        y: root.size * 0.5 + Math.sin((i * 60.0 + 30.0) * 1deg) * root.size * 0.13 - self.height / 2;
+        opacity: 0.42 * root.alpha;
+        background: root.petal.mix(#ffffff, 0.30);
+    }
+    // 花心
+    Rectangle {
+        width: root.size * 0.20;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: (root.size - self.width) / 2;
+        y: (root.size - self.height) / 2;
+        background: @radial-gradient(circle,
+            (#ffe6a0).with-alpha(0.85 * root.alpha) 0%,
+            Colors.transparent 76%);
+    }
+}
+
+component ScenePeony inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> petal: (#ff93ae);
+
+    // 中景：三朵牡丹，大小错开，慢慢呼吸。
+    for i in 3: Peony {
+        size: root.width * (0.92 - i * 0.20);
+        alpha: i == 0 ? 1.0 : 0.72;
+        x: root.width * SideArt.mx(root.side, 0.34 + Math.mod(i, 2) * 0.34) - self.width / 2
+            + Math.sin((root.phase * 360 + i * 100) * 1deg) * root.width * 0.03;
+        y: root.height * (0.10 + i * 0.30);
+    }
+
+    // 茎叶：两条很淡的弧线。
+    Path {
+        width: 100%;
+        height: root.height * 0.42;
+        y: root.height * 0.58;
+        viewbox-width: 100;
+        viewbox-height: 40;
+        fit: fill;
+        stroke: (#6f8a5a).with-alpha(0.16);
+        stroke-width: 2px;
+        stroke-line-cap: round;
+        commands: "M 40 0 C 44 14 38 26 30 40 M 56 2 C 54 16 58 28 64 40";
+    }
+
+    // 前景：飘落的花瓣。
+    for i in 10: Rectangle {
+        width: (4.0 + 3.0 * SideArt.rnd(i, 131)) * 1px;
+        height: self.width * 0.62;
+        border-radius: self.height * 0.5;
+        x: root.width * SideArt.rnd(i, 133)
+            + Math.sin((root.phase * 360 + i * 71) * 1deg) * root.width * 0.06;
+        y: Math.mod(SideArt.rnd(i, 135) + root.phase * (0.08 + 0.06 * SideArt.rnd(i, 137)), 1.0)
+            * root.height;
+        opacity: 0.20 + 0.30 * SideArt.breathe(root.phase, i, 0.8);
+        background: root.petal;
+    }
+}
+
+// ── 20 · 锦鲤水波 ───────────────────────────────────────────────────────────
+
+component Koi inherits Rectangle {
+    in property <length> size: 80px;
+    in property <float> alpha: 1.0;
+    in property <bool> flip: false;
+    in property <color> tint: #ff9a5a;
+
+    width: root.size * 0.52;
+    height: root.size;
+    background: Colors.transparent;
+
+    // 鱼身
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 52;
+        viewbox-height: 130;
+        fit: fill;
+        fill: @linear-gradient(180deg,
+            root.tint.mix(#ffffff, 0.35).with-alpha(0.92 * root.alpha) 0%,
+            root.tint.with-alpha(0.72 * root.alpha) 52%,
+            root.tint.mix(#7a2a12, 0.45).with-alpha(0.80 * root.alpha) 100%);
+        commands: "M 26 4 C 40 16 44 38 37 62 C 33 76 30 88 26 100 C 22 88 19 76 15 62 C 8 38 12 16 26 4 Z";
+    }
+    // 尾鳍
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 52;
+        viewbox-height: 130;
+        fit: fill;
+        fill: root.tint.mix(#ffffff, 0.20).with-alpha(0.72 * root.alpha);
+        commands: "M 26 96 C 16 102 8 114 5 126 C 15 122 21 120 26 118 C 31 120 37 122 47 126 C 44 114 36 102 26 96 Z";
+    }
+    // 背鳍
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 52;
+        viewbox-height: 130;
+        fit: fill;
+        fill: root.tint.mix(#ffffff, 0.42).with-alpha(0.55 * root.alpha);
+        commands: "M 26 16 C 33 26 35 38 32 50 C 30 42 28 30 26 16 Z";
+    }
+    // 眼睛
+    Rectangle {
+        x: root.width * (root.flip ? 0.36 : 0.44);
+        y: root.height * 0.17;
+        width: 3px;
+        height: 3px;
+        border-radius: 1.5px;
+        background: (#2a1a16).with-alpha(0.85 * root.alpha);
+    }
+    // 白斑
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 52;
+        viewbox-height: 130;
+        fit: fill;
+        fill: (#fff8ec).with-alpha(0.42 * root.alpha);
+        commands: "M 26 34 C 33 40 34 50 30 58 C 27 52 23 42 26 34 Z";
+    }
+}
+
+component SceneKoi inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> water: (#7fd8e8);
+
+    // 后景：三圈扩散的水纹。
+    for i in 3: Rectangle {
+        width: root.width * (0.36 + 0.30 * Math.mod(root.phase * 1.1 + i * 0.33, 1.0));
+        height: self.width * 0.46;
+        border-radius: self.width / 2;
+        x: (root.width - self.width) / 2;
+        y: root.height * (0.18 + i * 0.27);
+        border-width: 1px;
+        border-color: root.water.with-alpha(0.16);
+        background: Colors.transparent;
+    }
+
+    // 中景：两条锦鲤，一大一小，从下往上摆着游。
+    for i in 2: Koi {
+        size: root.width * (i == 0 ? 0.92 : 0.58);
+        alpha: i == 0 ? 1.0 : 0.60;
+        flip: i == 1;
+        tint: i == 0 ? (#ff9a5a) : (#ffc27a);
+        x: root.width * (0.5 + 0.24 * Math.sin((root.phase * 360 + i * 180) * 1deg))
+            - self.width / 2;
+        y: Math.mod(i * 0.5 - root.phase * (i == 0 ? 0.75 : 0.55), 1.0)
+            * (root.height + self.height) - self.height;
+    }
+
+    // 水光：三条横着走的亮带。
+    for i in 3: Rectangle {
+        width: root.width * 1.2;
+        height: root.height * 0.07;
+        x: (Math.mod(root.phase * (0.07 + i * 0.04) + i * 0.27, 1.2) - 0.1) * root.width;
+        y: root.height * (0.28 + i * 0.20);
+        background: @linear-gradient(90deg,
+            Colors.transparent 0%,
+            root.water.with-alpha(0.12) 50%,
+            Colors.transparent 100%);
+    }
+
+    for i in 8: Rectangle {
+        width: 2px;
+        height: 2px;
+        border-radius: 1px;
+        x: root.width * SideArt.rnd(i, 139);
+        y: Math.mod(SideArt.rnd(i, 141) - root.phase * 0.08, 1.0) * root.height;
+        opacity: 0.16 + 0.34 * SideArt.breathe(root.phase, i, 0.9);
+        background: root.water;
+    }
+}
+
+// ── 21 · 青花瓷纹 ───────────────────────────────────────────────────────────
+
+component ScenePorcelain inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> blue: Theme.dark ? (#9fc6f0) : (#2f5f9e);
+
+    // 两条缠枝纹带：圆环与卷草纹交替，缓慢向下流。
+    for i in 4: Rectangle {
+        width: root.width * 0.42;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: root.width * (Math.mod(i, 2) == 0 ? 0.28 : 0.62) - self.width / 2;
+        y: Math.mod(i * 0.26 + root.phase * 0.10, 1.25) * root.height - root.height * 0.10;
+        border-width: 1.4px;
+        border-color: root.blue.with-alpha(0.20);
+        background: Colors.transparent;
+    }
+    for i in 4: Path {
+        width: root.width * 0.5;
+        height: root.width * 0.5;
+        x: root.width * (Math.mod(i, 2) == 0 ? 0.16 : 0.50);
+        y: Math.mod(i * 0.26 + 0.13 + root.phase * 0.10, 1.25) * root.height - root.height * 0.10;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        fit: fill;
+        stroke: root.blue.with-alpha(0.18);
+        stroke-width: 1.6px;
+        stroke-line-cap: round;
+        commands: "M 20 78 C 34 66 46 60 50 46 C 54 32 44 24 34 30 C 26 35 28 46 38 46 C 50 46 62 38 70 26 M 52 20 C 60 14 72 16 78 24";
+    }
+
+    // 一道瓷面反光。
+    Rectangle {
+        width: root.width * 0.55;
+        height: 100%;
+        x: (Math.mod(root.phase * 0.5, 1.6) - 0.3) * root.width;
+        background: @linear-gradient(90deg,
+            Colors.transparent 0%,
+            (#dff0ff).with-alpha(0.10) 50%,
+            Colors.transparent 100%);
+    }
+
+    for i in 6: Rectangle {
+        width: 1.6px;
+        height: 1.6px;
+        border-radius: 0.8px;
+        x: root.width * SideArt.rnd(i, 143);
+        y: Math.mod(SideArt.rnd(i, 145) - root.phase * 0.05, 1.0) * root.height;
+        opacity: 0.14 + 0.24 * SideArt.breathe(root.phase, i, 0.6);
+        background: root.blue;
+    }
+}
+
+// ── 22 · 京剧脸谱 ───────────────────────────────────────────────────────────
+
+component OperaMask inherits Rectangle {
+    in property <length> size: 90px;
+    in property <float> alpha: 1.0;
+    in property <color> gold: #e8b04b;
+
+    width: root.size;
+    height: root.size * 1.18;
+    background: Colors.transparent;
+
+    // 脸
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 90;
+        viewbox-height: 106;
+        fit: fill;
+        fill: @linear-gradient(180deg,
+            (#f2e6d0).with-alpha(0.90 * root.alpha) 0%,
+            (#e6c8a8).with-alpha(0.86 * root.alpha) 62%,
+            (#b8896a).with-alpha(0.88 * root.alpha) 100%);
+        commands: "M 45 4 C 70 4 82 24 82 48 C 82 74 66 98 45 102 C 24 98 8 74 8 48 C 8 24 20 4 45 4 Z";
+    }
+    // 额头纹样
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 90;
+        viewbox-height: 106;
+        fit: fill;
+        stroke: (#b8342a).with-alpha(0.85 * root.alpha);
+        stroke-width: 2px;
+        stroke-line-cap: round;
+        commands: "M 45 12 C 52 22 55 30 45 40 C 35 30 38 22 45 12 Z M 45 40 L 45 52";
+    }
+    // 眉眼
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 90;
+        viewbox-height: 106;
+        fit: fill;
+        stroke: (#1c1414).with-alpha(0.90 * root.alpha);
+        stroke-width: 3px;
+        stroke-line-cap: round;
+        commands: "M 18 44 C 26 36 34 38 38 46 M 72 44 C 64 36 56 38 52 46";
+    }
+    // 眉眼的留白底
+    // 眼睛
+    Rectangle {
+        x: root.width * 0.26;
+        y: root.height * 0.44;
+        width: root.width * 0.13;
+        height: self.width * 0.55;
+        border-radius: self.width / 2;
+        background: (#f7f0e0).with-alpha(0.95 * root.alpha);
+    }
+    Rectangle {
+        x: root.width * 0.61;
+        y: root.height * 0.44;
+        width: root.width * 0.13;
+        height: self.width * 0.55;
+        border-radius: self.width / 2;
+        background: (#f7f0e0).with-alpha(0.95 * root.alpha);
+    }
+    Rectangle {
+        x: root.width * 0.30;
+        y: root.height * 0.465;
+        width: root.width * 0.05;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: (#201414).with-alpha(0.85 * root.alpha);
+    }
+    Rectangle {
+        x: root.width * 0.65;
+        y: root.height * 0.465;
+        width: root.width * 0.05;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: (#201414).with-alpha(0.85 * root.alpha);
+    }
+    // 嘴
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 90;
+        viewbox-height: 106;
+        fit: fill;
+        stroke: (#a8281e).with-alpha(0.80 * root.alpha);
+        stroke-width: 2.4px;
+        stroke-line-cap: round;
+        commands: "M 34 78 C 40 84 50 84 56 78";
+    }
+}
+
+component SceneOpera inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> gold: #e8b04b;
+
+    // 后景：一层戏台红光。
+    Rectangle {
+        width: 100%;
+        height: root.height * 0.6;
+        y: root.height * 0.20;
+        background: @radial-gradient(circle,
+            (#b8342a).with-alpha(0.14) 0%,
+            Colors.transparent 66%);
+    }
+
+    // 两张脸谱：远处小的、近处大的，轻晃。
+    for i in 2: OperaMask {
+        size: root.width * (i == 0 ? 0.86 : 0.58);
+        alpha: i == 0 ? 1.0 : 0.62;
+        x: root.width * SideArt.mx(root.side, 0.36 + i * 0.22) - self.width / 2
+            + Math.sin((root.phase * 360 + i * 130) * 1deg) * root.width * 0.03;
+        y: root.height * (0.12 + i * 0.42);
+    }
+
+    for i in 8: Rectangle {
+        width: 1.8px;
+        height: 1.8px;
+        border-radius: 0.9px;
+        x: root.width * SideArt.rnd(i, 147);
+        y: Math.mod(SideArt.rnd(i, 149) - root.phase * 0.05, 1.0) * root.height;
+        opacity: 0.14 + 0.28 * SideArt.breathe(root.phase, i, 0.7);
+        background: root.gold;
+    }
+}
+
+// ── 23 · 竹林清风 ───────────────────────────────────────────────────────────
+
+component SceneBamboo inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> bamboo: Theme.dark ? (#9fd8a8) : (#2f6a48);
+
+    // 中景：四根竹子，粗细分远近，随风轻摆。
+    for i in 4: Rectangle {
+        width: root.width * (0.036 + (3 - i) * 0.010);
+        height: root.height * 1.06;
+        x: root.width * (0.18 + i * 0.22)
+            + Math.sin((root.phase * 360 + i * 74) * 1deg) * root.width * 0.035;
+        y: -root.height * 0.03;
+        border-radius: self.width / 2;
+        background: @linear-gradient(90deg,
+            root.bamboo.with-alpha(0.10) 0%,
+            root.bamboo.with-alpha(0.20) 46%,
+            root.bamboo.with-alpha(0.06) 100%);
+
+        // 竹节
+        for j in 5: Rectangle {
+            width: 100%;
+            height: 2px;
+            y: parent.height * (0.14 + j * 0.19);
+            background: root.bamboo.with-alpha(0.26);
+        }
+    }
+
+    // 竹叶：细长的三角，横向飘出。
+    for i in 12: Path {
+        width: root.width * 0.30;
+        height: root.width * 0.14;
+        x: root.width * SideArt.mx(root.side, 0.20 + 0.62 * SideArt.rnd(i, 151))
+            + Math.sin((root.phase * 360 + i * 83) * 1deg) * root.width * 0.05;
+        y: root.height * (0.08 + 0.82 * SideArt.rnd(i, 153));
+        viewbox-width: 30;
+        viewbox-height: 14;
+        fit: fill;
+        fill: root.bamboo.with-alpha(0.10 + 0.14 * SideArt.rnd(i, 155));
+        commands: "M 1 12 C 10 4 22 2 29 1 C 24 7 12 12 1 12 Z";
+    }
+
+    for i in 7: Rectangle {
+        width: 1.6px;
+        height: 1.6px;
+        border-radius: 0.8px;
+        x: root.width * SideArt.rnd(i, 157);
+        y: Math.mod(SideArt.rnd(i, 159) - root.phase * 0.05, 1.0) * root.height;
+        opacity: 0.14 + 0.28 * SideArt.breathe(root.phase, i, 0.8);
+        background: (#d8ffe0);
+    }
+}
+
+// ── 24 · 折扇屏风 ───────────────────────────────────────────────────────────
+
+component Fan inherits Rectangle {
+    in property <length> size: 110px;
+    in property <float> alpha: 1.0;
+    in property <color> paper: #f2e2c4;
+    in property <color> gold: #e8b04b;
+
+    width: root.size;
+    height: root.size * 0.62;
+    background: Colors.transparent;
+
+    // 扇面
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 62;
+        fit: fill;
+        fill: @linear-gradient(180deg,
+            root.paper.with-alpha(0.32 * root.alpha) 0%,
+            root.paper.with-alpha(0.10 * root.alpha) 100%);
+        stroke: root.gold.with-alpha(0.40 * root.alpha);
+        stroke-width: 1.2px;
+        commands: "M 4 58 C 10 22 34 4 50 4 C 66 4 90 22 96 58 Z";
+    }
+    // 扇骨
+    for i in 5: Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 62;
+        fit: fill;
+        stroke: root.gold.with-alpha(0.26 * root.alpha);
+        stroke-width: 1px;
+        commands: i == 0 ? "M 50 58 L 8 54"
+            : i == 1 ? "M 50 58 L 26 30"
+            : i == 2 ? "M 50 58 L 50 6"
+            : i == 3 ? "M 50 58 L 74 30"
+            : "M 50 58 L 92 54";
+    }
+    // 扇轴
+    Rectangle {
+        x: root.width * 0.47;
+        y: root.height * 0.88;
+        width: root.width * 0.06;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: root.gold.with-alpha(0.80 * root.alpha);
+    }
+}
+
+component SceneFan inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> gold: #e8b04b;
+
+    // 两把扇：一前一后，轻轻开合。
+    for i in 2: Fan {
+        size: root.width * (i == 0 ? 0.94 : 0.62);
+        alpha: i == 0 ? 1.0 : 0.62;
+        x: root.width * SideArt.mx(root.side, 0.34 + i * 0.26) - self.width / 2
+            + Math.sin((root.phase * 360 + i * 120) * 1deg) * root.width * 0.03;
+        y: root.height * (0.52 + i * 0.16);
+    }
+
+    // 前景：几点金色浮尘。
+    for i in 9: Rectangle {
+        width: (1.6 + 1.6 * SideArt.rnd(i, 161)) * 1px;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: root.width * SideArt.rnd(i, 163);
+        y: Math.mod(SideArt.rnd(i, 165) - root.phase * 0.06, 1.0) * root.height;
+        opacity: 0.14 + 0.32 * SideArt.breathe(root.phase, i, 0.7);
+        background: root.gold;
+    }
+}
+
+// ── 25 · 龙舟竞渡 ───────────────────────────────────────────────────────────
+
+component SceneBoat inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> wave: Theme.dark ? (#6fb8d8) : (#2a5a78);
+    property <color> gold: Theme.skin.signature;
+
+    // 后景：月光
+    Rectangle {
+        width: root.width * 0.34;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: root.width * SideArt.mx(root.side, 0.34);
+        y: root.height * 0.08;
+        background: @radial-gradient(circle,
+            (#fff2cf).with-alpha(0.28) 0%,
+            Colors.transparent 70%);
+    }
+
+    // 中景：三条水波，从后往前。
+    for i in 3: Path {
+        width: root.width * 1.2;
+        height: root.height * 0.10;
+        x: (Math.mod(root.phase * (0.08 + i * 0.05) + i * 0.23, 1.2) - 0.1) * root.width
+            - root.width * 0.05;
+        y: root.height * (0.60 + i * 0.11);
+        viewbox-width: 100;
+        viewbox-height: 16;
+        fit: fill;
+        fill: @linear-gradient(180deg,
+            root.wave.with-alpha(0.20 + i * 0.06) 0%,
+            root.wave.with-alpha(0.04) 100%);
+        commands: "M 0 10 C 10 4 20 14 30 10 C 40 4 50 14 60 10 C 70 4 80 14 90 10 C 96 7 100 6 100 6 L 100 16 L 0 16 Z";
+    }
+
+    // 龙舟：船身 + 龙头 + 一排短桨
+    for i in 2: Rectangle {
+        width: root.width * (i == 0 ? 0.86 : 0.56);
+        height: root.width * (i == 0 ? 0.30 : 0.20);
+        x: root.width * SideArt.mx(root.side, i == 0 ? 0.28 : 0.58) - self.width / 2;
+        y: root.height * (i == 0 ? 0.62 : 0.53)
+            + Math.sin((root.phase * 360 + i * 90) * 1deg) * 5px;
+        opacity: i == 0 ? 1.0 : 0.60;
+
+        // 船身
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 35;
+            fit: fill;
+            fill: @linear-gradient(180deg,
+                (#7a2a1a).with-alpha(0.75) 0%,
+                (#3a100c).with-alpha(0.90) 100%);
+            stroke: root.gold.with-alpha(0.45);
+            stroke-width: 1.2px;
+            commands: "M 2 12 L 20 8 L 80 8 L 98 12 C 88 30 70 34 50 34 C 30 34 12 30 2 12 Z";
+        }
+        // 龙头
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 35;
+            fit: fill;
+            fill: root.gold.with-alpha(0.80);
+            stroke: (root.gold.mix(#ffffff, 0.4)).with-alpha(0.6);
+            stroke-width: 1px;
+            commands: "M 3 12 C 2 4 8 0 14 2 C 18 4 18 10 14 12 Z";
+        }
+        // 桨
+        for j in 4: Rectangle {
+            x: parent.width * (0.24 + j * 0.17);
+            y: parent.height * 0.55;
+            width: 1.6px;
+            height: parent.height * 0.75;
+            background: root.gold.with-alpha(0.30);
+        }
+    }
+
+    // 前景：水花与光点。
+    for i in 9: Rectangle {
+        width: 2px;
+        height: 2px;
+        border-radius: 1px;
+        x: root.width * SideArt.rnd(i, 167)
+            + Math.sin((root.phase * 360 + i * 67) * 1deg) * root.width * 0.05;
+        y: Math.mod(SideArt.rnd(i, 169) - root.phase * 0.09, 1.0) * root.height;
+        opacity: 0.16 + 0.34 * SideArt.breathe(root.phase, i, 0.9);
+        background: (#dff2ff);
+    }
+}
+
+// ── 26 · 福字铜钱 ───────────────────────────────────────────────────────────
+
+component SceneCoin inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> gold: Theme.skin.signature;
+    property <color> warm: #fff0c8;
+    property <color> red: (#d8402e);
+
+    // 中景：一串会翻面的铜钱往下落。
+    for i in 9: Rectangle {
+        width: root.width * (0.24 + 0.12 * SideArt.rnd(i, 171))
+            * (0.42 + 0.58 * Math.abs(Math.sin((root.phase * 360 * (0.7 + 0.5 * SideArt.rnd(i, 173)) + i * 73) * 1deg)));
+        height: self.width;
+        x: root.width * SideArt.mx(root.side, 0.18 + 0.64 * SideArt.rnd(i, 175)) - self.width / 2
+            + Math.sin((root.phase * 360 + i * 87) * 1deg) * root.width * 0.04;
+        y: Math.mod(SideArt.rnd(i, 177) - root.phase * (0.05 + 0.04 * SideArt.rnd(i, 179)), 1.0)
+            * (root.height + root.width * 0.4) - root.width * 0.2;
+
+        // 钱面
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            border-radius: self.width / 2;
+            background: @radial-gradient(circle,
+                root.warm.with-alpha(0.80) 0%,
+                root.gold.with-alpha(0.70) 58%,
+                root.gold.mix(#7a5a18, 0.5).with-alpha(0.72) 100%);
+        }
+        // 方孔
+        Rectangle {
+            width: parent.width * 0.30;
+            height: parent.width * 0.30;
+            x: parent.width * 0.35;
+            y: parent.width * 0.35;
+            background: (#241608).with-alpha(0.55);
+        }
+        // 钱缘
+        Rectangle {
+            width: parent.width * 0.82;
+            height: parent.width * 0.82;
+            x: parent.width * 0.09;
+            y: parent.width * 0.09;
+            border-radius: self.width / 2;
+            border-width: 1px;
+            border-color: root.warm.with-alpha(0.45);
+            background: Colors.transparent;
+        }
+    }
+
+    // 后景：一条红绸软软地飘。
+    Path {
+        width: 100%;
+        height: root.height * 0.7;
+        y: root.height * 0.12;
+        viewbox-width: 100;
+        viewbox-height: 60;
+        fit: fill;
+        stroke: root.red.with-alpha(0.30);
+        stroke-width: 2.4px;
+        stroke-line-cap: round;
+        commands: "M 6 8 C 28 16 20 30 40 38 C 60 46 66 54 92 50";
+    }
+
+    for i in 8: Rectangle {
+        width: 1.6px;
+        height: 1.6px;
+        border-radius: 0.8px;
+        x: root.width * SideArt.rnd(i, 181);
+        y: Math.mod(SideArt.rnd(i, 183) - root.phase * 0.07, 1.0) * root.height;
+        opacity: 0.16 + 0.34 * SideArt.breathe(root.phase, i, 0.8);
+        background: root.warm;
+    }
+}
+
+// ── 27 · 舞狮贺岁 ───────────────────────────────────────────────────────────
+
+component LionHead inherits Rectangle {
+    in property <length> size: 100px;
+    in property <float> alpha: 1.0;
+    in property <color> gold: #e8b04b;
+    in property <color> red: #c8402a;
+
+    width: root.size;
+    height: root.size;
+    background: Colors.transparent;
+
+    // 鬃毛：一圈小圆
+    for i in 14: Rectangle {
+        width: root.size * 0.24;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: root.size * 0.5 + Math.cos((i * 25.7) * 1deg) * root.size * 0.36 - self.width / 2;
+        y: root.size * 0.5 + Math.sin((i * 25.7) * 1deg) * root.size * 0.36 - self.height / 2;
+        opacity: (0.26 + 0.12 * Math.mod(i, 2)) * root.alpha;
+        background: Math.mod(i, 3) == 0 ? root.red : root.gold;
+    }
+    // 脸
+    Rectangle {
+        width: root.size * 0.62;
+        height: root.size * 0.58;
+        x: (root.size - self.width) / 2;
+        y: (root.size - self.height) / 2;
+        border-radius: self.width * 0.46;
+        background: @radial-gradient(circle,
+            root.red.mix(#ffd0a0, 0.55).with-alpha(0.85 * root.alpha) 0%,
+            root.red.with-alpha(0.80 * root.alpha) 72%,
+            root.red.mix(#3a0a08, 0.5).with-alpha(0.85 * root.alpha) 100%);
+    }
+    // 大眼
+    for i in 2: Rectangle {
+        width: root.size * 0.17;
+        height: root.size * 0.17;
+        border-radius: self.width / 2;
+        x: root.size * (i == 0 ? 0.27 : 0.56);
+        y: root.size * 0.38;
+        background: (#fff6e0).with-alpha(0.92 * root.alpha);
+    }
+    for i in 2: Rectangle {
+        width: root.size * 0.07;
+        height: root.size * 0.07;
+        border-radius: self.width / 2;
+        x: root.size * (i == 0 ? 0.32 : 0.61);
+        y: root.size * 0.43;
+        background: (#241410).with-alpha(0.90 * root.alpha);
+    }
+    // 鼻与口
+    Rectangle {
+        width: root.size * 0.16;
+        height: root.size * 0.10;
+        x: root.size * 0.42;
+        y: root.size * 0.60;
+        border-radius: self.width * 0.5;
+        background: root.gold.with-alpha(0.80 * root.alpha);
+    }
+    Rectangle {
+        width: root.size * 0.24;
+        height: root.size * 0.055;
+        x: root.size * 0.38;
+        y: root.size * 0.72;
+        border-radius: self.height / 2;
+        background: (#2a0a08).with-alpha(0.75 * root.alpha);
+    }
+    // 独角
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        fit: fill;
+        fill: root.gold.with-alpha(0.85 * root.alpha);
+        commands: "M 46 14 C 44 6 50 0 58 2 C 56 8 53 12 46 14 Z";
+    }
+}
+
+component SceneLion inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> gold: Theme.skin.signature;
+
+    // 后景：喜气的一团暖红光。
+    Rectangle {
+        width: 100%;
+        height: root.height * 0.5;
+        y: root.height * 0.25;
+        background: @radial-gradient(circle,
+            (#ff7a52).with-alpha(0.13) 0%,
+            Colors.transparent 66%);
+    }
+
+    // 两只狮头：一前一后，上上下下。
+    for i in 2: LionHead {
+        size: root.width * (i == 0 ? 0.88 : 0.60);
+        alpha: i == 0 ? 1.0 : 0.62;
+        x: root.width * SideArt.mx(root.side, 0.34 + i * 0.28) - self.width / 2
+            + Math.sin((root.phase * 360 + i * 110) * 1deg) * root.width * 0.04;
+        y: root.height * (0.16 + i * 0.40)
+            + Math.sin((root.phase * 360 + i * 160) * 1deg) * root.width * 0.05;
+        gold: root.gold;
+    }
+
+    // 前景：金红纸屑。
+    for i in 10: Rectangle {
+        width: (3.0 + 2.0 * SideArt.rnd(i, 185)) * 1px;
+        height: self.width * 0.5;
+        border-radius: 1px;
+        x: root.width * SideArt.rnd(i, 187)
+            + Math.sin((root.phase * 360 + i * 97) * 1deg) * root.width * 0.06;
+        y: Math.mod(SideArt.rnd(i, 189) + root.phase * (0.10 + 0.08 * SideArt.rnd(i, 191)), 1.0)
+            * root.height;
+        opacity: 0.20 + 0.36 * SideArt.breathe(root.phase, i, 1.0);
+        background: Math.mod(i, 3) == 0 ? (#ffd98a) : (#e8503c);
+    }
+}
+
+// ── 29 · 雪落红梅 ───────────────────────────────────────────────────────────
+
+component Blossom inherits Rectangle {
+    in property <length> size: 26px;
+    in property <float> alpha: 1.0;
+    in property <color> petal: #ff8f86;
+
+    width: root.size;
+    height: root.size;
+    background: Colors.transparent;
+
+    for i in 5: Rectangle {
+        width: root.size * 0.46;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: root.size * 0.5 + Math.cos((i * 72.0 - 90.0) * 1deg) * root.size * 0.23 - self.width / 2;
+        y: root.size * 0.5 + Math.sin((i * 72.0 - 90.0) * 1deg) * root.size * 0.23 - self.height / 2;
+        opacity: 0.72 * root.alpha;
+        background: root.petal;
+    }
+    Rectangle {
+        width: root.size * 0.22;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: (root.size - self.width) / 2;
+        y: (root.size - self.height) / 2;
+        background: (#ffe6a0).with-alpha(0.90 * root.alpha);
+    }
+}
+
+component ScenePlum inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    property <color> wood: Theme.dark ? (#8a4a3a) : (#5a3226);
+    property <color> petal: (#ff8f86);
+
+    // 中景：一条从上方伸下来的梅枝，两条分叉。
+    Path {
+        width: 100%;
+        height: root.height * 0.75;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        fit: fill;
+        stroke: root.wood.with-alpha(0.42);
+        stroke-width: root.width * 0.035;
+        stroke-line-cap: round;
+        commands: "M 20 0 C 32 14 28 28 40 42 C 50 54 44 70 56 84 M 40 42 C 56 44 68 38 80 26 M 28 22 C 40 24 52 20 62 14";
+    }
+    for i in 3: Path {
+        width: 100%;
+        height: root.height * 0.5;
+        x: root.width * (0.10 + i * 0.22);
+        y: root.height * (0.12 + i * 0.20);
+        viewbox-width: 60;
+        viewbox-height: 100;
+        fit: fill;
+        stroke: root.wood.with-alpha(0.26);
+        stroke-width: root.width * 0.016;
+        stroke-line-cap: round;
+        commands: "M 10 0 C 18 18 12 34 22 50 C 28 60 24 72 30 86";
+    }
+
+    // 梅花：沿枝开，大小错落。
+    for i in 10: Blossom {
+        size: root.width * (0.16 + 0.10 * SideArt.rnd(i, 193));
+        alpha: 0.60 + 0.40 * SideArt.rnd(i, 195);
+        x: root.width * SideArt.mx(root.side, 0.12 + 0.66 * SideArt.rnd(i, 197)) - self.width / 2;
+        y: root.height * (0.06 + 0.56 * SideArt.rnd(i, 199));
+        petal: root.petal;
+    }
+
+    // 后景：雾与暖光。
+    Rectangle {
+        width: 100%;
+        height: root.height * 0.4;
+        y: root.height * 0.06;
+        background: @radial-gradient(circle,
+            (#ff7a6a).with-alpha(0.10) 0%,
+            Colors.transparent 70%);
+    }
+
+    // 前景：飘雪 + 落瓣。
+    for i in 16: Rectangle {
+        width: (1.4 + 1.6 * SideArt.rnd(i, 201)) * 1px;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: Math.mod(SideArt.rnd(i, 203) + root.phase * 0.015, 1.0) * root.width;
+        y: Math.mod(SideArt.rnd(i, 205) + root.phase * (0.05 + 0.04 * SideArt.rnd(i, 207)), 1.0)
+            * root.height;
+        opacity: 0.18 + 0.34 * SideArt.breathe(root.phase, i, 0.6);
+        background: #fff2e8;
+    }
+    for i in 5: Rectangle {
+        width: 5px;
+        height: 3px;
+        border-radius: 2px;
+        x: root.width * SideArt.rnd(i, 209)
+            + Math.sin((root.phase * 360 + i * 83) * 1deg) * root.width * 0.06;
+        y: Math.mod(SideArt.rnd(i, 211) + root.phase * 0.10, 1.0) * root.height;
+        opacity: 0.20 + 0.26 * SideArt.breathe(root.phase, i, 0.7);
+        background: root.petal;
+    }
+}
+// ── 场景调度 ─────────────────────────────────────────────────────────────────
+
+component SceneStage inherits Rectangle {
+    in property <int> side: 0;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+
+    if Theme.skin.style == 1 || Theme.skin.style == 11: SceneDragon {
+        side: root.side;
+        phase: root.phase;
+    }
+    if Theme.skin.style == 8: SceneDragon {
+        side: root.side;
+        phase: root.phase;
+        relief: true;
+    }
+    if Theme.skin.style == 2: SceneTech { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 3: SceneCyber { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 4 || Theme.skin.style == 18: SceneInk { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 5: SceneStars { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 6: SceneDawn { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 7: SceneJade { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 9: SceneIce { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 10: SceneGold { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 12: SceneLantern { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 28: SceneLantern { side: root.side; phase: root.phase; many: true; }
+    if Theme.skin.style == 13 || Theme.skin.style == 30: SceneCloud { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 14: ScenePalace { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 15: SceneWall { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 16: ScenePaperCut { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 17: SceneFireworks { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 19: ScenePeony { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 20: SceneKoi { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 21: ScenePorcelain { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 22: SceneOpera { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 23: SceneBamboo { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 24: SceneFan { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 25: SceneBoat { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 26: SceneCoin { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 27: SceneLion { side: root.side; phase: root.phase; }
+    if Theme.skin.style == 29: ScenePlum { side: root.side; phase: root.phase; }
+}
+
+/// 一侧的带子：场景 + 遮罩 + 焦点光。
+component SideBand inherits Rectangle {
+    in property <int> side: 0;
+    in property <length> screen-w: 0px;
+    in property <length> band-w: 120px;
+    in property <float> phase: 0;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+    clip: true;
+
+    // 指针在附近时这一侧亮一点：焦点处稍亮，非焦点弱化。
+    property <length> centre-x: root.side == 0 ? root.band-w / 2
+        : root.screen-w - root.band-w / 2;
+    property <float> nearby: Math.max(0.0, 1.0
+        - Math.abs(Theme.cursor-x - root.centre-x) / (root.band-w * 2.6));
+    property <float> lift: Theme.side-art-motion ? 0.80 + 0.20 * root.nearby : 0.90;
+
+    // 场景本身（全部主题共用一块画布，按皮肤换景）。
+    SceneStage {
+        width: 100%;
+        height: 100%;
+        side: root.side;
+        phase: root.phase;
+        opacity: root.lift;
+    }
+
+    // 焦点处的柔光：指针靠近时从这一侧的外缘渗进来一点皮肤签名色。
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        opacity: root.nearby;
+        background: @radial-gradient(circle,
+            Theme.skin.signature.with-alpha(0.10) 0%,
+            Colors.transparent 58%);
+    }
+
+    // 向中间渐隐：靠内的一半盖成页面底色，装饰不会压到内容列上，文字
+    // 对比度也不变（盖住的是画，不是字）。
+    Rectangle {
+        x: root.side == 0 ? root.band-w * 0.52 : 0px;
+        width: root.band-w * 0.48;
+        height: 100%;
+        background: root.side == 0
+            ? @linear-gradient(90deg,
+                Theme.launch-page.with-alpha(0.0) 0%,
+                Theme.launch-page.with-alpha(0.72) 62%,
+                Theme.launch-page 100%)
+            : @linear-gradient(90deg,
+                Theme.launch-page 0%,
+                Theme.launch-page.with-alpha(0.72) 38%,
+                Theme.launch-page.with-alpha(0.0) 100%);
+    }
+
+    // 上下和外侧压一点暗角：整幅画落在窗口里，不像是贴上去的。
+    Rectangle {
+        width: 100%;
+        height: 14%;
+        y: 0px;
+        background: @linear-gradient(180deg,
+            Theme.launch-page.with-alpha(0.55) 0%,
+            Colors.transparent 100%);
+    }
+
+    Rectangle {
+        width: 100%;
+        height: 16%;
+        y: root.height - self.height;
+        background: @linear-gradient(0deg,
+            Theme.launch-page.with-alpha(0.62) 0%,
+            Colors.transparent 100%);
+    }
+
+    Rectangle {
+        x: root.side == 0 ? 0px : root.band-w - root.band-w * 0.10;
+        width: root.band-w * 0.10;
+        height: 100%;
+        background: root.side == 0
+            ? @linear-gradient(90deg, Theme.launch-page.with-alpha(0.30) 0%, Colors.transparent 100%)
+            : @linear-gradient(90deg, Colors.transparent 0%, Theme.launch-page.with-alpha(0.30) 100%);
+    }
+}
+
+/// 两侧装饰的整体容器：两块等宽的立式带子。
+export component HomeSideArt inherits Rectangle {
+    /// 和背景风景同一相位，0..1 一圈。
+    in property <float> phase: 0;
+    /// 每侧带宽（由 HomeBackdrop 按内容列两侧的空白算好）。
+    in property <length> band: 120px;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+    clip: true;
+
+    for s in 2: SideBand {
+        x: s == 0 ? 0px : root.width - root.band;
+        width: root.band;
+        height: 100%;
+        side: s;
+        screen-w: root.width;
+        band-w: root.band;
+        phase: root.phase;
+    }
+}
+

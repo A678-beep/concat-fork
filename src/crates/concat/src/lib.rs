@@ -616,7 +616,8 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     let dark = studio.prefs.dark.unwrap_or(true);
     app.global::<Theme>().set_dark(dark);
     // 主题皮肤：设置文件记的是 `Theme.skins` 里的 id（"dragon-gold"…），
-    // 认不出就落回第一套「极简暗」。皮肤自带的强调色先记下来，给下面的
+    // 认不出就落回默认的「中国龙 · 赤金」（图库第一套是极简暗，所以这里由
+    // skin_index 负责选默认）。皮肤自带的强调色先记下来，给下面的
     // 强调色默认值用：用户自己选过强调色时以用户为准。
     let skin_accent = {
         let theme = app.global::<Theme>();
@@ -627,6 +628,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         theme.set_skin_choice(index as i32);
         theme.set_motion(studio.prefs.motion_enabled());
         theme.set_low_power(studio.prefs.low_power_mode());
+        theme.set_side_art(studio.prefs.side_art_mode());
         usize::try_from(index)
             .ok()
             .and_then(|row| slint::Model::row_data(&specs, row))
@@ -2798,6 +2800,26 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                 app.global::<Theme>().set_low_power(on);
                 let mut studio = shell.studio.borrow_mut();
                 studio.prefs.low_power = Some(on);
+                studio.prefs.save(&studio.host.dirs);
+            });
+        }
+    });
+    // 首页两侧装饰：0 关 / 1 动态 / 2 低配静态。只有启动页画，其余页面不变。
+    app.on_settings_side_art_changed({
+        move |mode| {
+            Shell::with(|shell, app| {
+                let mode = mode.clamp(0, 2);
+                log::info!(
+                    "settings: Home side art {}",
+                    match mode {
+                        0 => "off",
+                        2 => "static",
+                        _ => "animated",
+                    }
+                );
+                app.global::<Theme>().set_side_art(mode);
+                let mut studio = shell.studio.borrow_mut();
+                studio.prefs.side_art = Some(mode as u32);
                 studio.prefs.save(&studio.host.dirs);
             });
         }

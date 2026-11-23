@@ -933,6 +933,8 @@ export component SettingsDialog inherits Sheet {
     callback motion-changed(on: bool);
     /// 低配模式：keep the scenery but stop moving it.
     callback low-power-changed(on: bool);
+    /// 首页两侧装饰：0 关 / 1 动态 / 2 低配静态。
+    callback side-art-changed(index: int);
     /// 面板流光边框总开关、强度、风格。
     callback neon-changed(on: bool);
     callback neon-intensity-changed(index: int);
@@ -1565,8 +1567,9 @@ export component SettingsDialog inherits Sheet {
                 }
 
                 // 主题皮肤：一套预设 = 一组面板色调 + 一张程序化绘制的背景
-                // 风景（矢量与粒子，没有视频/GIF/图片素材）。极简暗是默认：
-                // 纯色、没有计时器，窗口空着的时候 CPU 是 0。
+                // 风景（矢量与粒子，没有视频/GIF/图片素材）。0.3.4 起默认是中国龙 · 赤金：
+                // 深色底 + 赤金背景 + 首页两侧龙纹。极简暗是省电款：纯色、没有
+                // 计时器，窗口空着的时候 CPU 是 0。
                 //
                 // 0.3.3：31 套分「经典 / 国潮」两组，分组开关 + 搜索交给
                 // Rust 过滤（图库照 `Theme.skin-filtered` 画原始下标）。
@@ -1624,6 +1627,25 @@ export component SettingsDialog inherits Sheet {
                     switchable: true;
                     on: Theme.low-power;
                     switched(on) => { root.low-power-changed(on); }
+                }
+
+                // 首页两侧装饰（0.3.4）：启动页左右那两列空白上的主题图，
+                // 宽屏才有，窄窗自动收起。它属于动态背景的一部分：总开关
+                // 关掉时它也一起收。低配模式会自动把它停成静态一帧。
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.sideArt");
+                    hint: I18n.t("settings.sideArtHint");
+                    // 下标就是 mode：0 关 / 1 动态 / 2 低配静态，和
+                    // Theme.side-art 与 settings.json 的 sideArt 对齐。
+                    choices: [
+                        I18n.t("settings.sideArtOff"),
+                        I18n.t("settings.sideArtAnimated"),
+                        I18n.t("settings.sideArtStatic"),
+                    ];
+                    choice: Theme.side-art;
+                    open: false;
+                    chose(index) => { root.side-art-changed(index); }
                 }
 
                 // 面板流光：全应用统一的霓虹跑马灯边框。总开关、强度、

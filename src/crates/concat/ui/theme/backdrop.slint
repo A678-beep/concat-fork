@@ -24,6 +24,7 @@
 
 import { Theme } from "theme.slint";
 import { SkinSpec } from "skins.slint";
+import { HomeSideArt } from "side-art.slint";
 
 /// One skin's scene, at `phase` (0..1 around its loop). Draws nothing for
 /// style 0, which is Minimal Dark and is allowed to be free.
@@ -2074,5 +2075,49 @@ export component ThemeBackdrop inherits Rectangle {
         spec: Theme.skin;
         phase: root.phase;
         page: Theme.page;
+    }
+}
+
+/// 0.3.4：启动页自己的“地面”——背景风景 + 两侧主题装饰，共用一个 30fps
+/// 相位。只有一个定时器，所以两侧装饰不会把整窗重绘翻倍；低配/失焦/最小化
+/// 时它停，侧饰画的是冻结的一帧。
+///
+/// 侧饰的带宽按内容列两侧真实的空白算：内容列最宽 1360px，宽屏上两边空
+/// 出来的地方就是装饰带；夹在屏宽 8%–18% 之间。窗宽 < 1200px 时不挂。
+export component HomeBackdrop inherits Rectangle {
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+    clip: true;
+
+    property <float> phase: 0;
+    /// 与 start.slint 的 WideHome 同一套边距算法。
+    property <length> pad: Math.max(24px, Math.min(64px, root.width / 18));
+    property <length> content-w: Math.min(root.width - 2 * root.pad, 1360px);
+    property <length> gap: (root.width - root.content-w) / 2;
+    property <length> band: Math.min(root.width * 0.18, Math.max(root.width * 0.08, root.gap));
+    property <bool> wide: root.width >= 1200px;
+    /// 静态模式（低配 或「首页侧饰 = 静态」）停在相位的四分之一处。
+    property <float> art-phase: (Theme.low-power || Theme.side-art == 2) ? 0.22 : root.phase;
+
+    Timer {
+        interval: 33ms;
+        running: Theme.skin-motion;
+        triggered => { root.phase = Math.mod(root.phase + 0.033 / 9.0, 1.0); }
+    }
+
+    if Theme.backdrop-shown: SkinScene {
+        width: 100%;
+        height: 100%;
+        spec: Theme.skin;
+        phase: root.phase;
+        page: Theme.page;
+    }
+
+    if Theme.side-art-shown && root.wide: HomeSideArt {
+        width: 100%;
+        height: 100%;
+        band: root.band;
+        phase: root.art-phase;
     }
 }

@@ -126,6 +126,11 @@ export global Theme {
     /// frame of the skin, instead of the animated one; the timer does not
     /// run, so the window returns to zero when it is left alone.
     in-out property <bool> low-power: false;
+    /// 首页两侧的主题装饰：0 关 / 1 动态 / 2 低配静态。0.3.4 起加在启动页
+    /// 的左右两列空白上（宽屏才有；窄窗直接不挂）。它是动态背景的一部分：
+    /// 动态背景总开关关掉、或极简暗这种没有风景的皮肤，侧饰也不画。
+    /// Settings > 外观 选，Rust 记在 settings.json（`sideArt`）。
+    in-out property <int> side-art: 1;
     /// The window is in front, and not minimised. Written by Rust from the
     /// platform's focus and occlusion events (lib.rs, `platform::select_backend`);
     /// not remembered - it is a fact about this moment, not a preference.
@@ -136,6 +141,13 @@ export global Theme {
     /// while the window is in front. The single gate `ThemeBackdrop`'s
     /// timer runs on.
     out property <bool> skin-motion: backdrop-shown && !low-power && animating;
+    /// 首页两侧装饰画不画：有风景的皮肤 + 侧饰没关。动态背景关掉时整套
+    /// 风景都不画，侧饰跟着一起收，和「动态背景」这个总开关一致。
+    out property <bool> side-art-shown: backdrop-shown && side-art != 0;
+    /// 侧饰动不动：选了「动态」、不是低配模式、窗口在前面。低配/失焦/
+    /// 最小化时它是静态的一帧，和背景风景同一套门控。
+    out property <bool> side-art-motion: side-art-shown && side-art == 1
+        && !low-power && animating;
     /// The accent row the skin wears when it is picked, for Settings to
     /// hand to the accent handler as part of "switch to this skin".
     out property <int> skin-accent: skin.accent;

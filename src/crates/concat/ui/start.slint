@@ -3,7 +3,7 @@
 
 import { I18n } from "i18n.slint";
 import { Theme } from "theme/theme.slint";
-import { ThemeBackdrop } from "theme/backdrop.slint";
+import { HomeBackdrop } from "theme/backdrop.slint";
 import { CopyChip, Modal } from "primitives/modal.slint";
 import { FocusRing } from "primitives/focus-ring.slint";
 import { Glyph, Icon } from "icons.slint";
@@ -2635,10 +2635,11 @@ export component StartScreen inherits Rectangle {
     background: Theme.launch-page;
     clip: true;
 
-    // 主题皮肤的动态背景：首屏地方大，皮肤在这里最看得出来。外面还有
-    // 一层 launch-page 的底色，元素只负责风景；没开动态背景/极简暗时
-    // 什么都不挂。
-    if Theme.backdrop-shown: ThemeBackdrop {
+    // 主题皮肤的动态背景与两侧主题装饰：首屏地方大，皮肤在这里最看得出来。
+    // 外面还有一层 launch-page 的底色，元素只负责风景；没开动态背景/极简暗
+    // 时什么都不挂。两侧装饰只在宽窗（≥1200px）出现：它画在内容列两侧的
+    // 空白里，向中间渐隐，不动布局，也不压到文字上。
+    if Theme.backdrop-shown: HomeBackdrop {
         x: 0;
         y: 0;
         width: root.width;

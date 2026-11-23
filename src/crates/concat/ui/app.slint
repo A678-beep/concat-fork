@@ -551,6 +551,8 @@ export component App inherits Window {
     callback settings-motion-changed(on: bool);
     /// 低配模式（风景静态）。
     callback settings-low-power-changed(on: bool);
+    /// 首页两侧装饰：0 关 / 1 动态 / 2 低配静态。
+    callback settings-side-art-changed(index: int);
     /// 面板流光边框：总开关 / 强度 / 风格。
     callback settings-neon-changed(on: bool);
     callback settings-neon-intensity-changed(index: int);
@@ -1260,6 +1262,7 @@ export component App inherits Window {
         skin-query-changed(text) => { root.settings-skin-query-changed(text); }
         motion-changed(on) => { root.settings-motion-changed(on); }
         low-power-changed(on) => { root.settings-low-power-changed(on); }
+        side-art-changed(index) => { root.settings-side-art-changed(index); }
         neon-changed(on) => { root.settings-neon-changed(on); }
         neon-intensity-changed(index) => { root.settings-neon-intensity-changed(index); }
         neon-style-changed(index) => { root.settings-neon-style-changed(index); }

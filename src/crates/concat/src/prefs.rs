@@ -70,16 +70,20 @@ pub struct Preferences {
     /// https://github.com/jub0t/Concat/issues/320
     pub ui_scale: Option<u32>,
     /// 主题皮肤，记 `Theme.skins` 里的 id（"minimal-dark"、"dragon-gold"…）。
-    /// `None` 或认不出的 id 是第一套，也就是极简暗：纯色、无动画。
+    /// `None` 或认不出的 id 是「中国龙 · 赤金」（0.3.4 起的默认）。
     #[serde(default)]
     pub skin: Option<String>,
     /// 动态背景：皮肤的风景画在面板后面。`None` 是开（皮肤自带什么就画什么）；
-    /// 极简暗没有风景，所以默认就是静止的。
+    /// 极简暗没有风景，所以切过去就是静止的。
     #[serde(default)]
     pub dynamic_background: Option<bool>,
     /// 低配模式：保留风景但停掉动画。`None` 是关。
     #[serde(default)]
     pub low_power: Option<bool>,
+    /// 首页两侧的主题装饰：0 关 / 1 动态 / 2 低配静态。`None` 是开（0.3.4
+    /// 起首页默认就带两侧装饰；极简暗这种没风景的皮肤不画）。
+    #[serde(default)]
+    pub side_art: Option<u32>,
     /// 面板流光边框：总开关。`None` 是开（0.3.3 起默认开）。
     #[serde(default)]
     pub panel_neon: Option<bool>,
@@ -331,15 +335,22 @@ impl Preferences {
     }
 
     /// 记住的皮肤是哪一套：`ids` 是 `Theme.skins` 的 id，按图库顺序。没记住、
-    /// 或记住的 id 这一版已经没有了，都落回第一套（极简暗），和强调色一样的
-    /// 兜底规则。
+    /// 或记住的 id 这一版已经没有了，都落回「中国龙 · 赤金」——0.3.4 起首页
+    /// 默认就穿这一套（第一次打开就看得见背景与两侧的龙）；图库里没有
+    /// dragon-gold 时才落回第一套，和强调色一样的兜底规则。
     pub fn skin_index(&self, ids: impl IntoIterator<Item = impl AsRef<str>>) -> usize {
-        let Some(wanted) = self.skin.as_deref().map(str::trim) else {
-            return 0;
-        };
-        let wanted = wanted.to_lowercase();
-        ids.into_iter()
-            .position(|id| id.as_ref().trim().to_lowercase() == wanted)
+        let list: Vec<String> = ids
+            .into_iter()
+            .map(|id| id.as_ref().trim().to_lowercase())
+            .collect();
+        if let Some(wanted) = self.skin.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
+            let wanted = wanted.to_lowercase();
+            if let Some(index) = list.iter().position(|id| *id == wanted) {
+                return index;
+            }
+        }
+        list.iter()
+            .position(|id| id == "dragon-gold")
             .unwrap_or(0)
     }
 
@@ -351,6 +362,11 @@ impl Preferences {
     /// 低配模式开着没有。
     pub fn low_power_mode(&self) -> bool {
         self.low_power.unwrap_or(false)
+    }
+
+    /// 首页两侧装饰的模式：0 关 / 1 动态 / 2 低配静态。记住的越界值夹回。
+    pub fn side_art_mode(&self) -> i32 {
+        self.side_art.unwrap_or(1).min(2) as i32
     }
 
     /// 面板流光边框开着没有（默认开）。
