@@ -1,0 +1,266 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 XingLai AI and Concat contributors
+
+// 面板流光边框：沿容器四边流动的七彩 / 赤金 / 青碧 / 科技蓝光带。
+//
+// 一套设计系统，全应用共用：2px 光带 + 6px 柔光、10 秒一圈、圆角跟随
+// 容器（`clip` 到同半径的圆角里）。线宽、缓动、一圈的时长都写在这里，
+// 换皮肤不改它们；皮肤只影响跟随主题一档取到的颜色。
+//
+// 层级：`active`（当前聚焦/激活）流光全亮并播放；`lit`（悬停/键盘焦点）
+// 是更亮的静态光边；都不是就是一条安静的静态细光边，不花屏。
+//
+// 性能：每个边框自己一个 33ms 定时器，只有 `active` 时才跑；窗口失焦、
+// 最小化、低配模式、总开关关掉，定时器都停 —— 默认的极简暗没人碰时，
+// 一个流光定时器都不存在，空闲 CPU 依旧是 0。
+//
+// 所有颜色都是 `hsv()` 与 `mix()` 算出来的，没有贴图、没有 GIF。
+
+import { Theme } from "theme.slint";
+
+export global Neon {
+    /// 一圈的相位，0..1。每个边框自己维护（只有动的那几个在跑）。
+    in-out property <float> phase: 0;
+
+    /// 总开关 / 强度 / 风格都在 `Theme` 上（Rust 要读写，见那里的说明）。
+    /// 低配模式下所有流光停成静态（设计系统仍在，只是不动）。
+    out property <bool> on: Theme.panel-neon && !Theme.low-power;
+
+    /// 一圈 8-12s：32ms 一步 = 0.0032 圈，10 秒走完。
+    public pure function step() -> float {
+        return 0.0032;
+    }
+
+    /// 强度换算成光带不透明度。
+    public pure function core-alpha() -> float {
+        return Theme.panel-neon-intensity <= 0 ? 0.62 : Theme.panel-neon-intensity == 1 ? 0.80 : 0.95;
+    }
+
+    public pure function glow-alpha() -> float {
+        return Theme.panel-neon-intensity <= 0 ? 0.10 : Theme.panel-neon-intensity == 1 ? 0.16 : 0.24;
+    }
+
+    public pure function idle-alpha() -> float {
+        return Theme.panel-neon-intensity <= 0 ? 0.14 : Theme.panel-neon-intensity == 1 ? 0.20 : 0.28;
+    }
+
+    /// 三色循环，`t` 0..1：起点色 -> 中间色 -> 终点色。
+    pure function tri(a: color, b: color, c: color, t: float) -> color {
+        let x = Math.mod(t, 1.0);
+        return x < 0.5 ? a.mix(b, x * 2.0) : b.mix(c, (x - 0.5) * 2.0);
+    }
+
+    /// 光带在相位 `t` 处的颜色。七彩是低饱和的柔和环，其它三档按各自的
+    /// 双色往返，避免满屏高饱和闪烁。
+    public pure function color-at(t: float) -> color {
+        let x = Math.mod(t, 1.0);
+        if Theme.panel-neon-style == 0 {
+            return hsv(Math.mod(x * 360.0, 360.0), 0.58, 1.0);
+        }
+        if Theme.panel-neon-style == 1 {
+            return tri(#ff8a3c, #ffd98a, #c8402a, x).mix(#e8b04b, 0.22);
+        }
+        if Theme.panel-neon-style == 2 {
+            return tri(#2fb79a, #9fe8d2, #1f6f7a, x).mix(#57c2a5, 0.18);
+        }
+        if Theme.panel-neon-style == 3 {
+            return tri(#2f6ff0, #5fd0ff, #8a5cff, x).mix(#4fc3ff, 0.15);
+        }
+        // 跟随主题：皮肤的签名色与强调色之间缓慢往返，再和一层白混一点，
+        // 让它在深底与亮底上都读得出来。
+        return tri(Theme.skin.signature, Theme.skin.signature.mix(#ffffff, 0.45),
+            Theme.accent, x).mix(#ffffff, 0.10);
+    }
+}
+
+/// 一层沿四边流动的流光。放在容器的最后一个子元素上，铺满容器；
+/// 它不是输入元素，不挡点击。
+export component NeonFrame inherits Rectangle {
+    /// 当前聚焦/激活：流光全亮并播放。
+    in property <bool> active: false;
+    /// 悬停或键盘焦点：静态光边更亮（不播放，省电）。
+    in property <bool> lit: false;
+    /// 圆角跟随容器。
+    in property <length> radius: Theme.r;
+    /// 光带离容器边缘的内缩。
+    in property <length> inset: 0px;
+    /// 光带线宽。
+    in property <length> thickness: 2px;
+
+    width: 100%;
+    height: 100%;
+    background: Colors.transparent;
+    clip: true;
+    border-radius: root.radius;
+    visible: Theme.panel-neon;
+
+    /// 这一帧在动：总开关、低配、窗口前后台都算上。
+    property <bool> flowing: root.active && Neon.on && Theme.animating;
+    property <float> phase: 0.0;
+
+    Timer {
+        interval: 32ms;
+        running: root.flowing;
+        triggered => {
+            root.phase = Math.mod(root.phase + Neon.step(), 1.0);
+        }
+    }
+
+    // 悬停：窗口坐标里的指针落在自己身上。`lit` 由父级另有说法时以父级为准。
+    property <bool> hovered: Theme.cursor-x >= self.absolute-position.x
+        && Theme.cursor-x <= self.absolute-position.x + self.width
+        && Theme.cursor-y >= self.absolute-position.y
+        && Theme.cursor-y <= self.absolute-position.y + self.height;
+    property <bool> glow: root.active || root.lit || root.hovered;
+
+    // 四边各自的六段颜色。只在这条边自己的方向上取相位，接缝处颜色
+    // 相邻——顺时针一圈就是一条连续的彩带。
+    property <float> ph: root.phase;
+    property <bool> dim: root.glow;
+    property <float> core-op: root.active
+        ? Neon.core-alpha() : Neon.idle-alpha();
+    property <float> halo-op: root.glow
+        ? (root.active ? Neon.glow-alpha() : Neon.glow-alpha() * 0.6)
+        : Neon.glow-alpha() * 0.22;
+
+    // ── 上边：左 -> 右 ──────────────────────────────────────────────
+    Rectangle {
+        x: root.inset;
+        y: root.inset;
+        width: root.width - root.inset * 2;
+        height: root.thickness;
+        border-radius: root.thickness / 2;
+        background: @linear-gradient(90deg,
+            Neon.color-at(root.ph + 0.000) 0%,
+            Neon.color-at(root.ph + 0.050) 20%,
+            Neon.color-at(root.ph + 0.100) 40%,
+            Neon.color-at(root.ph + 0.150) 60%,
+            Neon.color-at(root.ph + 0.200) 80%,
+            Neon.color-at(root.ph + 0.250) 100%);
+        opacity: root.core-op;
+    }
+
+    Rectangle {
+        x: root.inset;
+        y: root.inset;
+        width: root.width - root.inset * 2;
+        height: root.thickness + 7px;
+        background: @linear-gradient(90deg,
+            Neon.color-at(root.ph + 0.000) 0%,
+            Neon.color-at(root.ph + 0.050) 20%,
+            Neon.color-at(root.ph + 0.100) 40%,
+            Neon.color-at(root.ph + 0.150) 60%,
+            Neon.color-at(root.ph + 0.200) 80%,
+            Neon.color-at(root.ph + 0.250) 100%);
+        opacity: root.halo-op;
+    }
+
+    // ── 右边：上 -> 下 ──────────────────────────────────────────────
+    Rectangle {
+        x: root.width - root.inset - root.thickness;
+        y: root.inset;
+        width: root.thickness;
+        height: root.height - root.inset * 2;
+        border-radius: root.thickness / 2;
+        background: @linear-gradient(180deg,
+            Neon.color-at(root.ph + 0.250) 0%,
+            Neon.color-at(root.ph + 0.300) 20%,
+            Neon.color-at(root.ph + 0.350) 40%,
+            Neon.color-at(root.ph + 0.400) 60%,
+            Neon.color-at(root.ph + 0.450) 80%,
+            Neon.color-at(root.ph + 0.500) 100%);
+        opacity: root.core-op;
+    }
+
+    Rectangle {
+        x: root.width - root.inset - root.thickness - 7px;
+        y: root.inset;
+        width: root.thickness + 7px;
+        height: root.height - root.inset * 2;
+        background: @linear-gradient(180deg,
+            Neon.color-at(root.ph + 0.250) 0%,
+            Neon.color-at(root.ph + 0.300) 20%,
+            Neon.color-at(root.ph + 0.350) 40%,
+            Neon.color-at(root.ph + 0.400) 60%,
+            Neon.color-at(root.ph + 0.450) 80%,
+            Neon.color-at(root.ph + 0.500) 100%);
+        opacity: root.halo-op;
+    }
+
+    // ── 下边：右 -> 左（渐变从右端起） ──────────────────────────────
+    Rectangle {
+        x: root.inset;
+        y: root.height - root.inset - root.thickness;
+        width: root.width - root.inset * 2;
+        height: root.thickness;
+        border-radius: root.thickness / 2;
+        background: @linear-gradient(270deg,
+            Neon.color-at(root.ph + 0.500) 0%,
+            Neon.color-at(root.ph + 0.550) 20%,
+            Neon.color-at(root.ph + 0.600) 40%,
+            Neon.color-at(root.ph + 0.650) 60%,
+            Neon.color-at(root.ph + 0.700) 80%,
+            Neon.color-at(root.ph + 0.750) 100%);
+        opacity: root.core-op;
+    }
+
+    Rectangle {
+        x: root.inset;
+        y: root.height - root.inset - root.thickness - 7px;
+        width: root.width - root.inset * 2;
+        height: root.thickness + 7px;
+        background: @linear-gradient(270deg,
+            Neon.color-at(root.ph + 0.500) 0%,
+            Neon.color-at(root.ph + 0.550) 20%,
+            Neon.color-at(root.ph + 0.600) 40%,
+            Neon.color-at(root.ph + 0.650) 60%,
+            Neon.color-at(root.ph + 0.700) 80%,
+            Neon.color-at(root.ph + 0.750) 100%);
+        opacity: root.halo-op;
+    }
+
+    // ── 左边：下 -> 上（渐变从底端起） ──────────────────────────────
+    Rectangle {
+        x: root.inset;
+        y: root.inset;
+        width: root.thickness;
+        height: root.height - root.inset * 2;
+        border-radius: root.thickness / 2;
+        background: @linear-gradient(0deg,
+            Neon.color-at(root.ph + 0.750) 0%,
+            Neon.color-at(root.ph + 0.800) 20%,
+            Neon.color-at(root.ph + 0.850) 40%,
+            Neon.color-at(root.ph + 0.900) 60%,
+            Neon.color-at(root.ph + 0.950) 80%,
+            Neon.color-at(root.ph + 0.000) 100%);
+        opacity: root.core-op;
+    }
+
+    Rectangle {
+        x: root.inset;
+        y: root.inset;
+        width: root.thickness + 7px;
+        height: root.height - root.inset * 2;
+        background: @linear-gradient(0deg,
+            Neon.color-at(root.ph + 0.750) 0%,
+            Neon.color-at(root.ph + 0.800) 20%,
+            Neon.color-at(root.ph + 0.850) 40%,
+            Neon.color-at(root.ph + 0.900) 60%,
+            Neon.color-at(root.ph + 0.950) 80%,
+            Neon.color-at(root.ph + 0.000) 100%);
+        opacity: root.halo-op;
+    }
+
+    // 四个角补一点柔光，让转角的颜色接得上，不像四条独立的灯管。
+    for corner in 4: Rectangle {
+        width: 12px;
+        height: 12px;
+        border-radius: 6px;
+        x: corner == 0 || corner == 3 ? root.inset - 2px
+            : root.width - root.inset - 10px;
+        y: corner < 2 ? root.inset - 2px : root.height - root.inset - 10px;
+        background: @radial-gradient(circle,
+            Neon.color-at(root.ph + 0.25 * corner).with-alpha(root.halo-op * 1.6) 0%,
+            Colors.transparent 70%);
+    }
+}

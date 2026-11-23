@@ -80,6 +80,15 @@ pub struct Preferences {
     /// 低配模式：保留风景但停掉动画。`None` 是关。
     #[serde(default)]
     pub low_power: Option<bool>,
+    /// 面板流光边框：总开关。`None` 是开（0.3.3 起默认开）。
+    #[serde(default)]
+    pub panel_neon: Option<bool>,
+    /// 面板流光强度：0 弱 / 1 中 / 2 强。`None` 是中。
+    #[serde(default)]
+    pub panel_neon_intensity: Option<u32>,
+    /// 面板流光风格：0 七彩 / 1 赤金 / 2 青碧 / 3 科技蓝 / 4 跟随主题。
+    #[serde(default)]
+    pub panel_neon_style: Option<u32>,
     /// The chosen transcriber model id, e.g. "base.en".
     pub transcriber_model: Option<String>,
     /// The language the captions sheet last asked the transcriber for, by
@@ -342,6 +351,21 @@ impl Preferences {
     /// 低配模式开着没有。
     pub fn low_power_mode(&self) -> bool {
         self.low_power.unwrap_or(false)
+    }
+
+    /// 面板流光边框开着没有（默认开）。
+    pub fn neon_enabled(&self) -> bool {
+        self.panel_neon.unwrap_or(true)
+    }
+
+    /// 面板流光强度，夹在 0..2。
+    pub fn neon_intensity(&self) -> i32 {
+        self.panel_neon_intensity.unwrap_or(1).min(2) as i32
+    }
+
+    /// 面板流光风格，夹在 0..4。
+    pub fn neon_style(&self) -> i32 {
+        self.panel_neon_style.unwrap_or(0).min(4) as i32
     }
 
     /// The remembered accent when it is a colour rather than a name: the

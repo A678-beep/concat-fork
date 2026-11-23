@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
 
 // The theme: the two palettes, and the two properties that choose from them.
@@ -139,6 +139,31 @@ export global Theme {
     /// The accent row the skin wears when it is picked, for Settings to
     /// hand to the accent handler as part of "switch to this skin".
     out property <int> skin-accent: skin.accent;
+    /// 图库里按分组/搜索过滤后的皮肤下标，元素是 `skins` 里的原始下标。
+    /// 创建时是全部；Settings 的分组开关与搜索框把过滤结果交给 Rust，Rust
+    /// 写回这里，画廊照着画，切皮肤时拿到的仍是原始下标。
+    in-out property <[int]> skin-filtered: [];
+    /// 图库当前分组：0 全部 / 1 经典 / 2 国潮。
+    in-out property <int> skin-group: 0;
+    /// 图库搜索词。
+    in-out property <string> skin-query: "";
+
+    /// 指针在窗口里的位置（逻辑像素），由 Rust 从光标事件写入；面板流光
+    /// 边框用它判断"指针在哪块面板上"。
+    in-out property <length> cursor-x: -10000px;
+    in-out property <length> cursor-y: -10000px;
+    /// 当前聚焦/激活的面板（座位下标）。Rust 在窗口里按下时按座位框算
+    /// 出来写在这里；-1 是都没有。面板流光边框据此决定哪块在跑。
+    in-out property <int> active-seat: -1;
+
+    /// 面板流光边框：总开关（默认开）、强度（0 弱 / 1 中 / 2 强）、
+    /// 风格（0 七彩 / 1 赤金 / 2 青碧 / 3 科技蓝 / 4 跟随主题）。
+    /// 全应用一套 `neon.slint` 的设计 token；低配模式在 `Neon.on` 里统一
+    /// 停成静态。这几个放在 Theme 上而不是 Neon 上，是因为 Rust 要读写它，
+    /// 而只有被根组件用到的全局才会生成 Rust 侧的类型。
+    in-out property <bool> panel-neon: true;
+    in-out property <int> panel-neon-intensity: 1;
+    in-out property <int> panel-neon-style: 0;
 
     /// `base` with the worn skin's hue mixed in at the strength the skin
     /// asks for on the base that is on. 0 strength (Minimal Dark) is the

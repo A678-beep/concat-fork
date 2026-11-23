@@ -3,6 +3,7 @@
 
 import { I18n } from "../i18n.slint";
 import { Theme } from "../theme/theme.slint";
+import { Neon } from "../theme/neon.slint";
 import { SkinScene } from "../theme/backdrop.slint";
 import { Skins, SkinSpec } from "../theme/skins.slint";
 import { NumberField } from "../primitives/number-field.slint";
@@ -665,27 +666,33 @@ component SkinCard inherits Rectangle {
 // width, each card the same size. Absolute positions rather than a layout,
 // the same arithmetic the asset grid uses, so the card is a plain Rectangle
 // and the whole grid's height is known without a second pass.
+//
+// 0.3.3: the grid draws `Theme.skin-filtered` — the original indices the
+// group switch and the search box leave visible, Rust keeps it in step —
+// and the per-skin `group` field is what "经典 / 国潮" split on. An empty
+// result is a zero-height grid and a line of its own says so.
 component SkinGallery inherits Rectangle {
     callback picked(index: int);
 
     property <length> gap: 10px;
     property <length> min-card: 168px;
+    property <int> count: Theme.skin-filtered.length;
     property <int> cols: Math.max(2,
         Math.floor((root.width + root.gap) / (root.min-card + root.gap)));
     property <length> card-w: (root.width - (root.cols - 1) * root.gap) / root.cols;
     property <length> card-h: 124px;
-    property <int> rows: Math.ceil(Theme.skins.length * 1.0 / root.cols);
+    property <int> rows: Math.ceil(root.count * 1.0 / root.cols);
 
-    height: root.rows * (root.card-h + root.gap) - root.gap;
+    height: Math.max(0px, root.rows * (root.card-h + root.gap) - root.gap);
 
-    for index in Theme.skins.length: SkinCard {
+    for index in root.count: SkinCard {
         x: Math.mod(index, root.cols) * (root.card-w + root.gap);
         y: Math.floor(index / root.cols) * (root.card-h + root.gap);
         width: root.card-w;
         height: root.card-h;
-        spec: Theme.skins[index];
-        chosen: Theme.skin-choice == index;
-        picked => { root.picked(index); }
+        spec: Theme.skins[Theme.skin-filtered[index]];
+        chosen: Theme.skin-choice == Theme.skin-filtered[index];
+        picked => { root.picked(Theme.skin-filtered[index]); }
     }
 }
 
@@ -913,13 +920,23 @@ export component SettingsDialog inherits Sheet {
     /// on, which is the whole reason it moved in here.
     callback theme-changed(dark: bool);
     /// 主题皮肤：which of `Theme.skins` the window should wear. Picking one
-    /// also picks the accent it ships with, from the Rust side.
+    /// also picks the accent it ships with, from the Rust side. The index is
+    /// the skin's original position in `Theme.skins`, and picking it also
+    /// switches the palette to the base the skin was drawn for.
     callback skin-changed(index: int);
+    /// 图库分组：0 全部 / 1 经典 / 2 国潮。
+    callback skin-group-changed(index: int);
+    /// 图库搜索词（按名称/描述过滤）。
+    callback skin-query-changed(text: string);
     /// 动态背景开关：the scenery behind the panes, animated while the window
     /// is at the front.
     callback motion-changed(on: bool);
     /// 低配模式：keep the scenery but stop moving it.
     callback low-power-changed(on: bool);
+    /// 面板流光边框总开关、强度、风格。
+    callback neon-changed(on: bool);
+    callback neon-intensity-changed(index: int);
+    callback neon-style-changed(index: int);
     /// The accent, as an index into `Theme.accent-names`.
     callback accent-changed(index: int);
     /// A colour picked by hand in place of any on the list.
@@ -1550,10 +1567,37 @@ export component SettingsDialog inherits Sheet {
                 // 主题皮肤：一套预设 = 一组面板色调 + 一张程序化绘制的背景
                 // 风景（矢量与粒子，没有视频/GIF/图片素材）。极简暗是默认：
                 // 纯色、没有计时器，窗口空着的时候 CPU 是 0。
+                //
+                // 0.3.3：31 套分「经典 / 国潮」两组，分组开关 + 搜索交给
+                // Rust 过滤（图库照 `Theme.skin-filtered` 画原始下标）。
                 DialogSection {
                     ruled: false;
                     title: I18n.t("settings.skins");
                     hint: I18n.t("settings.skinsHint");
+
+                    SegmentedControl {
+                        width: 280px;
+                        options: [
+                            I18n.t("settings.skinsAll"),
+                            I18n.t("settings.skinsClassic"),
+                            I18n.t("settings.skinsGuochao"),
+                        ];
+                        current: Theme.skin-group;
+                        changed(index) => { root.skin-group-changed(index); }
+                    }
+
+                    Field {
+                        width: 280px;
+                        value: Theme.skin-query;
+                        placeholder: I18n.t("settings.skinsSearch");
+                        edited(text) => { root.skin-query-changed(text); }
+                    }
+
+                    if Theme.skin-filtered.length == 0: Text {
+                        text: I18n.t("settings.skinsEmpty");
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-sm;
+                    }
 
                     SkinGallery {
                         picked(index) => { root.skin-changed(index); }
@@ -1580,6 +1624,45 @@ export component SettingsDialog inherits Sheet {
                     switchable: true;
                     on: Theme.low-power;
                     switched(on) => { root.low-power-changed(on); }
+                }
+
+                // 面板流光：全应用统一的霓虹跑马灯边框。总开关、强度、
+                // 风格三行；低配模式自动停成静态，动态背景关掉它也照跑。
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.neon");
+                    hint: I18n.t("settings.neonHint");
+                    switchable: true;
+                    on: Theme.panel-neon;
+                    switched(on) => { root.neon-changed(on); }
+                }
+
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.neonIntensity");
+                    choices: [
+                        I18n.t("settings.neonWeak"),
+                        I18n.t("settings.neonMid"),
+                        I18n.t("settings.neonStrong"),
+                    ];
+                    choice: Theme.panel-neon-intensity;
+                    open: false;
+                    chose(index) => { root.neon-intensity-changed(index); }
+                }
+
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.neonStyle");
+                    choices: [
+                        I18n.t("settings.neonRainbow"),
+                        I18n.t("settings.neonGold"),
+                        I18n.t("settings.neonJade"),
+                        I18n.t("settings.neonTech"),
+                        I18n.t("settings.neonTheme"),
+                    ];
+                    choice: Theme.panel-neon-style;
+                    open: false;
+                    chose(index) => { root.neon-style-changed(index); }
                 }
 
                 // The accent: the colour every selection, activated tool and

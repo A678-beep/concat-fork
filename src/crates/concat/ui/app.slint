@@ -17,6 +17,7 @@ import "../../concat-text/fonts/HankenGrotesk-Bold.ttf";
 import "../../concat-text/fonts/HankenGrotesk-Italic.ttf";
 
 import { Theme } from "theme/theme.slint";
+import { Neon } from "theme/neon.slint";
 import { Skins, SkinSpec } from "theme/skins.slint";
 import { Bezier, Curves, Fmt, Focus, Payload } from "util.slint";
 import { EffectData } from "demo/effects-panel.slint";
@@ -543,10 +544,17 @@ export component App inherits Window {
     callback settings-theme-changed(dark: bool);
     /// 主题皮肤：gallery 选中的下标（Theme.skins）。
     callback settings-skin-changed(index: int);
+    /// 图库分组 / 搜索词（Rust 过滤 `Theme.skin-filtered`）。
+    callback settings-skin-group-changed(index: int);
+    callback settings-skin-query-changed(text: string);
     /// 动态背景开关。
     callback settings-motion-changed(on: bool);
     /// 低配模式（风景静态）。
     callback settings-low-power-changed(on: bool);
+    /// 面板流光边框：总开关 / 强度 / 风格。
+    callback settings-neon-changed(on: bool);
+    callback settings-neon-intensity-changed(index: int);
+    callback settings-neon-style-changed(index: int);
     callback settings-accent-changed(index: int);
     callback settings-accent-custom-changed(colour: color);
     callback settings-playhead-changed(colour: color);
@@ -1248,8 +1256,13 @@ export component App inherits Window {
         log-level-changed(index) => { root.settings-log-level-changed(index); }
         theme-changed(dark) => { root.settings-theme-changed(dark); }
         skin-changed(index) => { root.settings-skin-changed(index); }
+        skin-group-changed(index) => { root.settings-skin-group-changed(index); }
+        skin-query-changed(text) => { root.settings-skin-query-changed(text); }
         motion-changed(on) => { root.settings-motion-changed(on); }
         low-power-changed(on) => { root.settings-low-power-changed(on); }
+        neon-changed(on) => { root.settings-neon-changed(on); }
+        neon-intensity-changed(index) => { root.settings-neon-intensity-changed(index); }
+        neon-style-changed(index) => { root.settings-neon-style-changed(index); }
         accent-changed(index) => { root.settings-accent-changed(index); }
         accent-custom-changed(colour) => { root.settings-accent-custom-changed(colour); }
         playhead-changed(colour) => { root.settings-playhead-changed(colour); }

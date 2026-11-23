@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 XingLai AI and Concat contributors
 
 // The skin's scenery, drawn behind the panes.
@@ -520,6 +520,1531 @@ export component SkinScene inherits Rectangle {
             x: Math.mod(i * 0.618 + root.phase * 0.03, 1.0) * root.width;
             y: Math.mod(i * 0.414 - root.phase * 0.02, 1.0) * root.height;
             opacity: 0.12 + 0.22 * Math.abs(Math.sin((root.phase * 360 + i * 63.0) * 1deg));
+            background: root.spec.signature;
+        }
+    }
+
+    // ── 8 · 纯金 · 龙纹 ─────────────────────────────────────────────
+    //
+    // 亮金鎏金的底，一条暗金龙纹从左下盘到右上，云纹压在角落；金属光泽
+    // 是两道很淡的斜光在缓慢扫过。文字用浅色基（深墨字），对比度靠基色
+    // 保证，不靠描边。
+    if root.spec.style == 8: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(162deg,
+            #f6e5b6 0%,
+            #ecd08c 34%,
+            #ddb966 68%,
+            #c9a04e 100%);
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: @radial-gradient(circle,
+                (#fff6dc).with-alpha(0.55) 0%,
+                (#f7e7ba).with-alpha(0.0) 62%);
+        }
+
+        // 金属扫光：两道很长的斜带，错开半个循环。
+        for i in 2: Rectangle {
+            width: 62%;
+            height: 200%;
+            y: -root.height * 0.5;
+            x: (Math.mod(root.phase * 0.5 + i * 0.5, 1.0) * 1.6 - 0.4) * root.width;
+            background: @linear-gradient(90deg,
+                Colors.transparent 0%,
+                (#fffdf2).with-alpha(0.30) 48%,
+                Colors.transparent 100%);
+        }
+
+        // 龙身：一条长 S 与回卷的尾巴，暗金描边。
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            y: Math.sin((root.phase * 360) * 1deg) * 1.6px;
+            stroke: root.spec.signature.with-alpha(0.52);
+            stroke-width: root.width * 0.0022;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+            commands: "M 6 90 C 20 82 26 68 40 64 C 54 60 56 44 70 38 C 82 33 90 40 92 50 C 93 57 88 62 81 60";
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            y: Math.sin((root.phase * 360) * 1deg) * 1.6px;
+            stroke: root.spec.signature.with-alpha(0.16);
+            stroke-width: root.width * 0.0060;
+            stroke-line-cap: round;
+            commands: "M 6 90 C 20 82 26 68 40 64 C 54 60 56 44 70 38 C 82 33 90 40 92 50 C 93 57 88 62 81 60";
+        }
+
+        // 龙鳞：沿身体两排小弧，随循环微微起伏。
+        for i in 15: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            y: Math.sin((root.phase * 360 + i * 24) * 1deg) * 0.9px;
+            stroke: root.spec.signature.with-alpha(0.34);
+            stroke-width: root.width * 0.0011;
+            commands: "M \{8 + i * 5.3} \{82 - i * 2.2} A 2.5 1.9 0 0 1 \{13 + i * 5.3} \{82 - i * 2.2}";
+        }
+
+        // 云纹：三朵暗金云的曲线。
+        for i in 3: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            x: Math.sin((root.phase * 360 + i * 120) * 1deg) * 2.4px;
+            stroke: root.spec.signature.with-alpha(0.30);
+            stroke-width: root.width * 0.0013;
+            stroke-line-cap: round;
+            commands: i == 0 ? "M 10 22 C 16 15 26 16 28 23 C 29 28 24 32 19 30 C 16 29 16 25 19 24"
+                : i == 1 ? "M 66 84 C 72 77 82 79 84 86 C 85 91 80 94 75 92 C 72 91 72 87 75 86"
+                : "M 84 14 C 89 8 97 10 98 16 C 99 20 96 23 92 22 C 90 21 90 18 92 17";
+        }
+
+        // 细金粉。
+        for i in 10: Rectangle {
+            width: 1.6px;
+            height: 1.6px;
+            border-radius: 0.8px;
+            x: Math.mod(i * 0.618 + root.phase * 0.03, 1.0) * root.width;
+            y: Math.mod(i * 0.377 + 0.08, 1.0) * root.height;
+            opacity: 0.14 + 0.18 * Math.abs(Math.sin((root.phase * 360 + i * 66) * 1deg));
+            background: root.spec.signature;
+        }
+    }
+
+    // ── 9 · 纯青 ────────────────────────────────────────────────────
+    //
+    // 一色青瓷：没有纹样，只有一层釉光和几圈极淡的水痕。留白就是设计。
+    if root.spec.style == 9: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(172deg,
+            #0c2f2e 0%,
+            #12403e 46%,
+            #0a2524 100%);
+
+        Rectangle {
+            x: Math.mod(root.phase * 0.25, 1.0) * root.width - root.width * 0.35;
+            width: 42%;
+            height: 200%;
+            y: -root.height * 0.5;
+            background: @linear-gradient(90deg,
+                Colors.transparent 0%,
+                (#cfe9e2).with-alpha(0.09) 50%,
+                Colors.transparent 100%);
+        }
+
+        for i in 3: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: root.spec.signature.with-alpha(0.10);
+            stroke-width: root.width * 0.0009;
+            commands: "M \{22 + i * 8} \{94 - i * 3} C \{38 + i * 8} \{86 - i * 3} \{62 + i * 8} \{86 - i * 3} \{78 + i * 8} \{94 - i * 3}";
+        }
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: @radial-gradient(circle,
+                (#8fe6d5).with-alpha(0.08) 0%,
+                Colors.transparent 58%);
+        }
+
+        for i in 6: Rectangle {
+            width: 1.4px;
+            height: 1.4px;
+            border-radius: 0.7px;
+            x: Math.mod(i * 0.53 + root.phase * 0.01, 1.0) * root.width;
+            y: Math.mod(i * 0.291 + 0.12, 1.0) * root.height;
+            opacity: 0.10 + 0.14 * Math.abs(Math.sin((root.phase * 360 + i * 80) * 1deg));
+            background: root.spec.signature;
+        }
+    }
+
+    // ── 10 · 纯金 ───────────────────────────────────────────────────
+    //
+    // 纯金渐变，没有龙也没有纹样：几道很细的金属拉丝和一道极缓的光扫，
+    // 商务、克制，深色字。
+    if root.spec.style == 10: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(168deg,
+            #f6e4b2 0%,
+            #e8cd8e 38%,
+            #d4ae62 72%,
+            #b98f48 100%);
+
+        for i in 4: Rectangle {
+            width: 100%;
+            height: 1.2px;
+            y: root.height * (0.16 + i * 0.21);
+            background: @linear-gradient(90deg,
+                Colors.transparent 0%,
+                (#fff8e4).with-alpha(0.22) 30%,
+                (#fff8e4).with-alpha(0.10) 60%,
+                Colors.transparent 100%);
+        }
+
+        // 光扫：8-12 秒一圈的白色柔光。
+        Rectangle {
+            height: 100%;
+            width: 30%;
+            x: (Math.mod(root.phase * 0.8, 1.0) * 1.5 - 0.3) * root.width;
+            background: @linear-gradient(90deg,
+                Colors.transparent 0%,
+                (#fffdf4).with-alpha(0.34) 50%,
+                Colors.transparent 100%);
+        }
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: @radial-gradient(circle,
+                (#8a6420).with-alpha(0.10) 0%,
+                Colors.transparent 62%);
+        }
+    }
+
+    // ── 11 · 金龙腾云 ───────────────────────────────────────────────
+    //
+    // 参考片的骨架：金龙在云海里盘旋，远处有雷光一闪，金尘向上飘。
+    // 龙仍然是矢量缎带 + 鳞弧，不是贴图。
+    if root.spec.style == 11: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(168deg,
+            #1b0d07 0%,
+            #2a1208 46%,
+            #160a06 100%);
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: @radial-gradient(circle,
+                (#e8a83e).with-alpha(0.16) 0%,
+                Colors.transparent 56%);
+        }
+
+        // 云海：三层缓慢反向漂移的低云。
+        for i in 3: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            x: Math.sin((root.phase * 360 + i * 140) * 1deg) * (2.0px + i * 1.4px);
+            fill: root.spec.signature.with-alpha(i == 0 ? 0.06 : i == 1 ? 0.09 : 0.13);
+            commands: i == 0
+                ? "M 0 62 C 14 54 26 58 36 52 C 48 45 62 50 72 46 C 84 41 94 46 100 42 L 100 100 L 0 100 Z"
+                : i == 1
+                ? "M 0 76 C 12 68 24 74 36 68 C 50 61 64 68 78 62 C 88 58 96 62 100 59 L 100 100 L 0 100 Z"
+                : "M 0 90 C 16 84 30 90 44 85 C 58 80 74 87 88 82 L 100 79 L 100 100 L 0 100 Z";
+        }
+
+        // 雷光：两道很细的折线，只在循环的一段里出现。
+        for i in 2: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            opacity: Math.mod(root.phase * 8.0 + i * 0.41, 1.0) > 0.72
+                ? 0.42 * Math.abs(Math.sin((root.phase * 360 + i * 90) * 1deg)) : 0.0;
+            stroke: #ffe6a8;
+            stroke-width: root.width * 0.0011;
+            stroke-line-cap: round;
+            commands: i == 0
+                ? "M 42 2 L 48 9 L 44 11 L 52 20 L 48 22 L 56 32"
+                : "M 78 4 L 74 12 L 79 14 L 72 23 L 77 25 L 70 34";
+        }
+
+        // 龙：一条大盘旋的身体 + 回勾的头 + 尾。整体随循环轻微起伏。
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            y: Math.sin((root.phase * 360) * 1deg) * 2.6px;
+            stroke: root.spec.signature.with-alpha(0.50);
+            stroke-width: root.width * 0.0026;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+            commands: "M 4 92 C 18 84 16 66 30 58 C 44 50 40 32 56 26 C 70 21 84 28 88 40 C 90 47 86 52 79 51 C 73 50 71 45 74 41";
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            y: Math.sin((root.phase * 360) * 1deg) * 2.6px;
+            stroke: root.spec.signature.with-alpha(0.14);
+            stroke-width: root.width * 0.0072;
+            stroke-line-cap: round;
+            commands: "M 4 92 C 18 84 16 66 30 58 C 44 50 40 32 56 26 C 70 21 84 28 88 40 C 90 47 86 52 79 51 C 73 50 71 45 74 41";
+        }
+
+        // 龙尾：一道回卷的细线。
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            y: Math.sin((root.phase * 360 + 60) * 1deg) * 2.6px;
+            stroke: root.spec.signature.with-alpha(0.34);
+            stroke-width: root.width * 0.0014;
+            stroke-line-cap: round;
+            commands: "M 4 92 C 10 96 18 94 20 88";
+        }
+
+        // 鳞片。
+        for i in 17: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            y: Math.sin((root.phase * 360 + i * 20) * 1deg) * 1.2px;
+            stroke: root.spec.signature.with-alpha(0.28);
+            stroke-width: root.width * 0.0012;
+            commands: "M \{6 + i * 4.9} \{85 - i * 3.2} A 2.4 1.8 0 0 1 \{10.6 + i * 4.9} \{85 - i * 3.2}";
+        }
+
+        // 金尘：向上飘的慢粒子。
+        for i in 14: Rectangle {
+            width: 2px;
+            height: 2px;
+            border-radius: 1px;
+            x: Math.mod(i * 0.618 + root.phase * 0.02, 1.0) * root.width;
+            y: Math.mod(i * 0.371 - root.phase * 0.06, 1.0) * root.height;
+            opacity: 0.14 + 0.26 * Math.abs(Math.sin((root.phase * 360 + i * 57) * 1deg));
+            background: root.spec.signature;
+        }
+    }
+
+    // ── 12 · 中国红灯笼 ─────────────────────────────────────────────
+    if root.spec.style == 12: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(170deg,
+            #2c0808 0%,
+            #460d0b 44%,
+            #200606 100%);
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: @radial-gradient(circle,
+                (#ff8a45).with-alpha(0.16) 0%,
+                Colors.transparent 58%);
+        }
+
+        // 三盏灯笼：暖光晕 + 灯身 + 上下盖 + 会摆的流苏。
+        for i in 3: Rectangle {
+            x: root.width * (0.16 + i * 0.30) - 22px
+                + Math.sin((root.phase * 360 + i * 110) * 1deg) * 5px;
+            y: root.height * (0.20 + Math.mod(i, 2) * 0.10)
+                + Math.sin((root.phase * 360 + i * 90) * 1deg) * 4px;
+            width: 44px;
+            height: 56px;
+
+            Rectangle {
+                width: 100%;
+                height: 60%;
+                y: 8px;
+                border-radius: self.width / 2;
+                background: @radial-gradient(circle,
+                    (#ffb877).with-alpha(0.95) 0%,
+                    (#e2452e).with-alpha(0.92) 58%,
+                    (#8a1a12).with-alpha(0.95) 100%);
+            }
+
+            Rectangle {
+                width: 100%;
+                height: 26%;
+                y: 8px;
+                background: @radial-gradient(circle,
+                    (#ff7a3a).with-alpha(0.22) 0%,
+                    Colors.transparent 72%);
+            }
+
+            Rectangle {
+                x: (parent.width - 14px) / 2;
+                y: 6px;
+                width: 14px;
+                height: 5px;
+                border-radius: 2px;
+                background: (#d9a441).with-alpha(0.9);
+            }
+
+            Rectangle {
+                x: (parent.width - 10px) / 2;
+                y: 37px;
+                width: 10px;
+                height: 4px;
+                border-radius: 2px;
+                background: (#b8873a).with-alpha(0.9);
+            }
+
+            // 流苏：两条随循环摆动的线。
+            for t in 2: Rectangle {
+                x: (parent.width - 2px) / 2 + (t == 0 ? -2px : 2px)
+                    + Math.sin((root.phase * 360 + i * 70 + t * 40) * 1deg) * 1.6px;
+                y: 39px;
+                width: 1.6px;
+                height: 24%;
+                border-radius: 1px;
+                background: (#e8b04b).with-alpha(0.55);
+            }
+        }
+
+        for i in 10: Rectangle {
+            width: 1.8px;
+            height: 1.8px;
+            border-radius: 0.9px;
+            x: Math.mod(i * 0.583 + root.phase * 0.02, 1.0) * root.width;
+            y: Math.mod(i * 0.313 - root.phase * 0.03, 1.0) * root.height;
+            opacity: 0.12 + 0.22 * Math.abs(Math.sin((root.phase * 360 + i * 63) * 1deg));
+            background: #ffb877;
+        }
+    }
+
+    // ── 13 · 祥云流动 ───────────────────────────────────────────────
+    if root.spec.style == 13: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(172deg,
+            #2a0c06 0%,
+            #41100a 42%,
+            #200705 100%);
+
+        // 三排祥云：一排慢、一排中、一排快，错开，向右滚。
+        for i in 6: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            x: Math.mod(root.phase * (0.6 + Math.mod(i, 3) * 0.5) + i * 0.19, 1.2) * root.width
+                - root.width * 0.2;
+            stroke: root.spec.signature.with-alpha(0.12 + Math.mod(i, 3) * 0.05);
+            stroke-width: root.width * (0.0010 + Math.mod(i, 2) * 0.0004);
+            stroke-line-cap: round;
+            commands: "M 0 18 C 5 12 13 13 15 19 C 16 23 12 26 8 24 C 6 23 6 20 8 19 M 22 18 C 27 12 35 13 37 19 C 38 23 34 26 30 24 C 28 23 28 20 30 19";
+            y: root.height * (0.18 + Math.floor(i / 2) * 0.24);
+        }
+
+        // 一道很慢的金色光带。
+        Rectangle {
+            width: 34%;
+            height: 100%;
+            x: (Math.mod(root.phase * 0.9, 1.0) * 1.4 - 0.2) * root.width;
+            background: @linear-gradient(90deg,
+                Colors.transparent 0%,
+                (#ffe6a8).with-alpha(0.10) 50%,
+                Colors.transparent 100%);
+        }
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: @radial-gradient(circle,
+                (#ffcf6a).with-alpha(0.10) 0%,
+                Colors.transparent 66%);
+        }
+    }
+
+    // ── 14 · 故宫剪影 ───────────────────────────────────────────────
+    if root.spec.style == 14: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(180deg,
+            #1c0a10 0%,
+            #3a1014 52%,
+            #57151a 100%);
+
+        // 淡月与雪光。
+        Rectangle {
+            width: Math.min(root.width, root.height) * 0.14;
+            height: self.width;
+            border-radius: self.width / 2;
+            x: root.width * 0.74;
+            y: root.height * 0.14;
+            background: (#f3e6c8).with-alpha(0.28);
+        }
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: @radial-gradient(circle,
+                (#f3e6c8).with-alpha(0.10) 0%,
+                Colors.transparent 50%);
+        }
+
+        // 宫墙 + 两层重檐的剪影。
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            fill: (#20080c).with-alpha(0.75);
+            commands: "M 0 78 L 100 78 L 100 100 L 0 100 Z";
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            fill: (#150508).with-alpha(0.92);
+            commands: "M 12 78 L 12 70 L 6 70 L 18 60 L 24 62 L 30 54 L 36 62 L 42 60 L 46 70 L 40 70 L 40 78 Z";
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            fill: (#150508).with-alpha(0.92);
+            commands: "M 54 78 L 54 71 L 49 71 L 60 61 L 66 64 L 72 55 L 78 64 L 84 62 L 90 71 L 84 71 L 84 78 Z";
+        }
+
+        // 金色瓦当：檐下一排很淡的亮点。
+        for i in 9: Rectangle {
+            width: 3px;
+            height: 2px;
+            x: root.width * (0.16 + i * 0.085);
+            y: root.height * 0.735;
+            opacity: 0.22 + 0.14 * Math.abs(Math.sin((root.phase * 360 + i * 37) * 1deg));
+            background: root.spec.signature;
+        }
+
+        // 雪：缓缓斜落的细点。
+        for i in 16: Rectangle {
+            width: 1.8px;
+            height: 1.8px;
+            border-radius: 0.9px;
+            x: Math.mod(i * 0.537 + root.phase * 0.012, 1.0) * root.width;
+            y: Math.mod(i * 0.283 + root.phase * 0.05, 1.0) * root.height;
+            opacity: 0.16 + 0.22 * Math.abs(Math.sin((root.phase * 360 + i * 47) * 1deg));
+            background: #f3e6c8;
+        }
+    }
+
+    // ── 15 · 长城暮色 ───────────────────────────────────────────────
+    if root.spec.style == 15: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(180deg,
+            #171022 0%,
+            #351a2a 38%,
+            #7a3226 74%,
+            #c05a2c 100%);
+
+        // 落日。
+        Rectangle {
+            width: Math.min(root.width, root.height) * 0.20;
+            height: self.width;
+            border-radius: self.width / 2;
+            x: root.width * 0.60;
+            y: root.height * 0.60;
+            background: (#ffcf8a).with-alpha(0.50);
+        }
+
+        // 三层山脊，越近越暗。
+        for i in 3: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            y: Math.sin((root.phase * 360 + i * 110) * 1deg) * (1.2px + i * 0.8px);
+            fill: (#1a0d14).with-alpha(i == 0 ? 0.30 : i == 1 ? 0.52 : 0.80);
+            commands: i == 0
+                ? "M 0 62 L 14 50 L 26 58 L 38 44 L 52 56 L 66 48 L 80 60 L 92 52 L 100 58 L 100 100 L 0 100 Z"
+                : i == 1
+                ? "M 0 76 L 18 62 L 32 70 L 46 58 L 62 70 L 76 62 L 90 72 L 100 66 L 100 100 L 0 100 Z"
+                : "M 0 92 L 22 76 L 40 86 L 58 72 L 74 84 L 90 76 L 100 86 L 100 100 L 0 100 Z";
+        }
+
+        // 近处山脊上的长城：一条折线 + 三座烽火台。
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            y: Math.sin((root.phase * 360 + 30) * 1deg) * 1.4px;
+            stroke: (#160a10).with-alpha(0.92);
+            stroke-width: root.width * 0.0018;
+            commands: "M 0 90 L 12 83 L 22 86 L 34 78 L 46 82 L 58 74 L 70 79 L 82 72 L 94 77 L 100 74";
+        }
+
+        for i in 3: Rectangle {
+            width: 5px;
+            height: 7px;
+            x: root.width * (0.20 + i * 0.26);
+            y: root.height * (0.775 - i * 0.022);
+            background: (#160a10).with-alpha(0.95);
+        }
+
+        // 暮霭。
+        Rectangle {
+            width: 100%;
+            height: 12%;
+            y: root.height * 0.62;
+            background: @linear-gradient(90deg,
+                Colors.transparent 0%,
+                (#ffb066).with-alpha(0.10) 50%,
+                Colors.transparent 100%);
+        }
+    }
+
+    // ── 16 · 窗花剪纸 ───────────────────────────────────────────────
+    if root.spec.style == 16: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(168deg,
+            #2a0606 0%,
+            #440b0b 46%,
+            #1c0404 100%);
+
+        // 团花：十二瓣绕着中心极慢地转（用位置推算，不用旋转属性）。
+        for i in 12: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            x: 0;
+            y: 0;
+            stroke: root.spec.signature.with-alpha(0.24);
+            stroke-width: root.width * 0.0012;
+            commands: "M \{50 + 4 * Math.cos((i * 30 + root.phase * 24) * 1deg)} \{50 + 4 * Math.sin((i * 30 + root.phase * 24) * 1deg)} L \{50 + 25 * Math.cos((i * 30 + root.phase * 24) * 1deg)} \{50 + 25 * Math.sin((i * 30 + root.phase * 24) * 1deg)}";
+        }
+
+        // 两圈外环 + 四个角花。
+        for i in 2: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: root.spec.signature.with-alpha(i == 0 ? 0.18 : 0.10);
+            stroke-width: root.width * 0.0010;
+            commands: i == 0
+                ? "M 32 50 C 32 40 40 32 50 32 C 60 32 68 40 68 50 C 68 60 60 68 50 68 C 40 68 32 60 32 50 Z"
+                : "M 24 50 C 24 36 36 24 50 24 C 64 24 76 36 76 50 C 76 64 64 76 50 76 C 36 76 24 64 24 50 Z";
+        }
+
+        // 四角的小菱形，团花之外的边饰。
+        for i in 4: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            fill: root.spec.signature.with-alpha(0.20);
+            commands: i == 0 ? "M 6 3 L 9 6 L 6 9 L 3 6 Z"
+                : i == 1 ? "M 94 3 L 97 6 L 94 9 L 91 6 Z"
+                : i == 2 ? "M 6 91 L 9 94 L 6 97 L 3 94 Z"
+                : "M 94 91 L 97 94 L 94 97 L 91 94 Z";
+        }
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: @radial-gradient(circle,
+                (#ff6a4a).with-alpha(0.10) 0%,
+                Colors.transparent 62%);
+        }
+    }
+
+    // ── 17 · 烟花夜景 ───────────────────────────────────────────────
+    if root.spec.style == 17: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(180deg,
+            #060a1a 0%,
+            #0c1230 52%,
+            #080a18 100%);
+
+        for i in 12: Rectangle {
+            width: 1.4px;
+            height: 1.4px;
+            border-radius: 0.7px;
+            x: Math.mod(i * 0.618 + 0.03, 1.0) * root.width;
+            y: Math.mod(i * 0.377 + 0.04, 1.0) * root.height * 0.7;
+            opacity: 0.10 + 0.20 * Math.abs(Math.sin((root.phase * 360 + i * 41) * 1deg));
+            background: #cdd8ff;
+        }
+
+        // 三朵烟花：粒子沿同一方向散开，半径随循环涨落、末端渐隐。
+        for burst in 3: Rectangle {
+            x: root.width * (0.22 + burst * 0.27);
+            y: root.height * (0.18 + Math.mod(burst, 2) * 0.10);
+            width: 0px;
+            height: 0px;
+
+            Rectangle {
+                width: Math.min(root.width, root.height) * (0.05 + 0.05 * Math.mod(root.phase + burst * 0.33, 1.0));
+                height: self.width;
+                border-radius: self.width / 2;
+                x: -self.width / 2;
+                y: -self.height / 2;
+                background: @radial-gradient(circle,
+                    (burst == 0 ? #ffd27a : burst == 1 ? #ff8a6a : #7fd8ff).with-alpha(0.30) 0%,
+                    Colors.transparent 70%);
+            }
+
+            for p in 10: Rectangle {
+                width: 2.2px;
+                height: 2.2px;
+                border-radius: 1.1px;
+                x: Math.cos((p * 36 + burst * 17) * 1deg)
+                    * Math.min(root.width, root.height) * (0.04 + 0.11 * Math.mod(root.phase + burst * 0.31, 1.0)) - 1px;
+                y: Math.sin((p * 36 + burst * 17) * 1deg)
+                    * Math.min(root.width, root.height) * (0.04 + 0.11 * Math.mod(root.phase + burst * 0.31, 1.0)) - 1px;
+                opacity: (0.75 - 0.5 * Math.mod(root.phase + burst * 0.31, 1.0))
+                    * (0.55 + 0.45 * Math.abs(Math.sin((p * 47) * 1deg + (root.phase * 360) * 1deg)));
+                background: burst == 0 ? #ffd27a : burst == 1 ? #ff9a7a : #9fdcff;
+            }
+        }
+
+        // 城市剪影。
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            fill: (#05060e).with-alpha(0.9);
+            commands: "M 0 88 L 8 88 L 8 82 L 14 82 L 14 88 L 22 88 L 22 78 L 30 78 L 30 88 L 40 88 L 40 84 L 48 84 L 48 88 L 58 88 L 58 80 L 66 80 L 66 88 L 76 88 L 76 85 L 84 85 L 84 88 L 100 88 L 100 100 L 0 100 Z";
+        }
+    }
+
+    // ── 18 · 水墨山河 ───────────────────────────────────────────────
+    //
+    // 宣纸的暖白底 + 墨色远近三层山 + 一行飞鸟。浅色基，深墨字。
+    if root.spec.style == 18: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(176deg,
+            #efeade 0%,
+            #e6e0d2 46%,
+            #d8d2c4 100%);
+
+        // 墨晕。
+        for i in 2: Rectangle {
+            width: 46%;
+            height: 60%;
+            x: root.width * (i == 0 ? 0.02 : 0.52)
+                + Math.sin((root.phase * 360 + i * 180) * 1deg) * 6px;
+            y: root.height * (i == 0 ? 0.10 : 0.42);
+            background: @radial-gradient(circle,
+                (#2b2a24).with-alpha(0.05) 0%,
+                Colors.transparent 68%);
+        }
+
+        for i in 3: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            y: Math.sin((root.phase * 360 + i * 120) * 1deg) * (1.0px + i * 0.6px);
+            fill: (#2f2e28).with-alpha(i == 0 ? 0.10 : i == 1 ? 0.16 : 0.30);
+            commands: i == 0
+                ? "M 0 58 L 16 44 L 28 52 L 42 36 L 56 50 L 70 40 L 84 52 L 100 44 L 100 100 L 0 100 Z"
+                : i == 1
+                ? "M 0 74 L 20 58 L 34 68 L 50 52 L 66 66 L 82 56 L 100 70 L 100 100 L 0 100 Z"
+                : "M 0 92 L 24 76 L 42 86 L 60 72 L 78 84 L 94 76 L 100 82 L 100 100 L 0 100 Z";
+        }
+
+        // 飞鸟：很小的两笔。
+        for i in 5: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            x: Math.mod(i * 0.17 + root.phase * 0.35, 1.25) * root.width - root.width * 0.15;
+            y: root.height * (0.24 + Math.mod(i * 0.13, 0.16))
+                + Math.sin((root.phase * 360 + i * 80) * 1deg) * 2px;
+            stroke: (#2b2a24).with-alpha(0.42);
+            stroke-width: root.width * 0.0011;
+            stroke-line-cap: round;
+            commands: "M 0 0 C 1.2 -1.4 2.6 -1.4 3.6 0 M 3.6 0 C 4.6 -1.4 6.0 -1.4 7.2 0";
+        }
+
+        // 一枚小小的朱印。
+        Rectangle {
+            width: 10px;
+            height: 10px;
+            x: root.width - 30px;
+            y: root.height - 30px;
+            border-width: 1.4px;
+            border-color: (#a8322a).with-alpha(0.55);
+            background: (#a8322a).with-alpha(0.10);
+        }
+    }
+
+    // ── 19 · 牡丹花开 ───────────────────────────────────────────────
+    if root.spec.style == 19: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(170deg,
+            #240614 0%,
+            #3e0a1e 46%,
+            #1a0410 100%);
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: @radial-gradient(circle,
+                (#ff9ab6).with-alpha(0.16) 0%,
+                Colors.transparent 60%);
+        }
+
+        // 花心：两圈同心弧当花瓣层。
+        for i in 3: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: root.spec.signature.with-alpha(0.16 + i * 0.06);
+            stroke-width: root.width * (0.0012 + i * 0.0004);
+            commands: i == 0
+                ? "M 40 50 C 40 43 45 38 50 38 C 55 38 60 43 60 50 C 60 57 55 62 50 62 C 45 62 40 57 40 50 Z"
+                : i == 1
+                ? "M 34 50 C 34 40 41 32 50 32 C 59 32 66 40 66 50 C 66 60 59 68 50 68 C 41 68 34 60 34 50 Z"
+                : "M 27 50 C 27 37 37 26 50 26 C 63 26 73 37 73 50 C 73 63 63 74 50 74 C 37 74 27 63 27 50 Z";
+        }
+
+        // 花瓣粒子：从花心向外飘，循环一次开一轮。
+        for i in 16: Rectangle {
+            width: 3px;
+            height: 5px;
+            border-radius: 2.5px;
+            x: root.width * 0.5 + Math.cos((i * 22.5) * 1deg)
+                * Math.min(root.width, root.height) * (0.10 + 0.22 * Math.mod(root.phase * 0.8 + i * 0.037, 1.0))
+                - 1.5px;
+            y: root.width * 0.5 + Math.sin((i * 22.5) * 1deg)
+                * Math.min(root.width, root.height) * (0.10 + 0.22 * Math.mod(root.phase * 0.8 + i * 0.037, 1.0))
+                - 2.5px;
+            opacity: 0.5 * (1.0 - Math.mod(root.phase * 0.8 + i * 0.037, 1.0));
+            background: i > 10 ? #ffb0c4 : root.spec.signature;
+        }
+    }
+
+    // ── 20 · 锦鲤水波 ───────────────────────────────────────────────
+    if root.spec.style == 20: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(178deg,
+            #07242c 0%,
+            #0c3540 52%,
+            #061a20 100%);
+
+        // 锦鲤：椭圆身 + 尾鳍，沿正弦路线游，快慢错开。
+        for i in 2: Rectangle {
+            x: Math.mod(root.phase * (0.5 + i * 0.18) + i * 0.45, 1.15) * (root.width + 120px) - 60px;
+            y: root.height * (0.34 + i * 0.22)
+                + Math.sin((root.phase * 360 + i * 140) * 1deg) * 14px;
+            width: 46px;
+            height: 22px;
+
+            Rectangle {
+                width: 30px;
+                height: 18px;
+                y: 2px;
+                border-radius: 9px;
+                background: @linear-gradient(90deg,
+                    (#fff3e4).with-alpha(0.85) 0%,
+                    (#ff8a3c).with-alpha(0.88) 55%,
+                    (#d84a20).with-alpha(0.85) 100%);
+            }
+
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: 46;
+                viewbox-height: 22;
+                fill: (#ff7a3a).with-alpha(0.55);
+                commands: "M 28 11 C 34 4 42 3 46 8 C 42 6 38 8 36 11 C 38 14 42 16 46 14 C 42 19 34 18 28 11 Z";
+            }
+
+            Rectangle {
+                width: 3px;
+                height: 3px;
+                border-radius: 1.5px;
+                x: 7px;
+                y: 8px;
+                background: #ffffff;
+                opacity: 0.8;
+            }
+        }
+
+        // 水纹：几圈扩散的弧。
+        for i in 4: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: (#8fe0e8).with-alpha(0.10 - i * 0.015);
+            stroke-width: root.width * 0.0009;
+            commands: "M \{14 + i * 6} \{84 - i * 3} C \{30 + i * 6} \{76 - i * 3} \{60 + i * 6} \{76 - i * 3} \{86 - i * 2} \{84 - i * 3}";
+        }
+
+        for i in 6: Rectangle {
+            width: 2px;
+            height: 2px;
+            border-radius: 1px;
+            x: Math.mod(i * 0.47 + root.phase * 0.02, 1.0) * root.width;
+            y: Math.mod(i * 0.31 - root.phase * 0.04, 1.0) * root.height;
+            opacity: 0.12 + 0.16 * Math.abs(Math.sin((root.phase * 360 + i * 71) * 1deg));
+            background: #bdeef2;
+        }
+    }
+
+    // ── 21 · 青花瓷纹 ───────────────────────────────────────────────
+    //
+    // 瓷白底、青花的一条缠枝纹带 + 两道弦纹，整体极慢地横移。浅色基。
+    if root.spec.style == 21: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(172deg,
+            #f2f4f7 0%,
+            #e6ebf2 52%,
+            #d9e0ea 100%);
+
+        // 釉光。
+        Rectangle {
+            width: 36%;
+            height: 200%;
+            y: -root.height * 0.5;
+            x: (Math.mod(root.phase * 0.35, 1.0) - 0.1) * root.width;
+            background: @linear-gradient(90deg,
+                Colors.transparent 0%,
+                (#ffffff).with-alpha(0.45) 50%,
+                Colors.transparent 100%);
+        }
+
+        // 缠枝纹带：一排回旋的枝蔓。
+        for i in 7: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            x: Math.mod(root.phase * 0.25 + i * 0.16, 1.3) * root.width - root.width * 0.2;
+            stroke: root.spec.signature.with-alpha(0.34);
+            stroke-width: root.width * 0.0012;
+            stroke-line-cap: round;
+            commands: "M 0 50 C 3 44 9 44 11 50 C 12 54 9 57 6 55 C 4 54 4 51 6 50 M 11 50 C 15 46 20 47 22 52";
+        }
+
+        for i in 2: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: root.spec.signature.with-alpha(0.22);
+            stroke-width: root.width * 0.0010;
+            commands: i == 0
+                ? "M 0 40 L 100 40 M 0 42 L 100 42"
+                : "M 0 62 L 100 62 M 0 64 L 100 64";
+        }
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: @radial-gradient(circle,
+                (#2f5fa8).with-alpha(0.06) 0%,
+                Colors.transparent 66%);
+        }
+    }
+
+    // ── 22 · 京剧脸谱 ───────────────────────────────────────────────
+    if root.spec.style == 22: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(170deg,
+            #1c0505 0%,
+            #340808 52%,
+            #180404 100%);
+
+        // 幕布：竖折的明暗。
+        for i in 9: Rectangle {
+            x: i * root.width / 9;
+            width: root.width / 9;
+            height: 100%;
+            background: @linear-gradient(90deg,
+                Colors.transparent 0%,
+                (#ff5a3a).with-alpha(0.05) 50%,
+                Colors.transparent 100%);
+        }
+
+        // 一束聚光。
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: @radial-gradient(circle,
+                (#ff9a6a).with-alpha(0.14) 0%,
+                Colors.transparent 54%);
+        }
+
+        // 脸谱：一个抽象的脸型轮廓 + 眉眼与额心纹。
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: (#ff9a5a).with-alpha(0.30);
+            stroke-width: root.width * 0.0014;
+            commands: "M 50 26 C 60 26 66 36 65 48 C 64 60 58 70 50 70 C 42 70 36 60 35 48 C 34 36 40 26 50 26 Z";
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: root.spec.signature.with-alpha(0.30);
+            stroke-width: root.width * 0.0016;
+            stroke-line-cap: round;
+            commands: "M 40 44 C 44 40 48 41 49 45 M 51 45 C 52 41 56 40 60 44 M 44 56 C 47 58 53 58 56 56 M 50 30 L 50 38 M 45 34 L 55 34";
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            opacity: 0.10 + 0.10 * Math.abs(Math.sin((root.phase * 360) * 1deg));
+            stroke: (#ffd27a);
+            stroke-width: root.width * 0.0010;
+            commands: "M 50 16 C 64 18 74 30 74 46 C 74 62 64 76 50 78 C 36 76 26 62 26 46 C 26 30 36 18 50 16 Z";
+        }
+
+        for i in 10: Rectangle {
+            width: 2px;
+            height: 2px;
+            border-radius: 1px;
+            x: Math.mod(i * 0.61 + root.phase * 0.02, 1.0) * root.width;
+            y: Math.mod(i * 0.37 - root.phase * 0.02, 1.0) * root.height;
+            opacity: 0.12 + 0.20 * Math.abs(Math.sin((root.phase * 360 + i * 53) * 1deg));
+            background: #ff9a6a;
+        }
+    }
+
+    // ── 23 · 竹林清风 ───────────────────────────────────────────────
+    if root.spec.style == 23: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(174deg,
+            #071a10 0%,
+            #0b2a1a 46%,
+            #05140c 100%);
+
+        // 雾气。
+        Rectangle {
+            width: 100%;
+            height: 34%;
+            y: root.height * 0.52;
+            background: @linear-gradient(180deg,
+                Colors.transparent 0%,
+                (#bfe8cf).with-alpha(0.06) 50%,
+                Colors.transparent 100%);
+        }
+
+        // 竹：七根粗细不一的竖杆，随循环轻摆。
+        for i in 7: Rectangle {
+            x: root.width * (0.06 + i * 0.135)
+                + Math.sin((root.phase * 360 + i * 47) * 1deg) * (2.5px + i * 0.5px);
+            y: root.height * (0.05 + Math.mod(i, 3) * 0.05);
+            width: (i == 2 || i == 5) ? 3px : 2px;
+            height: root.height * (0.9 - Math.mod(i, 3) * 0.04);
+            border-radius: 1.5px;
+            background: @linear-gradient(180deg,
+                (#7fd6a2).with-alpha(0.24) 0%,
+                (#4a9a72).with-alpha(0.16) 60%,
+                Colors.transparent 100%);
+        }
+
+        // 叶：一根竹梢上的两三笔。
+        for i in 9: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            x: Math.sin((root.phase * 360 + i * 60) * 1deg) * 3px;
+            y: Math.sin((root.phase * 360 + i * 90) * 1deg) * 1.4px;
+            stroke: (#8fe0ae).with-alpha(0.18);
+            stroke-width: root.width * 0.0010;
+            stroke-line-cap: round;
+            commands: "M \{10 + i * 10.6} \{18 + Math.mod(i, 3) * 7} C \{14 + i * 10.6} \{14 + Math.mod(i, 3) * 7} \{20 + i * 10.6} \{15 + Math.mod(i, 3) * 7} \{22 + i * 10.6} \{19 + Math.mod(i, 3) * 7}";
+        }
+
+        for i in 6: Rectangle {
+            width: 1.6px;
+            height: 1.6px;
+            border-radius: 0.8px;
+            x: Math.mod(i * 0.57 + root.phase * 0.02, 1.0) * root.width;
+            y: Math.mod(i * 0.33 - root.phase * 0.05, 1.0) * root.height;
+            opacity: 0.16 + 0.26 * Math.abs(Math.sin((root.phase * 360 + i * 89) * 1deg));
+            background: #c8f0c0;
+        }
+    }
+
+    // ── 24 · 折扇屏风 ───────────────────────────────────────────────
+    if root.spec.style == 24: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(168deg,
+            #2a0c14 0%,
+            #3c1220 50%,
+            #1c0810 100%);
+
+        // 扇骨：从下方一处散开，展开角随循环很缓地呼吸。
+        for i in 9: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: root.spec.signature.with-alpha(i == 4 ? 0.42 : 0.22);
+            stroke-width: root.width * (i == 4 ? 0.0014 : 0.0010);
+            stroke-line-cap: round;
+            commands: "M 50 92 L \{50 + 46 * Math.cos((-90 + (i - 4) * 11 + Math.sin((root.phase * 360) * 1deg) * 1.4) * 1deg)} \{92 + 46 * Math.sin((-90 + (i - 4) * 11 + Math.sin((root.phase * 360) * 1deg) * 1.4) * 1deg)}";
+        }
+
+        // 扇面：两道弧。
+        for i in 2: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: root.spec.signature.with-alpha(i == 0 ? 0.22 : 0.12);
+            stroke-width: root.width * 0.0010;
+            commands: i == 0
+                ? "M 12 62 C 24 38 38 30 50 30 C 62 30 76 38 88 62"
+                : "M 20 66 C 30 46 40 40 50 40 C 60 40 70 46 80 66";
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: (#ffd98a).with-alpha(0.14);
+            stroke-width: root.width * 0.0010;
+            commands: "M 50 92 L 50 42";
+        }
+
+        // 扇面上的金色细纹。
+        for i in 5: Rectangle {
+            width: 2px;
+            height: 2px;
+            border-radius: 1px;
+            x: root.width * (0.30 + i * 0.10);
+            y: root.height * (0.40 + Math.mod(i, 2) * 0.06);
+            opacity: 0.20 + 0.18 * Math.abs(Math.sin((root.phase * 360 + i * 43) * 1deg));
+            background: #ffe2a8;
+        }
+    }
+
+    // ── 25 · 龙舟竞渡 ───────────────────────────────────────────────
+    if root.spec.style == 25: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(178deg,
+            #06202a 0%,
+            #0a3040 46%,
+            #04141c 100%);
+
+        // 远山与月。
+        Rectangle {
+            width: Math.min(root.width, root.height) * 0.16;
+            height: self.width;
+            border-radius: self.width / 2;
+            x: root.width * 0.78;
+            y: root.height * 0.14;
+            background: (#ffe9c0).with-alpha(0.26);
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            fill: (#041018).with-alpha(0.45);
+            commands: "M 0 62 L 16 50 L 30 58 L 44 46 L 58 56 L 74 48 L 88 58 L 100 52 L 100 100 L 0 100 Z";
+        }
+
+        // 龙舟：船身 + 龙头 + 四支桨。
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            x: Math.sin((root.phase * 360) * 1deg) * 2px;
+            y: Math.sin((root.phase * 360 + 90) * 1deg) * 2px;
+            fill: (#160a0c).with-alpha(0.92);
+            commands: "M 26 78 C 40 84 62 84 76 78 C 78 82 74 86 70 86 L 32 86 C 28 86 24 82 26 78 Z";
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            x: Math.sin((root.phase * 360) * 1deg) * 2px;
+            y: Math.sin((root.phase * 360 + 90) * 1deg) * 2px;
+            stroke: (#ffcf7a).with-alpha(0.55);
+            stroke-width: root.width * 0.0016;
+            stroke-line-cap: round;
+            commands: "M 74 78 C 80 76 84 70 82 64 C 81 61 78 60 76 62 M 84 70 C 88 68 90 65 89 62";
+        }
+
+        for i in 4: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: (#ffcf7a).with-alpha(0.28);
+            stroke-width: root.width * 0.0010;
+            commands: "M \{34 + i * 9} 80 L \{30 + i * 9} 68";
+        }
+
+        // 浪：三层横向的水纹。
+        for i in 3: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            x: Math.mod(root.phase * (i + 1) * 0.05, 1.0) * 20px;
+            stroke: (#8fe0e8).with-alpha(0.10 + i * 0.03);
+            stroke-width: root.width * 0.0009;
+            commands: "M 0 \{88 + i * 3} C 18 \{84 + i * 3} 32 \{92 + i * 3} 50 \{88 + i * 3} C 68 \{84 + i * 3} 82 \{92 + i * 3} 100 \{88 + i * 3}";
+        }
+
+        // 浪花。
+        for i in 8: Rectangle {
+            width: 2px;
+            height: 2px;
+            border-radius: 1px;
+            x: root.width * (0.28 + Math.mod(i * 0.47, 0.5));
+            y: root.height * (0.80 + Math.mod(i * 0.13, 0.10))
+                - root.phase * 2px;
+            opacity: 0.16 + 0.20 * Math.abs(Math.sin((root.phase * 360 + i * 50) * 1deg));
+            background: #d6f4f6;
+        }
+    }
+
+    // ── 26 · 福字铜钱 ───────────────────────────────────────────────
+    if root.spec.style == 26: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(168deg,
+            #2c0606 0%,
+            #470a08 48%,
+            #1c0404 100%);
+
+        // 淡淡的福字水印。
+        Text {
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2 - 6px;
+            text: "福";
+            font-size: Math.min(root.width, root.height) * 0.62;
+            font-weight: 700;
+            color: (#ffd76a).with-alpha(0.07);
+        }
+
+        // 铜钱：方孔圆钱一圈，缓慢上浮。
+        for i in 7: Rectangle {
+            x: Math.mod(i * 0.263 + root.phase * 0.02, 1.0) * root.width;
+            y: Math.mod(i * 0.157 - root.phase * 0.04, 1.0) * root.height;
+            width: (i == 2 || i == 5) ? 26px : 18px;
+            height: self.width;
+            border-radius: self.width / 2;
+            border-width: 1.6px;
+            border-color: (#ffd76a).with-alpha(0.26);
+            background: Colors.transparent;
+
+            Rectangle {
+                width: parent.width * 0.30;
+                height: self.width;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                background: (#ffd76a).with-alpha(0.20);
+            }
+        }
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: @radial-gradient(circle,
+                (#ffd76a).with-alpha(0.12) 0%,
+                Colors.transparent 62%);
+        }
+
+        for i in 9: Rectangle {
+            width: 2px;
+            height: 2px;
+            border-radius: 1px;
+            x: Math.mod(i * 0.59 + root.phase * 0.02, 1.0) * root.width;
+            y: Math.mod(i * 0.37 - root.phase * 0.05, 1.0) * root.height;
+            opacity: 0.14 + 0.22 * Math.abs(Math.sin((root.phase * 360 + i * 59) * 1deg));
+            background: root.spec.signature;
+        }
+    }
+
+    // ── 27 · 舞狮贺岁 ───────────────────────────────────────────────
+    if root.spec.style == 27: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(170deg,
+            #2a0805 0%,
+            #45100a 48%,
+            #1c0503 100%);
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: @radial-gradient(circle,
+                (#ffcf5a).with-alpha(0.13) 0%,
+                Colors.transparent 56%);
+        }
+
+        // 狮头：一圈绒球简化的外环 + 两只眼 + 鼻。
+        for i in 12: Rectangle {
+            width: 10px;
+            height: 10px;
+            border-radius: 5px;
+            x: root.width * 0.5 + Math.cos((i * 30) * 1deg) * Math.min(root.width, root.height) * 0.17 - 5px;
+            y: root.height * 0.44 + Math.sin((i * 30) * 1deg) * Math.min(root.width, root.height) * 0.17 - 5px;
+            background: @radial-gradient(circle,
+                (#ffb85a).with-alpha(0.30) 0%,
+                Colors.transparent 70%);
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: (#ffd27a).with-alpha(0.34);
+            stroke-width: root.width * 0.0016;
+            commands: "M 50 30 C 62 30 70 38 70 46 C 70 56 62 62 50 62 C 38 62 30 56 30 46 C 30 38 38 30 50 30 Z";
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: (#ff8a4a).with-alpha(0.42);
+            stroke-width: root.width * 0.0018;
+            stroke-line-cap: round;
+            commands: "M 41 44 C 44 41 47 42 48 45 M 52 45 C 53 42 56 41 59 44 M 46 54 C 48 56 52 56 54 54";
+        }
+
+        // 红金纸屑。
+        for i in 14: Rectangle {
+            width: 2.4px;
+            height: 2.4px;
+            border-radius: 1.2px;
+            x: Math.mod(i * 0.577 + root.phase * 0.03, 1.0) * root.width;
+            y: Math.mod(i * 0.331 - root.phase * 0.06, 1.0) * root.height;
+            opacity: 0.14 + 0.24 * Math.abs(Math.sin((root.phase * 360 + i * 61) * 1deg));
+            background: i > 9 ? #ff6a4a : #ffd27a;
+        }
+    }
+
+    // ── 28 · 灯笼长廊 ───────────────────────────────────────────────
+    if root.spec.style == 28: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(180deg,
+            #160404 0%,
+            #2a0806 54%,
+            #0e0202 100%);
+
+        // 长廊：向中心收的墙线。
+        for i in 2: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: (#ff9a5a).with-alpha(0.10);
+            stroke-width: root.width * 0.0010;
+            commands: i == 0 ? "M 4 100 L 44 42" : "M 96 100 L 56 42";
+        }
+
+        // 纵深灯笼：六对，越远越小越暗。
+        for i in 6: Rectangle {
+            width: 20px + i * 9px;
+            height: 26px + i * 12px;
+            x: root.width * 0.5 - (20px + i * 9px) / 2 + (Math.mod(i, 2) == 0 ? -1 : 1) * (14px + i * 24px);
+            y: root.height * (0.16 + i * 0.135)
+                + Math.sin((root.phase * 360 + i * 70) * 1deg) * (1.2px + i * 0.6px);
+            opacity: 0.24 + i * 0.10;
+
+            Rectangle {
+                width: 100%;
+                height: 100%;
+                border-radius: self.width / 2;
+                background: @radial-gradient(circle,
+                    (#ffc07a).with-alpha(0.85) 0%,
+                    (#e2452e).with-alpha(0.80) 52%,
+                    (#7a140c).with-alpha(0.85) 100%);
+            }
+
+            Rectangle {
+                x: -parent.width * 0.3;
+                y: -parent.height * 0.2;
+                width: 160%;
+                height: 140%;
+                background: @radial-gradient(circle,
+                    (#ff8a45).with-alpha(0.14) 0%,
+                    Colors.transparent 70%);
+            }
+        }
+
+        // 景深光斑。
+        for i in 8: Rectangle {
+            width: 8px + Math.mod(i, 3) * 5px;
+            height: self.width;
+            border-radius: self.width / 2;
+            x: Math.mod(i * 0.71 + root.phase * 0.008, 1.0) * root.width;
+            y: root.height * (0.30 + Math.mod(i * 0.23, 0.5));
+            opacity: 0.05 + 0.06 * Math.abs(Math.sin((root.phase * 360 + i * 77) * 1deg));
+            background: #ffb877;
+        }
+    }
+
+    // ── 29 · 雪落红梅 ───────────────────────────────────────────────
+    if root.spec.style == 29: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(174deg,
+            #160a18 0%,
+            #2a0c1a 48%,
+            #100610 100%);
+
+        // 月光。
+        Rectangle {
+            width: Math.min(root.width, root.height) * 0.11;
+            height: self.width;
+            border-radius: self.width / 2;
+            x: root.width * 0.76;
+            y: root.height * 0.12;
+            background: (#f2e6df).with-alpha(0.20);
+        }
+
+        // 梅枝：两条深色老枝。
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: (#120810).with-alpha(0.72);
+            stroke-width: root.width * 0.0042;
+            stroke-line-cap: round;
+            commands: "M 4 96 C 18 82 26 70 30 54 C 34 38 42 30 54 24";
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: (#120810).with-alpha(0.62);
+            stroke-width: root.width * 0.0026;
+            stroke-line-cap: round;
+            commands: "M 28 60 C 40 56 50 46 56 34 M 44 40 C 50 42 58 40 64 34";
+        }
+
+        // 梅花：五瓣的小点。
+        for i in 14: Rectangle {
+            width: 5px;
+            height: 5px;
+            border-radius: 2.5px;
+            x: root.width * (0.10 + Math.mod(i * 0.13, 0.62));
+            y: root.height * (0.24 + Math.mod(i * 0.19, 0.62))
+                + Math.sin((root.phase * 360 + i * 40) * 1deg) * 0.8px;
+            opacity: 0.30 + 0.24 * Math.abs(Math.sin((root.phase * 360 + i * 57) * 1deg));
+            background: i > 10 ? #ffd2dc : root.spec.signature;
+        }
+
+        // 雪：缓缓直落。
+        for i in 22: Rectangle {
+            width: 1.6px + Math.mod(i, 2) * 0.6px;
+            height: self.width;
+            border-radius: self.width / 2;
+            x: Math.mod(i * 0.431 + root.phase * 0.01, 1.0) * root.width;
+            y: Math.mod(i * 0.217 + root.phase * 0.09, 1.0) * root.height;
+            opacity: 0.16 + 0.26 * Math.abs(Math.sin((root.phase * 360 + i * 43) * 1deg));
+            background: #f4eef0;
+        }
+    }
+
+    // ── 30 · 赤金云纹 ───────────────────────────────────────────────
+    //
+    // 偏商务：不画具体的东西，只有三条抽象的赤金流云带和一道光，安静、
+    // 低饱和，适合放在客户提案的界面后面。
+    if root.spec.style == 30: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: @linear-gradient(166deg,
+            #1c0f0c 0%,
+            #2c1611 48%,
+            #140a08 100%);
+
+        // 三条流云带：不同粗细与速度，用 stroke 画柔和的曲线。
+        for i in 3: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            x: Math.sin((root.phase * 360 + i * 130) * 1deg) * (2.4px + i * 1.6px);
+            stroke: root.spec.signature.with-alpha(i == 0 ? 0.10 : i == 1 ? 0.16 : 0.22);
+            stroke-width: root.width * (i == 0 ? 0.0060 : i == 1 ? 0.0032 : 0.0016);
+            stroke-line-cap: round;
+            commands: i == 0
+                ? "M -6 30 C 20 18 40 34 62 26 C 80 20 92 24 106 16"
+                : i == 1
+                ? "M -6 56 C 22 44 44 60 66 52 C 84 46 94 50 106 42"
+                : "M -6 82 C 24 70 46 86 68 78 C 86 72 96 76 106 68";
+        }
+
+        // 一道很慢的斜向光带。
+        Rectangle {
+            width: 26%;
+            height: 160%;
+            y: -root.height * 0.3;
+            x: (Math.mod(root.phase * 0.7, 1.0) * 1.5 - 0.25) * root.width;
+            background: @linear-gradient(90deg,
+                Colors.transparent 0%,
+                (#ffe6b0).with-alpha(0.10) 50%,
+                Colors.transparent 100%);
+        }
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            background: @radial-gradient(circle,
+                (#e8b04b).with-alpha(0.09) 0%,
+                Colors.transparent 58%);
+        }
+
+        for i in 8: Rectangle {
+            width: 1.6px;
+            height: 1.6px;
+            border-radius: 0.8px;
+            x: Math.mod(i * 0.62 + root.phase * 0.02, 1.0) * root.width;
+            y: Math.mod(i * 0.39 - root.phase * 0.02, 1.0) * root.height;
+            opacity: 0.10 + 0.16 * Math.abs(Math.sin((root.phase * 360 + i * 67) * 1deg));
             background: root.spec.signature;
         }
     }

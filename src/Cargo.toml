@@ -1,9 +1,9 @@
-﻿[workspace]
+[workspace]
 resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.3.2"
+version = "0.3.3"
 edition = "2024"
 rust-version = "1.93"
 license = "AGPL-3.0-or-later"
@@ -153,4 +153,3 @@ i-slint-renderer-skia = { path = "patches/i-slint-renderer-skia" }
 # (see patches/README.md, and GGML_BACKEND_DL in build-app.yml). 0.15.0
 # exactly; bump it with whisper-rs, re-applying the change.
 whisper-rs-sys = { path = "patches/whisper-rs-sys" }
-

@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
 
 import { Theme } from "../theme/theme.slint";
+import { NeonFrame } from "../theme/neon.slint";
 import { Payload } from "../util.slint";
 import { DockSide } from "../dock.slint";
 import { PaneKind } from "pane-switcher.slint";
@@ -550,5 +551,14 @@ export component Seat inherits Rectangle {
             duration: 90ms;
             easing: cubic-bezier(0.4, 0, 0.2, 1);
         }
+    }
+
+    // 面板的流光边框：点过哪块面板，哪一块就是「当前聚焦」，它的四边走
+    // 一圈；其余是安静的静态细光边。指针悬停时静态光边更亮一点，但不
+    // 播放——没人动的时候窗口还是一个帧都不画。弹窗上的流光见 modal.slint。
+    NeonFrame {
+        active: Theme.active-seat == root.index;
+        radius: Theme.r;
+        inset: 1px;
     }
 }

@@ -163,8 +163,43 @@ static STARTING: std::sync::Mutex<Option<concat_log::Op>> = std::sync::Mutex::ne
 /// the milliseconds went, and Settings > About can show the last few
 /// launches the same way. A clock read and a push: nothing on a launch's
 /// path should be afraid to call this.
-fn starting_step(op: &mut Option<concat_log::Op>, name: &str) {
-    if let Some(op) = op.as_mut() {
+/// The Appearance gallery's visible rows: the skins whose group and words
+/// match `Theme.skin-group` / `Theme.skin-query`, as original indices into
+/// `Theme.skins`. Rust keeps the model because the tree has no recursion to
+/// filter an array with and the grid needs a dense list to lay out. The
+/// chosen skin is still `Theme.skin-choice`, an original index, so switching
+/// never renumbers what settings.json remembers.
+fn apply_skin_filter(app: &App) {
+    let theme = app.global::<Theme>();
+    let specs = theme.get_skins();
+    let group = theme.get_skin_group();
+    let query = theme.get_skin_query().to_lowercase();
+    let mut rows: Vec<i32> = Vec::new();
+    for index in 0..slint::Model::row_count(&specs) {
+        let Some(spec) = slint::Model::row_data(&specs, index) else {
+            continue;
+        };
+        let in_group = match group {
+            1 => spec.group == 0,
+            2 => spec.group == 1,
+            _ => true,
+        };
+        if !in_group {
+            continue;
+        }
+        if !query.is_empty() {
+            let name = spec.name.to_lowercase();
+            let hint = spec.hint.to_lowercase();
+            if !name.contains(&query) && !hint.contains(&query) {
+                continue;
+            }
+        }
+        rows.push(index as i32);
+    }
+    theme.set_skin_filtered(ModelRc::new(VecModel::from(rows)));
+}
+
+fn starting_step(op: &mut Option<concat_log::Op>, name: &str) {    if let Some(op) = op.as_mut() {
         op.step(name);
     }
 }
@@ -410,6 +445,37 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         // See the handler in platform.rs for why this is a raw event and
         // not a TouchArea.
         || Shell::with(|_, app| app.invoke_blur()),
+        // 指针位置：面板流光边框靠它判断"指针在哪块面板上"，悬停时静态
+        // 光边更亮。写的是两个属性，没有光边在读的时候这一步什么都不画。
+        |x, y| {
+            Shell::with(|_, app| {
+                let theme = app.global::<Theme>();
+                theme.set_cursor_x(x);
+                theme.set_cursor_y(y);
+            });
+        },
+        // 按下：按座位框算出被点中的是哪块面板，写进 `Theme.active-seat`。
+        // 被点中的那块流光开始跑，其余安静下来；弹窗的流光在 modal.slint。
+        |x, y| {
+            Shell::with(|_, app| {
+                let seats = app.global::<Editor>().get_seats();
+                let mut hit = -1;
+                for row in 0..slint::Model::row_count(&seats) {
+                    let Some(seat) = slint::Model::row_data(&seats, row) else {
+                        continue;
+                    };
+                    if x >= seat.x
+                        && x <= seat.x + seat.width
+                        && y >= seat.y
+                        && y <= seat.y + seat.height
+                    {
+                        hit = seat.index;
+                        break;
+                    }
+                }
+                app.global::<Theme>().set_active_seat(hit);
+            });
+        },
         // Back at the front, after Explorer or Finder: a file moved out
         // from under an open project is noticed here, and the relink
         // dialog opens on it. See `Studio::check_missing_media`.
@@ -630,6 +696,17 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     // https://github.com/jub0t/Concat/issues/320
     app.global::<Theme>()
         .set_ui_scale(studio.prefs.scale_index() as i32);
+    // 面板流光边框：默认开，强度与风格各记一个下标。低配模式/失焦/最小化
+    // 由 `Neon.on` 与 `Theme.animating` 统一停掉动画，这里只把记住的选择
+    // 放到全局上。
+    {
+        let theme = app.global::<Theme>();
+        theme.set_panel_neon(studio.prefs.neon_enabled());
+        theme.set_panel_neon_intensity(studio.prefs.neon_intensity());
+        theme.set_panel_neon_style(studio.prefs.neon_style());
+    }
+    // 图库一开始不过滤：8 套经典 + 23 套国潮，按 `skins` 的顺序全部列出。
+    apply_skin_filter(&app);
 
     // The window at the size the last session left it, maximised if it
     // was, while Settings > General remembers the layout. A size too big
@@ -2666,8 +2743,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     });
     // 主题皮肤：切图库下标，同时把皮肤自带的强调色一起换上（之后仍可在
     // 强调色一行里改），皮肤 id 记进设置文件。
-    app.on_settings_skin_changed({
-        move |index| {
+    app.on_settings_skin_changed({        move |index| {
             Shell::with(|shell, app| {
                 let theme = app.global::<Theme>();
                 let specs = theme.get_skins();
@@ -2680,11 +2756,16 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                 log::info!("settings: Skin {} ({})", spec.name, spec.id);
                 theme.set_skin_choice(index);
                 theme.set_accent_choice(spec.accent);
+                // 浅色设计的皮肤（纯金、青花瓷、水墨）在深色底上文字会发
+                // 灰，所以选皮肤时把明暗基一起换到它画的那个底上；之后仍
+                // 可从「主题」一行自己改回来。
+                theme.set_dark(!spec.base_light);
                 let accent = usize::try_from(spec.accent)
                     .ok()
                     .and_then(|row| slint::Model::row_data(&theme.get_accent_names(), row))
                     .map(|name| prefs::Preferences::accent_id(&name));
                 let mut studio = shell.studio.borrow_mut();
+                studio.prefs.dark = Some(!spec.base_light);
                 studio.prefs.skin = Some(spec.id.to_string());
                 studio.prefs.accent = accent;
                 studio.prefs.save(&studio.host.dirs);
@@ -2717,6 +2798,60 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                 app.global::<Theme>().set_low_power(on);
                 let mut studio = shell.studio.borrow_mut();
                 studio.prefs.low_power = Some(on);
+                studio.prefs.save(&studio.host.dirs);
+            });
+        }
+    });
+    // 图库分组/搜索：名称与描述都在 `Theme.skins` 里，过滤放在 Rust 做，
+    // 结果写进 `Theme.skin-filtered`（原始下标）；画廊照着画，切皮肤拿到的
+    // 仍是 `Theme.skins` 的下标，记住的 id 不变。
+    app.on_settings_skin_group_changed({
+        move |index| {
+            Shell::with(|_, app| {
+                app.global::<Theme>().set_skin_group(index);
+                apply_skin_filter(&app);
+            });
+        }
+    });
+    app.on_settings_skin_query_changed({
+        move |text| {
+            Shell::with(|_, app| {
+                app.global::<Theme>().set_skin_query(text);
+                apply_skin_filter(&app);
+            });
+        }
+    });
+    // 面板流光边框：总开关 / 强度 / 风格。低配与失焦的暂停是 Neon 自己的
+    // 绑定，这里只记住选择并换风格。
+    app.on_settings_neon_changed({
+        move |on| {
+            Shell::with(|shell, app| {
+                log::info!("settings: Panel neon {}", if on { "on" } else { "off" });
+                app.global::<Theme>().set_panel_neon(on);
+                let mut studio = shell.studio.borrow_mut();
+                studio.prefs.panel_neon = Some(on);
+                studio.prefs.save(&studio.host.dirs);
+            });
+        }
+    });
+    app.on_settings_neon_intensity_changed({
+        move |index| {
+            Shell::with(|shell, app| {
+                log::info!("settings: Panel neon intensity {index}");
+                app.global::<Theme>().set_panel_neon_intensity(index);
+                let mut studio = shell.studio.borrow_mut();
+                studio.prefs.panel_neon_intensity = Some(index.max(0) as u32);
+                studio.prefs.save(&studio.host.dirs);
+            });
+        }
+    });
+    app.on_settings_neon_style_changed({
+        move |index| {
+            Shell::with(|shell, app| {
+                log::info!("settings: Panel neon style {index}");
+                app.global::<Theme>().set_panel_neon_style(index);
+                let mut studio = shell.studio.borrow_mut();
+                studio.prefs.panel_neon_style = Some(index.max(0) as u32);
                 studio.prefs.save(&studio.host.dirs);
             });
         }

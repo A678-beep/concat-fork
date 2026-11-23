@@ -174,6 +174,15 @@ struct DropHandler {
     /// says where it moved, and a press says only that it happened.
     cursor: Option<(f32, f32)>,
     on_pressed_away: Box<dyn Fn()>,
+    /// Where the pointer moved to, in logical pixels of the window. The
+    /// skin's neon borders ask "is the pointer on me?" from their own
+    /// absolute position, so the window hands the position over as a
+    /// property read; see `Theme.cursor-x`.
+    on_cursor: Box<dyn Fn(f32, f32)>,
+    /// A press landed at that point in the window. Used to say which pane
+    /// is the focused one (`Theme.active-seat`), which is what decides
+    /// whose neon border flows.
+    on_pressed: Box<dyn Fn(f32, f32)>,
     /// The window came back to the front, or went away from it: `true` when it
     /// is at the front and not covered, `false` otherwise. Two facts arrive
     /// for it - winit's focus and its occlusion - and they are folded into the
@@ -242,6 +251,8 @@ impl DropHandler {
     fn new(
         on_dropped: impl Fn(Vec<PathBuf>) + 'static,
         on_pressed_away: impl Fn() + 'static,
+        on_cursor: impl Fn(f32, f32) + 'static,
+        on_pressed: impl Fn(f32, f32) + 'static,
         on_activity: impl Fn(bool) + 'static,
         on_exiting: impl Fn() + 'static,
     ) -> Self {
@@ -254,6 +265,8 @@ impl DropHandler {
             fitted: false,
             cursor: None,
             on_pressed_away: Box::new(on_pressed_away),
+            on_cursor: Box::new(on_cursor),
+            on_pressed: Box::new(on_pressed),
             on_activity: Box::new(on_activity),
             focused: true,
             occluded: false,
@@ -355,6 +368,9 @@ impl CustomApplicationHandler for DropHandler {
                     .or_else(|| winit_window.map(|window| window.scale_factor()))
                     .unwrap_or(1.0);
                 self.cursor = Some(((position.x / scale) as f32, (position.y / scale) as f32));
+                if let Some((x, y)) = self.cursor {
+                    (self.on_cursor)(x, y);
+                }
                 if let Some(window) = winit_window.filter(|_| self.edges) {
                     let size = window.inner_size();
                     let edge = (window.is_resizable()
@@ -396,6 +412,9 @@ impl CustomApplicationHandler for DropHandler {
                 state: ElementState::Pressed,
                 ..
             } => {
+                if let Some((x, y)) = self.cursor {
+                    (self.on_pressed)(x, y);
+                }
                 if let (Some(window), Some((x, y))) = (slint_window, self.cursor)
                     && press_misses_focused_input(window, x, y)
                 {
@@ -489,6 +508,8 @@ pub fn phone() -> bool {
 pub fn select_backend(
     on_files_dropped: impl Fn(Vec<PathBuf>) + 'static,
     on_pressed_away: impl Fn() + 'static,
+    on_cursor: impl Fn(f32, f32) + 'static,
+    on_pressed: impl Fn(f32, f32) + 'static,
     on_activity: impl Fn(bool) + 'static,
     on_exiting: impl Fn() + 'static,
 ) -> Result<Option<Gpu>, PlatformError> {
@@ -551,6 +572,8 @@ pub fn select_backend(
         .with_winit_custom_application_handler(DropHandler::new(
             on_files_dropped,
             on_pressed_away,
+            on_cursor,
+            on_pressed,
             on_activity,
             on_exiting,
         ));
@@ -763,6 +786,9 @@ pub fn select_backend(
     // Android has no pointer to press away with; the screen's own keyboard
     // dismisses, and the field goes with it.
     _on_pressed_away: impl Fn() + 'static,
+    // Nor a pointer at all: the neon borders stay still on a touch screen.
+    _on_cursor: impl Fn(f32, f32) + 'static,
+    _on_pressed: impl Fn(f32, f32) + 'static,
     // Nor a window that loses and regains the front: the activity owns the
     // screen, and a file comes back through the picker.
     _on_activity: impl Fn(bool) + 'static,

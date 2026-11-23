@@ -3,6 +3,7 @@
 
 import { I18n } from "../i18n.slint";
 import { Theme } from "../theme/theme.slint";
+import { NeonFrame } from "../theme/neon.slint";
 import { Glyph, Icon } from "../icons.slint";
 import { Tip } from "tooltip.slint";
 import { Select } from "select.slint";
@@ -255,6 +256,13 @@ export component Modal inherits Rectangle {
                 }
             }
         }
+
+        // 弹窗的流光：开着的弹窗就是当前焦点，一圈光沿卡片四边走。
+        NeonFrame {
+            active: root.open;
+            radius: root.fill ? 0px : Theme.r-xl;
+            inset: 1px;
+        }
     }
 }
 
@@ -368,6 +376,13 @@ export component Sheet inherits Rectangle {
             }
 
             @children
+        }
+
+        // 整页弹窗（设置、导出）的流光沿窗口四边走，开着的整页就是焦点。
+        NeonFrame {
+            active: root.open;
+            radius: 0px;
+            inset: 0px;
         }
     }
 }
