@@ -1962,6 +1962,23 @@ impl Studio {
         editor.set_media_selected_count(self.media.selected.len() as i32);
         editor.set_media_filter(self.media.filter);
         editor.set_media_jump_token(self.media_jump);
+        editor.set_library_page(self.library_page);
+        editor.set_library_page_token(self.library_page_token);
+        editor.set_smartcut_busy(self.smartcut_busy);
+        editor.set_smartcut_status(self.smartcut_status.as_str().into());
+        editor.set_smartcut_video(self.smartcut_video_name.as_str().into());
+        editor.set_smartcut_plan_title(self.smartcut_plan_title.as_str().into());
+        sync(
+            &models.smartcut_segments,
+            self.smartcut_plan_lines
+                .iter()
+                .map(|line| SharedString::from(line.as_str()))
+                .collect(),
+        );
+        editor.set_smartcut_progress(self.smartcut_progress);
+        editor.set_smartcut_stage(self.smartcut_stage.as_str().into());
+        editor.set_smartcut_can_render(!self.smartcut_plan_id.is_empty());
+        editor.set_smartcut_can_insert(self.smartcut_output_ready);
         editor.set_captions_jump_token(self.captions_jump);
         editor.set_importing(false);
 
@@ -2954,26 +2971,26 @@ impl Studio {
                     &keymap::label(&self.prefs, "next-edit"),
                     true,
                 ),
-                // 0.3.1 布局预设（剪映 11.9 的「布局模式」里我们做 3 个常用的）。
+                // 0.3.2 布局预设（剪映式：左素材 | 中预览+时间线 | 右属性）。
                 rule(),
                 row(
                     "layout-default",
-                    "布局：默认（素材 + 监视器 / 时间线）".to_owned(),
+                    "布局：默认（左素材 · 中预览/时间线 · 右属性）".to_owned(),
                     Glyph::Frame,
                     "",
                     true,
                 ),
                 row(
-                    "layout-media",
-                    "布局：素材优先".to_owned(),
-                    Glyph::Film,
+                    "layout-portrait",
+                    "布局：竖屏创作（预览居中，右属性）".to_owned(),
+                    Glyph::Image,
                     "",
                     true,
                 ),
                 row(
-                    "layout-portrait",
-                    "布局：竖屏创作（右）".to_owned(),
-                    Glyph::Image,
+                    "layout-edit",
+                    "布局：剪辑优先（时间线加高，右属性）".to_owned(),
+                    Glyph::Film,
                     "",
                     true,
                 ),

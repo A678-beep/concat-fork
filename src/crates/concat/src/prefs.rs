@@ -20,10 +20,17 @@ const FILE: &str = "settings.json";
 /// https://github.com/jub0t/Concat/issues/320
 pub const UI_SCALES: [u32; 6] = [100, 110, 125, 150, 175, 200];
 
+/// The layout file's format this build writes; see [`SavedLayout::version`].
+/// 0.3.2 起右列固定为属性面板，旧布局不再沿用。
+pub const LAYOUT_VERSION: u32 = 2;
+
 /// The workspace as the last session left it: each dock, and the window.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct SavedLayout {
+    /// 0.3.2：布局格式版本。0.3.1 及更早的布局没有这个字段（读成 0），
+    /// 默认布局改版（右列属性面板）后不再沿用它们的排布，但仍恢复窗口大小。
+    pub version: u32,
     /// The dock a wide window shows.
     pub wide: Option<crate::dock::SavedDock>,
     /// The dock a narrow one shows; see `studio::COMPACT_WIDTH`.

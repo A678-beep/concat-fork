@@ -1297,6 +1297,13 @@ export component SpeedPanel inherits VerticalLayout {
     /// Inside another section - a sound clip's Playback, with its fades and
     /// pitch - with no header or hairline of its own, always open.
     in property <bool> bare;
+    /// 0.3.2：变速页的分段。"" 全部（旧调用）；"constant" 只常规变速（倍速/
+    /// 时长联动）；"curve" 只曲线变速（关键点 + 预设 + 上下限）。两页共用同一
+    /// 条片段速度曲线，不复制能力。
+    in property <string> part: "";
+    pure function shows(part: string) -> bool {
+        return root.part == "" || root.part == part;
+    }
 
     callback set(field: ClipField, value: float);
     callback commit();
@@ -1328,7 +1335,9 @@ export component SpeedPanel inherits VerticalLayout {
         first: root.first || root.bare;
         padding-bottom: root.bare ? 0 : 8px;
         if !root.bare: SectionHeader {
-            title: I18n.t("common.speed");
+            title: root.part == "constant" ? "常规变速"
+                : root.part == "curve" ? "曲线变速"
+                : I18n.t("common.speed");
             collapsible: true;
             open <=> root.speed-open;
             summary: root.curved
@@ -1339,13 +1348,13 @@ export component SpeedPanel inherits VerticalLayout {
             }
         }
 
-        if root.bare || root.speed-open: SectionBody {
+        if root.bare || root.speed-open || root.part != "": SectionBody {
             padding-top: root.bare ? 0 : 4px;
             if root.selected.reverse-progress >= 0: ReverseRow {
                 progress: root.selected.reverse-progress;
             }
 
-            Row {
+            if root.part == "": Row {
                 label: I18n.t("common.speed");
 
                 SegmentedControl {
@@ -1365,7 +1374,7 @@ export component SpeedPanel inherits VerticalLayout {
                 }
             }
 
-            if root.curved: Row {
+            if root.curved && root.shows("curve"): Row {
                 label: I18n.t("speedRamp.shape");
                 Select {
                     // As the mode's: a pick ends the binding, Rust restores it.
@@ -1382,7 +1391,7 @@ export component SpeedPanel inherits VerticalLayout {
                 }
             }
 
-            if root.curved: SpeedGraph {
+            if root.curved && root.shows("curve"): SpeedGraph {
                 padding-left: Theme.pad;
                 padding-right: Theme.pad;
                 point(index, x, y) => {
@@ -1396,7 +1405,7 @@ export component SpeedPanel inherits VerticalLayout {
                 changed => { root.commit(); }
             }
 
-            if root.curved: Row {
+            if root.curved && root.shows("curve"): Row {
                 label: I18n.t("speedRamp.bends");
                 SegmentedControl {
                     // As the mode's: set again from Rust's word.
@@ -1416,7 +1425,7 @@ export component SpeedPanel inherits VerticalLayout {
             // The two extremes, for a ramp that is right in shape and too
             // much or too little in strength: the fastest stretch brought
             // down to 4x brings the rest of it along.
-            if root.curved && root.fastest > 0: Param {
+            if root.curved && root.shows("curve") && root.fastest > 0: Param {
                 label: I18n.t("speedRamp.fastest");
                 value <=> root.fastest;
                 minimum: 1.1;
@@ -1427,7 +1436,7 @@ export component SpeedPanel inherits VerticalLayout {
                 unit: "x";
                 changed(v) => { SpeedRamp.set-limit(true, v); root.commit(); }
             }
-            if root.curved && root.slowest > 0: Param {
+            if root.curved && root.shows("curve") && root.slowest > 0: Param {
                 label: I18n.t("speedRamp.slowest");
                 value <=> root.slowest;
                 minimum: 0.0625;
@@ -1439,20 +1448,56 @@ export component SpeedPanel inherits VerticalLayout {
                 changed(v) => { SpeedRamp.set-limit(false, v); root.commit(); }
             }
 
-            if !root.curved: Param {
-                label: I18n.t("common.rate");
-                value <=> root.speed;
-                // The engine's full range. The track is linear, so the
-                // useful 0.25-4x band sits left of centre and the number
-                // field beside it is how the extremes are actually dialled
-                // in.
-                minimum: 0.0625;
-                maximum: 16;
-                step: 0.05;
-                default-value: 1;
-                fmt: ParamFormat.rate;
-                unit: "x";
-                changed(v) => { root.set(ClipField.speed, v); root.commit(); }
+            if root.part == "curve" && !root.curved: VerticalLayout {
+                padding-left: Theme.pad;
+                padding-right: Theme.pad;
+                spacing: 8px;
+
+                Text {
+                    text: "曲线变速：在下面的曲线上加关键点，逐段快慢；开启后这个片段的时长按曲线均值重算。";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+
+                Button {
+                    label: "开启曲线变速";
+                    glyph: Glyph.speed-curve;
+                    clicked => { SpeedRamp.toggle-curve(true); root.commit(); }
+                }
+            }
+
+            if !root.curved && root.shows("constant"): VerticalLayout {
+                Param {
+                    label: I18n.t("common.rate");
+                    value <=> root.speed;
+                    // The engine's full range. The track is linear, so the
+                    // useful 0.25-4x band sits left of centre and the number
+                    // field beside it is how the extremes are actually dialled
+                    // in.
+                    minimum: 0.0625;
+                    maximum: 16;
+                    step: 0.05;
+                    default-value: 1;
+                    fmt: ParamFormat.rate;
+                    unit: "x";
+                    changed(v) => { root.set(ClipField.speed, v); root.commit(); }
+                }
+
+                // 时长联动：倍速一改，Rust 的命令按原素材时长重算片段时长，
+                // 这里把「现在的时长」摆出来，改多少看得见。
+                Row {
+                    label: "时长联动";
+                    Text {
+                        horizontal-stretch: 1;
+                        text: InspectorFmt.format(ParamFormat.seconds2, root.selected.duration)
+                            + "（原素材 ÷ 倍速，改倍速自动重算）";
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
             }
         }
     }
@@ -1481,6 +1526,13 @@ export component VideoPanel inherits VerticalLayout {
     /// Whether the Mask section is here: the phone gives the mask a tool
     /// and a sheet of its own instead.
     in property <bool> mask-section: true;
+    /// 0.3.2：这一段只画哪一组。"" 画全部（电话/旧调用）；"basic" 变换/画布/
+    /// 混合/防抖/裁剪；"keying" 抠像；"mask" 蒙版。剪映式右侧面板把画面拆成
+    /// 基础/抠像/蒙版/美颜四页，靠它选段，能力还是同一套。
+    in property <string> part: "";
+    pure function shows(part: string) -> bool {
+        return root.part == "" || root.part == part;
+    }
     /// Speed at the foot of Transform, a section with it rather than one
     /// at the bottom of the tab: where a clip sits, how big and how fast
     /// are what a cut is set up with first. A still has no rate.
@@ -1636,7 +1688,7 @@ export component VideoPanel inherits VerticalLayout {
     init => { root.seed(); }
     changed selected => { root.seed(); }
 
-    Section {
+    if root.shows("basic"): Section {
         first: true;
         transform := SectionHeader {
             title: I18n.t("clipInspector.transform");
@@ -1765,7 +1817,7 @@ export component VideoPanel inherits VerticalLayout {
     // What fills the frame where this picture does not reach: the
     // timeline's background, or one of the clip's own. Only on the lowest
     // picture lane, which is where a background is drawn.
-    if root.canvas && Backdrop.clip-has: Section {
+    if root.shows("basic") && root.canvas && Backdrop.clip-has: Section {
         canvas := SectionHeader {
             title: I18n.t("phone.canvas");
             collapsible: true;
@@ -1783,7 +1835,7 @@ export component VideoPanel inherits VerticalLayout {
         }
     }
 
-    Section {
+    if root.shows("basic"): Section {
         blend := SectionHeader {
             title: I18n.t("clipInspector.blend");
             collapsible: true;
@@ -1833,7 +1885,7 @@ export component VideoPanel inherits VerticalLayout {
     // The camera's shake taken out: the media's movement is measured once
     // in the background, and the correction is worked out from it live, so
     // the sliders answer at once. Footage only.
-    if root.selected.kind == ClipKind.video: Section {
+    if root.shows("basic") && root.selected.kind == ClipKind.video: Section {
         stabilize := SectionHeader {
             title: I18n.t("clipInspector.stabilize");
             collapsible: true;
@@ -1908,7 +1960,7 @@ export component VideoPanel inherits VerticalLayout {
     // monitor over it - and chroma key drops a colour. A key is the chroma
     // package on the chain, which is why its knobs read from the chain's
     // own rows. One at a time: ticking a block unticks the others.
-    if !root.figure: Section {
+    if root.shows("keying") && !root.figure: Section {
         cutout := SectionHeader {
             title: I18n.t("clipInspector.removeBackground");
             collapsible: true;
@@ -2145,7 +2197,7 @@ export component VideoPanel inherits VerticalLayout {
     // mode - add, subtract, intersect, or cut nothing and wait for a layer
     // or an effect. Each number keys on the mask itself. Drawn on the
     // picture as it is seen, so they move with the clip.
-    if root.mask-section
+    if root.shows("mask") && root.mask-section
         && (root.selected.kind == ClipKind.video || root.selected.kind == ClipKind.image): Section {
         mask-header := SectionHeader {
             title: I18n.t("mask.title");
@@ -2411,7 +2463,7 @@ export component VideoPanel inherits VerticalLayout {
 
     // What is cut off the source before it is fitted. Fractions of the
     // source's own edges, so a crop survives a change of output size.
-    if !root.figure: Section {
+    if root.shows("basic") && !root.figure: Section {
         crop := SectionHeader {
             title: I18n.t("clipInspector.crop");
             collapsible: true;
@@ -3442,6 +3494,10 @@ export component AnimatePanel inherits VerticalLayout {
     // The page - In, Out or Loop - is the control's to write, so it is
     // assigned, never bound.
     property <int> page;
+    /// 0.3.2：动画页的分段（入场/出场/组合）。-1 是旧调用，页面自选；
+    /// 0/1/2 由右侧面板的分段条指定，页内不再重复一排页签。
+    in property <int> preset-page: -1;
+    changed preset-page => { if (root.preset-page >= 0) { root.page = root.preset-page; } }
 
     // Seeded, not bound, for the reason FilterPanel's are.
     property <float> in-seconds;
@@ -3456,7 +3512,10 @@ export component AnimatePanel inherits VerticalLayout {
         root.loop-amount = root.selected.motion-loop-amount;
     }
 
-    init => { root.seed(); }
+    init => {
+        root.seed();
+        if (root.preset-page >= 0) { root.page = root.preset-page; }
+    }
     changed selected => { root.seed(); }
 
     padding-left: 14px;
@@ -3465,7 +3524,8 @@ export component AnimatePanel inherits VerticalLayout {
     padding-bottom: 14px;
     spacing: 12px;
 
-    SegmentedControl {
+    // 0.3.2：动画页的分段条（入场/出场/组合）由右侧面板给，页内不再重复。
+    if root.preset-page < 0: SegmentedControl {
         options: [I18n.t("motion.in"), I18n.t("motion.out"), I18n.t("motion.loop")];
         current <=> root.page;
     }
@@ -3634,3 +3694,509 @@ export component FilterPanel inherits VerticalLayout {
 // The catalogues. Data only: the stack renders whatever params a preset
 // declares, so adding a processor is one entry here and no change to the
 // panel. The ids are written into project files, so they are stable forever.
+
+// ── 0.3.2 右侧属性面板：剪映式的六个页，拆开的分段面板 ───────────────────
+//
+// 这些面板都只读 Editor 已经发布的那几份参数（adjust-params / adjust-wheels
+// / adjust-curves / applied-audio / selected），回调也走已有的 adjust-set /
+// chain-* / clip-set：六页是同一套能力的六种摆法，不是第二套实现。
+
+/// 调整 · HSL：八个色相通道的 色相 / 饱和度 / 明度。参数是 concat.adjust
+/// 包里 hsl_<通道>_<hue|sat|lum>，渲染在 effect.wgsl 里逐带做（hsl_band）。
+export component HslPanel inherits VerticalLayout {
+    in property <[AppliedParamData]> params;
+
+    callback set(key: string, value: float);
+    callback commit();
+
+    property <[string]> channels: ["红", "橙", "黄", "绿", "青", "蓝", "紫", "洋红"];
+    property <[string]> ids: ["red", "orange", "yellow", "green", "cyan", "blue", "purple", "magenta"];
+    property <int> channel: 0;
+
+    Section {
+        first: true;
+
+        SectionHeader {
+            title: "HSL";
+            HelpButton {
+                text: "按颜色挑通道，只动这一种颜色：色相往邻近颜色偏，饱和度更浓/更淡，明度更亮/更暗。八个通道对应剪映 11.9 的八色相。";
+            }
+        }
+
+        SectionBody {
+            HorizontalLayout {
+                padding-left: Theme.pad;
+                padding-right: Theme.pad;
+                padding-bottom: 4px;
+                spacing: 4px;
+
+                for name[i] in root.channels: Rectangle {
+                    height: 26px;
+                    horizontal-stretch: 1;
+                    border-radius: Theme.r-sm;
+                    background: root.channel == i ? Theme.accent : Theme.field;
+
+                    Text {
+                        x: 0;
+                        y: 0;
+                        width: parent.width;
+                        height: parent.height;
+                        text: name;
+                        color: root.channel == i ? Theme.on-accent : Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.channel = i; }
+                    }
+                }
+            }
+
+            for p in root.params: VerticalLayout {
+                if p.key.starts-with("hsl_" + root.ids[root.channel] + "_"): Rectangle {
+                    property <AppliedParamData> data: p;
+                    height: knob.preferred-height;
+                    changed data => { knob.value = self.data.value; }
+
+                    knob := Param {
+                        label: p.label;
+                        value: p.value;
+                        minimum: p.min;
+                        maximum: p.max;
+                        step: p.step;
+                        default-value: p.default-value;
+                        fmt: p.fmt;
+                        unit: p.unit;
+                        rail: true;
+                        changed(v) => { root.set(p.key, v); root.commit(); }
+                    }
+                }
+            }
+
+            Note {
+                text: "滑块松手即写入所选片段：受影响的只有这个颜色，其它颜色不动。";
+            }
+        }
+    }
+}
+
+/// 调整 · 基础：亮度/对比度/饱和度/锐化/色温/色调这些逐项滑块（concat.adjust
+/// 的普通参数，HSL 与美颜的键除外——它们有自己的页）。
+export component AdjustBasicPanel inherits VerticalLayout {
+    in property <[AppliedParamData]> params;
+
+    callback set(key: string, value: float);
+    callback commit();
+
+    Section {
+        first: true;
+
+        SectionHeader {
+            title: "基础调节";
+            HelpButton {
+                text: "都是所选片段自己的调节参数，写进片段的调色链；曲线、色轮、HSL 在隔壁三页。";
+            }
+        }
+
+        SectionBody {
+            for p in root.params: VerticalLayout {
+                if !p.key.starts-with("hsl_") && !p.key.starts-with("beauty_"): Rectangle {
+                    property <AppliedParamData> data: p;
+                    height: knob.preferred-height;
+                    changed data => { knob.value = self.data.value; }
+
+                    knob := Param {
+                        label: p.label;
+                        value: p.value;
+                        minimum: p.min;
+                        maximum: p.max;
+                        step: p.step;
+                        default-value: p.default-value;
+                        fmt: p.fmt;
+                        unit: p.unit;
+                        rail: true;
+                        changed(v) => { root.set(p.key, v); root.commit(); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 调整 · 曲线：亮度 + RGB 四条曲线，每条最多 8 个控制点（至少 4 个）。
+export component CurvesPanel inherits VerticalLayout {
+    in property <[CurveData]> curves;
+
+    callback point(key: string, point: int, x: float, y: float);
+    callback remove(key: string, point: int);
+    callback commit();
+
+    Section {
+        first: true;
+
+        SectionHeader {
+            title: "曲线";
+            HelpButton {
+                text: "在曲线上按一下加控制点（每条最多 8 个，至少 4 个可用），拖动改形状，右键/双击取下点。亮度先调明暗，再逐通道调色。";
+            }
+        }
+
+        SectionBody {
+            if root.curves.length > 0: CurveEditor {
+                padding-left: Theme.pad;
+                padding-right: Theme.pad;
+                curves: root.curves;
+                point(key, point, x, y) => {
+                    root.point(key, point, x, y);
+                    root.commit();
+                }
+                remove(key, point) => {
+                    root.remove(key, point);
+                    root.commit();
+                }
+            }
+        }
+    }
+}
+
+/// 调整 · 色轮：阴影（Lift）/ 中间调（Gamma）/ 高光（Gain）三个轮。
+export component WheelsPanel inherits VerticalLayout {
+    in property <[WheelData]> wheels;
+
+    callback set(key: string, value: float);
+    callback commit();
+
+    Section {
+        first: true;
+
+        SectionHeader {
+            title: "色轮";
+            HelpButton {
+                text: "三个轮子分别是阴影、中间调、高光：拖圆点把这一端往某个颜色推，下面的主控调亮暗。";
+            }
+        }
+
+        SectionBody {
+            if root.wheels.length > 0: HorizontalLayout {
+                padding-left: Theme.pad;
+                padding-right: Theme.pad;
+                spacing: 8px;
+
+                for w in root.wheels: ColorWheel {
+                    data: w;
+                    moved(x, y) => {
+                        root.set(w.key + ".x", x);
+                        root.set(w.key + ".y", y);
+                        root.commit();
+                    }
+                    master-changed(v) => {
+                        root.set(w.key + ".m", v);
+                        root.commit();
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 画面 · 美颜美体：磨皮/美白是 concat.adjust 的真实参数（整画面柔化与
+/// 提亮），瘦脸/大眼/身材需要人脸关键点模型，本版如实标「即将开放」，不给
+/// 假按钮。
+export component BeautyPanel inherits VerticalLayout {
+    in property <[AppliedParamData]> params;
+
+    callback set(key: string, value: float);
+    callback commit();
+
+    Section {
+        first: true;
+
+        SectionHeader {
+            title: "美颜美体";
+            HelpButton {
+                text: "磨皮 = 整画面柔化，美白 = 整画面提亮压一点艳度：这两个本版真实生效。瘦脸/大眼/身材要先有人脸关键点模型，0.3.3 再做，现在不放假按钮。";
+            }
+        }
+
+        SectionBody {
+            for p in root.params: VerticalLayout {
+                if p.key.starts-with("beauty_"): Rectangle {
+                    property <AppliedParamData> data: p;
+                    height: knob.preferred-height;
+                    changed data => { knob.value = self.data.value; }
+
+                    knob := Param {
+                        label: p.label;
+                        value: p.value;
+                        minimum: p.min;
+                        maximum: p.max;
+                        step: p.step;
+                        default-value: p.default-value;
+                        fmt: p.fmt;
+                        unit: p.unit;
+                        rail: true;
+                        changed(v) => { root.set(p.key, v); root.commit(); }
+                    }
+                }
+            }
+
+            Row {
+                label: "瘦脸";
+                Text {
+                    horizontal-stretch: 1;
+                    text: "即将开放 · 需人脸关键点模型（0.3.3）";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+            }
+
+            Row {
+                label: "大眼";
+                Text {
+                    horizontal-stretch: 1;
+                    text: "即将开放 · 需人脸关键点模型（0.3.3）";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+            }
+
+            Row {
+                label: "身材";
+                Text {
+                    horizontal-stretch: 1;
+                    text: "即将开放 · 需人体关键点模型（0.3.3）";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+/// 音频 · 换音色：六个变声预设，都是音频链上真实的效果包（concat.robot /
+/// telephone / megaphone / whisper / radio / pitch），开关一次一条撤销。
+export component VoicePresetPanel inherits VerticalLayout {
+    in property <[AppliedEntryData]> applied;
+    in property <[AppliedParamData]> params;
+
+    callback add(id: string);
+    callback remove(index: int);
+    callback set-param(index: int, key: string, value: float);
+    callback commit();
+
+    property <[string]> ids: [
+        "concat.robot", "concat.telephone", "concat.megaphone",
+        "concat.whisper", "concat.radio", "concat.pitch",
+    ];
+    property <[string]> labels: ["机器人", "电话音", "大喇叭", "耳语", "电台", "变调"];
+    property <[string]> notes: [
+        "金属感的调制人声",
+        "电话线的窄频带",
+        "手持喇叭的硬中频",
+        "气声多、低频收掉",
+        "小喇叭 + 一点沙沙声",
+        "升/降半音，时长不变",
+    ];
+
+    pure function at(id: string) -> int {
+        return root.applied.length > 0 && root.applied[0].id == id ? 0
+            : root.applied.length > 1 && root.applied[1].id == id ? 1
+            : root.applied.length > 2 && root.applied[2].id == id ? 2
+            : root.applied.length > 3 && root.applied[3].id == id ? 3
+            : root.applied.length > 4 && root.applied[4].id == id ? 4
+            : root.applied.length > 5 && root.applied[5].id == id ? 5
+            : root.applied.length > 6 && root.applied[6].id == id ? 6
+            : root.applied.length > 7 && root.applied[7].id == id ? 7
+            : -1;
+    }
+
+    function toggle(id: string) {
+        if (root.at(id) >= 0) {
+            root.remove(root.at(id));
+        } else {
+            root.add(id);
+        }
+    }
+
+    Section {
+        first: true;
+
+        SectionHeader {
+            title: "换音色";
+            HelpButton {
+                text: "变声预设都是音频效果链上的真实效果：点上就加在所选片段，再点一下取下来，可用 Ctrl+Z 撤销。";
+            }
+        }
+
+        SectionBody {
+            for id[i] in root.ids: SwitchRow {
+                label: root.labels[i] + "　" + root.notes[i];
+                checked: root.at(id) >= 0;
+                toggled(on) => { root.toggle(id); }
+            }
+
+            // 加上的预设自己的参数（比如变调的半音数），跟着效果包发布过来。
+            for p in root.params: VerticalLayout {
+                if p.entry >= 0: Rectangle {
+                    property <AppliedParamData> data: p;
+                    height: knob.preferred-height;
+                    changed data => { knob.value = self.data.value; }
+
+                    knob := Param {
+                        label: p.label;
+                        value: p.value;
+                        minimum: p.min;
+                        maximum: p.max;
+                        step: p.step;
+                        default-value: p.default-value;
+                        fmt: p.fmt;
+                        unit: p.unit;
+                        rail: true;
+                        changed(v) => {
+                            root.set-param(p.entry, p.key, v);
+                            root.commit();
+                        }
+                    }
+                }
+            }
+
+            Note {
+                text: "同一时刻可以叠多个变声（例如电话音 + 变调）；不喜欢就再点一下关掉。";
+            }
+        }
+    }
+}
+
+/// 变速 · 变速卡点（0.3.2 基础版）：按 BPM 把节拍点插进速度曲线。
+export component BeatSyncPanel inherits VerticalLayout {
+    in property <SelectedClipData> selected;
+
+    /// `every` 是每几个节拍一个点（1/2/4）。
+    callback beat(bpm: float, every: int);
+    callback commit();
+
+    property <float> bpm: 120;
+    property <int> every: 2;
+
+    Section {
+        first: true;
+
+        SectionHeader {
+            title: "变速卡点";
+            HelpButton {
+                text: "基础版：不做音频节拍检测，按你填的 BPM 把节拍点插进这个片段的曲线，快慢交替落在拍子上。BPM 对着 BGM 填（120 = 每秒两拍）。";
+            }
+        }
+
+        SectionBody {
+            Param {
+                label: "BPM";
+                value <=> root.bpm;
+                minimum: 40;
+                maximum: 240;
+                step: 1;
+                default-value: 120;
+                fmt: ParamFormat.plain;
+            }
+
+            Row {
+                label: "插点间隔";
+
+                SegmentedControl {
+                    options: ["1 拍", "2 拍", "4 拍"];
+                    current: root.every == 1 ? 0 : root.every == 2 ? 1 : 2;
+                    changed(index) => { root.every = index == 0 ? 1 : index == 1 ? 2 : 4; }
+                }
+            }
+
+            Button {
+                label: "按节拍插入变速点";
+                glyph: Glyph.speed-curve;
+                clicked => {
+                    root.beat(root.bpm, root.every);
+                    root.commit();
+                }
+            }
+
+            Note {
+                text: "按当前片段时长排点，快慢交替；插完可以切到「曲线变速」页继续拖点微调。";
+            }
+        }
+    }
+}
+
+/// AI 编辑：三种生成方式，都接到真实能力，不在这里假装能出片。
+/// - 填写：AI 工作室 · 一键成片（文案/商品信息在那边填，出片也由那边调度）；
+/// - 参考视频：AI 工作室 · 爆款复刻（本地选视频 → 平台拆解 → 复刻出片）；
+/// - 结构编辑：左侧模板页（把已有成片结构套到这个片段上）。
+export component AiEditPanel inherits VerticalLayout {
+    callback open-ai-studio(tab: int);
+    callback open-templates();
+
+    property <int> mode;
+    /// 0.3.2：右侧面板的“AI 编辑”三个小节（填写/参考视频/结构编辑）由外层
+    /// 分段条指定，页内不再抽一排页签；-1 是旧调用，自己选。
+    in property <int> preset-mode: -1;
+    changed preset-mode => { if (root.preset-mode >= 0) { root.mode = root.preset-mode; } }
+    init => { if (root.preset-mode >= 0) { root.mode = root.preset-mode; } }
+
+    Section {
+        first: true;
+
+        SectionHeader {
+            title: "AI 编辑";
+            HelpButton {
+                text: "三种生成方式：填写（AI 工作室一键成片）/ 参考视频（爆款复刻）/ 结构编辑（套模板）。平台能力的入口都在已有面板里，这里只带路、不重复计费。";
+            }
+        }
+
+        SectionBody {
+            if root.preset-mode < 0: SegmentedControl {
+                options: ["填写", "参考视频", "结构编辑"];
+                current <=> root.mode;
+            }
+
+            if root.mode == 0: VerticalLayout {
+                Note {
+                    text: "填写：在 AI 工作室的一键成片里写文案 / 商品信息 / 卖点，选好配音与画幅后由平台出片，成片自动回到桌面。";
+                }
+                Button {
+                    label: "打开 AI 工作室 · 一键成片";
+                    glyph: Glyph.wand;
+                    clicked => { root.open-ai-studio(0); }
+                }
+            }
+
+            if root.mode == 1: VerticalLayout {
+                Note {
+                    text: "参考视频：选一条本地视频，平台拆解镜头节奏、文案结构与模板，再用站内商用素材复刻——不搬运原片画面。";
+                }
+                Button {
+                    label: "打开 AI 工作室 · 爆款复刻";
+                    glyph: Glyph.film;
+                    clicked => { root.open-ai-studio(2); }
+                }
+                Note {
+                    text: "提示：参考视频请在「爆款复刻」页选本地文件；上传与拆解若未就绪，面板会给出网页版入口。";
+                }
+            }
+
+            if root.mode == 2: VerticalLayout {
+                Note {
+                    text: "结构编辑：把模板成片的镜头结构套到当前时间线——模板在左侧「模板」页，选中一个再应用。";
+                }
+                Button {
+                    label: "打开左侧模板页";
+                    glyph: Glyph.slot;
+                    clicked => { root.open-templates(); }
+                }
+            }
+        }
+    }
+}

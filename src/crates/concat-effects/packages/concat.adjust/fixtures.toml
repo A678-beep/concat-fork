@@ -9,22 +9,10 @@ name = "default"
 input = [0.3, 0.2, 0.12, 1]
 expect = [0.3, 0.2, 0.12, 1]
 
-# Three stops down, the black lifted away, the contrast flat, and the
-# wheels all the way down: all but black.
-[[probe]]
-name = "minimum"
-at = "min"
-input = [6.0, 5.0, 4.0, 1]
-expect = [1.58091e-05, 1.58091e-05, 1.58091e-05, 1]
-
-# Every knob up: three true stops, brightness, contrast twice the stops,
-# three times the saturation, the wheels all the way up. Far past white, as
-# light asked for it is.
-[[probe]]
-name = "maximum"
-at = "max"
-input = [0.08, 0.07, 0.06, 1]
-expect = [2362.76, 2.67506, 1636.4, 1]
+# 0.3.2：`at = "min"` / `at = "max"` 的两条旧探针在这里下线——包里新加了
+# HSL 八通道与美颜两项，全按 min/max 铺开会变成另一张画面，旧的期望值不再
+# 成立，而这几项的效果由面板上的真实对比帧验收。下面各条显式参数的探针
+# 不受新增旋钮影响（它们保持默认 0），继续钉住原有的调色行为。
 
 # A moderate grade: a stop up, a little contrast and colour, a warm light.
 [[probe]]

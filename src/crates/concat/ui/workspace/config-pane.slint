@@ -1,8 +1,11 @@
-﻿// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
 
 import { I18n } from "../i18n.slint";
 import { Theme, SegmentedControl, Tip } from "../primitives/primitives.slint";
+import { Section, SectionBody, SectionHeader } from "../primitives/panel.slint";
+import { Button } from "../primitives/modal.slint";
+import { Note } from "../inspector/controls.slint";
 import { SectionTabs } from "../primitives/section-tabs.slint";
 import { Glyph } from "../icons.slint";
 import { Select } from "../primitives/select.slint";
@@ -12,8 +15,9 @@ import { EffectData } from "../demo/effects-panel.slint";
 import {
     AdjustPanel, AppliedEntryData, AppliedParamData, AudioPanel, BackgroundRows, ProcessorRows,
     TransitionChoiceData,
-    AnimatePanel, CatalogueEntryData, ChainChoiceData, ColourKnobData, EnhancePanel, FilterPanel, PresetStack,
-    TransitionPanel, VideoPanel,
+    AdjustBasicPanel, AiEditPanel, AnimatePanel, BeautyPanel, BeatSyncPanel, CatalogueEntryData,
+    ChainChoiceData, ColourKnobData, CurvesPanel, EnhancePanel, FilterPanel, HslPanel,
+    PresetStack, SpeedPanel, TransitionPanel, VideoPanel, VoicePresetPanel, WheelsPanel,
 } from "../inspector/clip-inspector.slint";
 import {
     CurveData, CurveGroupData, WheelData, WheelGroupData,
@@ -237,6 +241,12 @@ export component ConfigPane inherits Rectangle {
     callback clip-commit();
     /// 人声降噪 / 去电流声（强度、去工频、试听方向）。
     callback clip-denoise(strength: int, hum: bool, audition: int);
+    /// 变速卡点（0.3.2 基础版）：按 BPM 往所选片段的速度曲线上插节拍点。
+    callback speed-beat(bpm: float, every: int);
+    /// AI 编辑页的三条带路：打开 AI 工作室的某一页（0 一键成片 / 2 爆款复刻），
+    /// 以及左侧的模板页。
+    callback open-ai-studio(tab: int);
+    callback open-templates();
     /// The Text tab's font picker and its import button; see Editor.
     in property <[string]> font-families;
     callback import-font();
@@ -263,90 +273,63 @@ export component ConfigPane inherits Rectangle {
     callback transition-param-set(key: string, value: float);
 
 
-    // The tab strip follows the selection, and stays short: three tabs at
-    // most, each with a dropdown of its sections, because seven tabs on a
-    // strip this narrow cannot be read. Video holds what happens to the
-    // picture - its placement, its speed, its colour; Audio
-    // the level, the fades and the voice and room chain; Effects the two
-    // shelves and the picture's chain. A still loses Audio, a sound clip
-    // keeps Audio alone, and a title gets Text and Effects: its look is its
-    // typography, stroke and box, all on the Text tab, and Video or Audio
-    // on a title would be panels that can only say "nothing here". Its
-    // picture chain is real, though - a title draws its effects like any
-    // clip - so the chain has its tab, or one dropped on it could be
-    // neither seen nor taken off (#484).
+    // ── 0.3.2：剪映式的六页右侧属性面板 ─────────────────────────────────
+    //
+    // 视频片段是六页：画面 / 音频 / 变速 / 动画 / 调整 / AI 编辑；图片少
+    // 一页音频；纯音频只有 音频 / 变速 / AI 编辑；文本、贴纸、滤镜层保持
+    // 自己那一页。tabs 是英文 id，给选面板用；tabs-shown 是界面语言，给
+    // 分段条用。每一页下面再用 SectionTabs 分小节（例如画面 = 基础 / 抠像 /
+    // 蒙版 / 美颜美体 / AI 效果），小节名同样是英文 id（sections）。
     property <bool> is-text: root.selected.kind == ClipKind.text;
     property <bool> is-image: root.selected.kind == ClipKind.image;
-    /// A shape gets one tab, Vector Image, with the placement panel
-    /// alone: it has no sound, no rate, no colour to adjust and no chain
-    /// of effects - a figure is its fill and its outline, nothing more.
     property <bool> is-shape: root.selected.kind == ClipKind.shape;
     property <bool> is-audio: root.selected.kind == ClipKind.audio;
-    /// A filter layer gets its own lone tab for the same reason a title does:
-    /// it has no transform, no gain and no rate, and every other tab could
-    /// only say "nothing here". What it does have - its strength, the colour
-    /// panel it grades everything beneath it with, and its chain - are the
-    /// tab's sections, so an adjustment layer is graded the way a clip is.
     property <bool> is-layer: root.selected.kind == ClipKind.filter || root.selected.kind == ClipKind.effect
         || root.selected.kind == ClipKind.adjustment || root.selected.kind == ClipKind.transition;
-    /// A sound layer gets one tab, Audio, for the filter layer's reason:
-    /// its strength and ramps, then its chain and the sound library -
-    /// the Audio effects page a sound clip has, over everything heard.
     property <bool> is-sound-layer: root.selected.kind == ClipKind.sound-layer;
-    /// Effects are laid on the timeline as layers now, so a clip's own
-    /// chain is not something to go looking for: its tab shows only on a
-    /// clip that already carries one - from an older project, a template,
-    /// the API - so that chain can still be seen, tuned and taken off.
-    /// The colour panel's own package and the chroma key have homes of
-    /// their own (Adjust, the cutout), so they do not count as a chain: a
-    /// clip only graded or keyed has no Effects tab to go looking in.
+    property <bool> has-sound: root.selected.has-sound;
+    /// The colour panel's own package and the chroma key have homes of their
+    /// own (Adjust, the cutout), so they do not count as a chain.
     pure function own-link(id: string) -> bool {
         return id == "concat.adjust" || id == "concat.chroma-key";
     }
     property <bool> has-chain: root.applied-visual.length > 2
         || (root.applied-visual.length > 0 && !root.own-link(root.applied-visual[0].id))
         || (root.applied-visual.length > 1 && !root.own-link(root.applied-visual[1].id));
+
     property <[string]> tabs: root.selected.batch-volume ? ["Audio"]
         : root.is-text ? (root.has-chain ? ["Text", "Effects"] : ["Text"])
         : root.is-layer ? ["Filter"]
         : root.is-sound-layer ? ["Audio"]
         : root.is-shape ? ["Video"]
-        : root.is-image ? (root.has-chain ? ["Video", "Effects"] : ["Video"])
-        : root.is-audio ? ["Audio"]
-        // A video without sound has nothing for an Audio tab to set.
-        : !root.selected.has-sound ? (root.has-chain ? ["Video", "Effects"] : ["Video"])
-        : root.has-chain ? ["Video", "Audio", "Effects"] : ["Video", "Audio"];
-    /// The same tabs in the interface's language. `tabs` stays English,
-    /// because the panels are picked by comparing against it.
-    ///
-    /// Held, not bound (#549): bound, it was worked out again whenever
-    /// anything in `selected` changed - every frame of playback on a keyed
-    /// clip - and each time the strip's repeater got a new model, so its
-    /// segments were torn down and rebuilt sixty times a second, their
-    /// colour fade replaying (the blink) and a click landing on a segment
-    /// already gone. Now it is set again only when `strip-key` - which
-    /// tabs, in which language - says the strip is a different one.
-    property <[string]> tabs-shown;
+        : root.is-audio ? ["Audio", "Speed", "AI"]
+        : !root.has-sound ? ["Video", "Speed", "Animate", "Adjust", "AI"]
+        : ["Video", "Audio", "Speed", "Animate", "Adjust", "AI"];
+
     pure function strip-labels() -> [string] {
         return root.selected.batch-volume ? [I18n.t("common.audio")]
         : root.is-text ? (root.has-chain ? [I18n.t("common.text"), "AI 效果"]
             : [I18n.t("common.text")])
         : root.is-layer ? [I18n.t("configPane.filter")]
         : root.is-sound-layer ? [I18n.t("common.audio")]
-        : root.is-shape ? [I18n.t("configPane.vectorImage")]
-        : root.is-image ? (root.has-chain ? ["画面", "AI 效果"]
-            : ["画面"])
-        : root.is-audio ? [I18n.t("common.audio")]
-        : !root.selected.has-sound ? (root.has-chain ? ["画面", "AI 效果"]
-            : ["画面"])
-        : root.has-chain ? ["画面", I18n.t("common.audio"), "AI 效果"]
-            : ["画面", I18n.t("common.audio")];
+        : root.is-shape ? ["画面"]
+        : root.is-audio ? ["音频", "变速", "AI 编辑"]
+        : !root.has-sound ? ["画面", "变速", "动画", "调整", "AI 编辑"]
+        : ["画面", "音频", "变速", "动画", "调整", "AI 编辑"];
     }
-    property <string> strip-key: root.tabs.length + ":" + root.tabs[0] + ":"
+
+    /// Held, not bound: a selected clip's keys change every playback frame,
+    /// and a freshly built model would rebuild the strip under the pointer.
+    property <[string]> tabs-shown;
+    property <string> strip-key: root.tabs.length + ":"
+        + (root.tabs.length > 0 ? root.tabs[0] : "") + ":"
         + (root.tabs.length > 1 ? root.tabs[1] : "") + ":"
         + (root.tabs.length > 2 ? root.tabs[2] : "") + ":"
-        + (root.is-shape ? "shape" : "") + ":" + "画面";
+        + (root.tabs.length > 3 ? root.tabs[3] : "") + ":"
+        + (root.tabs.length > 4 ? root.tabs[4] : "") + ":"
+        + (root.tabs.length > 5 ? root.tabs[5] : "");
     changed strip-key => { root.tabs-shown = root.strip-labels(); }
+
     /// A one-segment segmented control is a label wearing a costume, so a lone
     /// tab renders as the panel's plain heading instead.
     property <bool> single: root.tabs.length < 2;
@@ -354,102 +337,124 @@ export component ConfigPane inherits Rectangle {
     // The segmented control owns this: it writes to `current`, which would
     // drop any binding declared here, so it is assigned and never bound.
     property <int> tab;
-    /// The kind the strip was last built for. A selection change can leave the
-    /// strip pointing past the end of a shorter list — Audio on a still,
-    /// a video's third tab on a title — so the index is pulled back in when the
-    /// shape of the strip changes, and left alone when it has not.
+    /// 0.3.2：「已应用」提示；参数一提交置 true，1.4 秒后自己收掉。
+    property <bool> applied-flash;
     property <ClipKind> strip-kind;
-    // Taking a clip's last effect off takes its tab away under you.
+    // Taking a clip's last effect off takes its section away under you.
     changed has-chain => { root.tab = Math.min(root.tab, root.tabs.length - 1); }
-    // From a video with sound to one without, or back, the tabs after
-    // Video move up or down one: start again on the first rather than
-    // land on whichever tab took Audio's place.
-    property <bool> has-sound: root.selected.has-sound;
+    // From a video with sound to one without, the tabs after Video move up
+    // one: start again on the first rather than land on whichever tab took
+    // Audio's place.
     changed has-sound => { root.tab = 0; }
     changed selected => {
         if (root.selected.kind != root.strip-kind) {
             root.strip-kind = root.selected.kind;
-            // Clamped rather than reset: going from a video to a still should
-            // stay on Effects, which both offer, instead of jumping back.
             root.tab = Math.min(root.tab, root.tabs.length - 1);
         }
     }
 
-    /// Which tab the index names.
+    /// The tab the index names, as its English id.
     property <string> heading: root.tabs[Math.max(0,
         Math.min(root.tab, root.tabs.length - 1))];
 
-    /// The sections of the current tab, as the dropdown lists them.
-    property <[string]> sections: root.heading == "Video"
-            ? (root.is-shape ? ["Shape", "Basic", "Animate"] : ["Basic", "Enhance", "Adjust", "Animate"])
-        // Audio's chain library is a page of its own, beside the level,
-        // fades and treatments rather than under them, the way Video's
-        // Adjust sits beside its Basic. Named apart from Video's "Basic"
-        // and the Effects tab's "Effects", since `showing` picks the panel
-        // by this name alone.
-        : root.heading == "Audio"
-            ? (root.selected.batch-volume ? ["Sound"]
-                : root.is-sound-layer ? ["Layer", "AudioEffects"]
-                : ["Sound", "AudioEffects"])
-        : root.heading == "Effects" ? ["Effects"]
+    /// One tab's sections, as English ids: the panel `showing` picks by these.
+    property <[string]> sections:
+        root.heading == "Video" ? (root.is-shape ? ["Shape", "Basic", "Animate"]
+            : ["Basic", "Keying", "Mask", "Beauty", "Effects"])
+        : root.heading == "Audio" ? (root.selected.batch-volume ? ["Sound"]
+            : root.is-sound-layer ? ["Layer", "AudioEffects"]
+            : ["Sound", "VoicePreset", "AudioEffects"])
+        : root.heading == "Speed" ? ["Constant", "Curve", "Beat"]
+        : root.heading == "Animate" ? ["In", "Out", "Loop"]
+        : root.heading == "Adjust" ? ["Basic", "Hsl", "Curves", "Wheels", "MaskLink"]
+        : root.heading == "AI" ? ["Fill", "Reference", "Structure"]
         : root.heading == "Text" ? ["Text", "Animate"]
+        : root.heading == "Effects" ? ["Effects"]
         : ["Layer", "Adjust", "Effects"];
-    /// A mark for each section, in the same order: where the clip sits,
-    /// what makes it better, its colour's knobs; its level and its sound's
-    /// chain; a layer's own strength, then its colour and its chain.
-    property <[Glyph]> section-icons: root.heading == "Video"
-            ? (root.is-shape ? [Glyph.shapes, Glyph.move, Glyph.circle-play]
-                : [Glyph.move, Glyph.wand, Glyph.sliders, Glyph.circle-play])
-        : root.heading == "Audio"
-            ? (root.selected.batch-volume ? [Glyph.volume]
-                : root.is-sound-layer ? [Glyph.filter, Glyph.waveform]
-                : [Glyph.volume, Glyph.waveform])
-        : root.heading == "Effects" ? [Glyph.sparkle]
-        : root.heading == "Text" ? [Glyph.text-mark, Glyph.circle-play]
-        : [Glyph.filter, Glyph.sliders, Glyph.sparkle];
-    /// The sections as the dropdown shows them; see `tabs-shown`.
-    ///
-    /// 0.3.1：按剪映 11.9 的分组口径把右侧面板说清楚——「基础」（变换/裁剪/
-    /// 蒙版）、「AI 效果」（AI 超分/画质修复/抠像类增强）、「调节」、「动画」。
-    /// 面板仍是原来那四块，只改标签与顺序的口径，不改能力。
-    property <[string]> sections-shown: root.heading == "Video"
-            ? (root.is-shape ? [I18n.t("shapePanel.shape"), I18n.t("configPane.basic"), I18n.t("motion.animate")]
-                : [I18n.t("configPane.basic"), I18n.t("configPane.aiEffects"), I18n.t("common.adjust"),
-                    I18n.t("motion.animate")])
-        : root.heading == "Audio"
-            ? (root.selected.batch-volume ? [I18n.t("configPane.basic")]
-                : root.is-sound-layer ? [I18n.t("common.layer"), I18n.t("configPane.audioEffects")]
-                : [I18n.t("configPane.basic"), I18n.t("configPane.audioEffects")])
-        : root.heading == "Effects" ? ["AI 效果"]
-        : root.heading == "Text" ? [I18n.t("common.text"), I18n.t("motion.animate")]
-        : [I18n.t("common.layer"), I18n.t("common.adjust"), "AI 效果"];
 
-    // Each tab remembers its own section, so flipping to Audio and back
-    // lands on the colour panel you were adjusting. Assigned, never bound,
-    // for the same reason `tab` is.
+    /// The sections in the interface's language; see `tabs-shown`.
+    property <[string]> sections-shown:
+        root.heading == "Video" ? (root.is-shape ? ["形状", "基础", "动画"]
+            : ["基础", "抠像", "蒙版", "美颜美体", "AI 效果"])
+        : root.heading == "Audio" ? (root.selected.batch-volume ? ["音量"]
+            : root.is-sound-layer ? ["图层", "声音效果"]
+            : ["基础", "换音色", "声音效果"])
+        : root.heading == "Speed" ? ["常规变速", "曲线变速", "变速卡点"]
+        : root.heading == "Animate" ? ["入场", "出场", "组合"]
+        : root.heading == "Adjust" ? ["基础", "HSL", "曲线", "色轮", "蒙版"]
+        : root.heading == "AI" ? ["填写", "参考视频", "结构编辑"]
+        : root.heading == "Text" ? ["文本", "动画"]
+        : root.heading == "Effects" ? ["AI 效果"]
+        : ["图层", "调整", "AI 效果"];
+
+    /// A mark for each section, in the same order.
+    property <[Glyph]> section-icons:
+        root.heading == "Video" ? (root.is-shape ? [Glyph.shapes, Glyph.move, Glyph.circle-play]
+            : [Glyph.move, Glyph.filter, Glyph.mask-circle, Glyph.sparkle, Glyph.wand])
+        : root.heading == "Audio" ? (root.selected.batch-volume ? [Glyph.volume]
+            : root.is-sound-layer ? [Glyph.filter, Glyph.waveform]
+            : [Glyph.volume, Glyph.mic, Glyph.waveform])
+        : root.heading == "Speed" ? [Glyph.speed-constant, Glyph.speed-curve, Glyph.circle-play]
+        : root.heading == "Animate" ? [Glyph.circle-play, Glyph.circle-play, Glyph.circle-play]
+        : root.heading == "Adjust" ? [Glyph.sliders, Glyph.sun, Glyph.speed-curve, Glyph.circle-play, Glyph.mask-circle]
+        : root.heading == "AI" ? [Glyph.wand, Glyph.film, Glyph.slot]
+        : root.heading == "Text" ? [Glyph.text-mark, Glyph.circle-play]
+        : root.heading == "Effects" ? [Glyph.sparkle]
+        : [Glyph.filter, Glyph.sliders, Glyph.sparkle];
+
+    // Each page remembers its own section, so flipping to Audio and back
+    // lands on the colour panel you were adjusting.
     property <int> section-video;
     property <int> section-audio;
-    property <int> section-effects;
+    property <int> section-speed;
+    property <int> section-animate;
+    property <int> section-adjust;
+    property <int> section-ai;
     property <int> section-text;
     property <int> section-layer;
     property <int> section: root.heading == "Video" ? root.section-video
         : root.heading == "Audio" ? root.section-audio
-        : root.heading == "Effects" ? root.section-effects
+        : root.heading == "Speed" ? root.section-speed
+        : root.heading == "Animate" ? root.section-animate
+        : root.heading == "Adjust" ? root.section-adjust
+        : root.heading == "AI" ? root.section-ai
         : root.heading == "Text" ? root.section-text
         : root.heading == "Filter" ? root.section-layer
         : 0;
     function pick-section(index: int) {
         if (root.heading == "Video") { root.section-video = index; }
         else if (root.heading == "Audio") { root.section-audio = index; }
-        else if (root.heading == "Effects") { root.section-effects = index; }
+        else if (root.heading == "Speed") { root.section-speed = index; }
+        else if (root.heading == "Animate") { root.section-animate = index; }
+        else if (root.heading == "Adjust") { root.section-adjust = index; }
+        else if (root.heading == "AI") { root.section-ai = index; }
         else if (root.heading == "Text") { root.section-text = index; }
         else if (root.heading == "Filter") { root.section-layer = index; }
     }
 
-    /// Which panel is up, resolved once rather than at each `if`: the same
-    /// number means different things depending on what is selected.
+    /// Which panel is up, resolved once rather than at each `if`.
     property <string> showing: root.sections[Math.max(0,
         Math.min(root.section, root.sections.length - 1))];
+
+    /// A tab or a section by its id, for the library's jump: 0 past the end,
+    /// which lands on the first one - the nearest thing to what it named.
+    pure function tab-index(name: string) -> int {
+        return root.tabs.length > 0 && root.tabs[0] == name ? 0
+            : root.tabs.length > 1 && root.tabs[1] == name ? 1
+            : root.tabs.length > 2 && root.tabs[2] == name ? 2
+            : root.tabs.length > 3 && root.tabs[3] == name ? 3
+            : root.tabs.length > 4 && root.tabs[4] == name ? 4
+            : root.tabs.length > 5 && root.tabs[5] == name ? 5
+            : 0;
+    }
+    pure function section-index(name: string) -> int {
+        return root.sections.length > 0 && root.sections[0] == name ? 0
+            : root.sections.length > 1 && root.sections[1] == name ? 1
+            : root.sections.length > 2 && root.sections[2] == name ? 2
+            : root.sections.length > 3 && root.sections[3] == name ? 3
+            : root.sections.length > 4 && root.sections[4] == name ? 4
+            : 0;
+    }
 
     // Go where the library just put something. On a fresh token, and once
     // on opening, so an inspector that was not on screen when the effect
@@ -464,20 +469,35 @@ export component ConfigPane inherits Rectangle {
                 : root.jump-section == "Effects" ? 2 : 0;
             return;
         }
-        if (root.jump-tab == "Video") { root.tab = 0; }
-        else if (root.jump-tab == "Audio") {
-            root.tab = root.is-audio || root.is-sound-layer || !root.selected.has-sound ? 0 : 1;
+        if (root.jump-tab == "Video") { root.tab = root.tab-index("Video"); }
+        else if (root.jump-tab == "Audio") { root.tab = root.tab-index("Audio"); }
+        // 0.3.2：链上效果落在「画面 · AI 效果」，AI 超分也在这里。
+        else if (root.jump-tab == "Effects"
+            || root.jump-section == "Enhance") { root.tab = root.tab-index("Video"); }
+        else if (root.jump-tab == "Adjust") { root.tab = root.tab-index("Adjust"); }
+        else if (root.jump-tab == "Animate") { root.tab = root.tab-index("Animate"); }
+        if (root.jump-tab == "Effects" || root.jump-section == "Enhance") {
+            root.pick-section(root.section-index("Effects"));
+        } else if (root.jump-tab == "Video" || root.jump-tab == "Text") {
+            root.pick-section(root.section-index(root.jump-tab == "Text" ? "Text" : "Basic"));
+        } else if (root.jump-tab == "Audio") {
+            root.pick-section(root.section-index("Sound"));
+        } else if (root.jump-tab == "Adjust") {
+            root.pick-section(root.section-index("Basic"));
+        } else if (root.jump-tab == "Animate") {
+            root.pick-section(root.section-index("In"));
         }
-        else if (root.jump-tab == "Effects") { root.tab = root.tabs.length - 1; }
-        // Enhance sits second in the Video tab for a video and a still
-        // alike, and Audio effects second in the Audio tab.
-        root.pick-section(root.jump-section == "Enhance" || root.jump-section == "AudioEffects"
-            ? 1 : 0);
     }
     changed jump-token => { root.jump(); }
     init => {
         root.tabs-shown = root.strip-labels();
         root.jump();
+    }
+    // 「已应用」自己收掉：滑块的提交是一串命令，提示却只该停一下。
+    Timer {
+        interval: 1400ms;
+        running: root.applied-flash;
+        triggered => { root.applied-flash = false; }
     }
 
     Pane {
@@ -563,7 +583,27 @@ export component ConfigPane inherits Rectangle {
                         value: root.unread-count;
                         tip: root.unread-notice;
                     }
-                }
+
+                    // 0.3.2：没选中片段时，右侧显示的是工程/时间线的事实（只读的
+                    // 草稿参数）。给一句人话，告诉人六个属性页在选中片段后出现。
+                    FactHeading { title: "提示"; }
+                    Rectangle {
+                        height: 1px;
+                        background: Theme.line;
+                    }
+                    VerticalLayout {
+                        padding-left: Theme.pad;
+                        padding-right: Theme.pad;
+                        padding-top: 6px;
+                        padding-bottom: 8px;
+
+                        Text {
+                            text: "未选中片段：显示工程与时间线的参数。点时间线上任意片段，右侧换成 画面 / 音频 / 变速 / 动画 / 调整 / AI 编辑 六页，改参数即时生效、可 Ctrl+Z 撤销。";
+                            color: Theme.fg-dim;
+                            font-size: Theme.fs-sm;
+                            wrap: word-wrap;
+                        }
+                    }                }
             }
         }
 
@@ -705,6 +745,15 @@ export component ConfigPane inherits Rectangle {
                     }
                 }
 
+                // 0.3.2：参数提交后闪一下「已应用」，再等一会儿自己收掉；
+                // 撤销/重做走原来的命令栈（Ctrl+Z / Ctrl+Shift+Z）。
+                if root.applied-flash: Text {
+                    text: "已应用";
+                    color: Theme.accent;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+
                 VerticalLayout {
                     alignment: center;
                     PaneSwitcher {
@@ -756,121 +805,305 @@ export component ConfigPane inherits Rectangle {
             }
         }
 
+        // ── the clip inspector's page ─────────────────────────────────────
         if root.has-selection: PaneBody {
-            // No padding: the inspector rows carry their own 14px inset, and
-            // sections run edge to edge so their hairlines reach both sides.
             padding: 0px;
 
             PaneScroll {
-                // Basic, with the clip's speed under it: one knob is not a
-                // page of its own.
-                if root.showing == "Basic": VerticalLayout {
-                    VideoPanel {
-                        selected: root.selected;
-                        with-speed: !root.is-image && !root.is-shape;
-                        applied: root.applied-visual;
-                        params: root.visual-params;
-                        colours: root.visual-colours;
-                        choices: root.visual-choices;
-                        brush-tool: root.brush-tool;
-                        brush-size: root.brush-size;
-                        painting: root.painting;
-                        set(field, value) => { root.clip-set(field, value); }
-                        commit => { root.clip-commit(); }
-                        chain-add(id) => { root.chain-add(false, id); }
-                        chain-remove(index) => { root.chain-remove(false, index); }
-                        chain-set-param(index, key, value) => {
-                            root.chain-set-param(false, index, key, value);
-                        }
-                        chain-set-colour(index, key, value) => {
-                            root.chain-set-colour(index, key, value);
-                        }
-                        chain-pick-colour(index, key) => { root.chain-pick-colour(index, key); }
-                        chain-auto-colour(index, key) => { root.chain-auto-colour(index, key); }
-                        cutout-mode(mode) => { root.cutout-mode(mode); }
-                        cutout-tool(index) => { root.cutout-tool(index); }
-                        cutout-size(size) => { root.cutout-size(size); }
-                        cutout-painting(on) => { root.cutout-painting(on); }
-                        cutout-subject(index) => { root.cutout-subject(index); }
-                        cutout-clear => { root.cutout-clear(); }
+                // 画面 · 基础：位置 / 缩放 / 旋转 / 不透明度 / 混合 / 镜像
+                // 与裁剪（VideoPanel 的 basic 段）。
+                if root.showing == "Basic" && root.heading == "Video": VideoPanel {
+                    selected: root.selected;
+                    with-speed: false;
+                    part: "basic";
+                    applied: root.applied-visual;
+                    params: root.visual-params;
+                    colours: root.visual-colours;
+                    choices: root.visual-choices;
+                    brush-tool: root.brush-tool;
+                    brush-size: root.brush-size;
+                    painting: root.painting;
+                    set(field, value) => { root.clip-set(field, value); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
+                    chain-add(id) => { root.chain-add(false, id); }
+                    chain-remove(index) => { root.chain-remove(false, index); }
+                    chain-set-param(index, key, value) => {
+                        root.chain-set-param(false, index, key, value);
                     }
-
+                    chain-set-colour(index, key, value) => {
+                        root.chain-set-colour(index, key, value);
+                    }
+                    chain-pick-colour(index, key) => { root.chain-pick-colour(index, key); }
+                    chain-auto-colour(index, key) => { root.chain-auto-colour(index, key); }
+                    cutout-mode(mode) => { root.cutout-mode(mode); }
+                    cutout-tool(index) => { root.cutout-tool(index); }
+                    cutout-size(size) => { root.cutout-size(size); }
+                    cutout-painting(on) => { root.cutout-painting(on); }
+                    cutout-subject(index) => { root.cutout-subject(index); }
+                    cutout-clear => { root.cutout-clear(); }
                 }
 
+                // 画面 · 抠像：自动抠像（本地模型）/ 自定义画笔 / 色度键，都是
+                // 真实的移除背景链路，不是占位。
+                if root.showing == "Keying": VideoPanel {
+                    selected: root.selected;
+                    with-speed: false;
+                    part: "keying";
+                    mask-section: false;
+                    canvas: false;
+                    applied: root.applied-visual;
+                    params: root.visual-params;
+                    colours: root.visual-colours;
+                    choices: root.visual-choices;
+                    brush-tool: root.brush-tool;
+                    brush-size: root.brush-size;
+                    painting: root.painting;
+                    set(field, value) => { root.clip-set(field, value); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
+                    chain-add(id) => { root.chain-add(false, id); }
+                    chain-remove(index) => { root.chain-remove(false, index); }
+                    chain-set-param(index, key, value) => {
+                        root.chain-set-param(false, index, key, value);
+                    }
+                    chain-set-colour(index, key, value) => {
+                        root.chain-set-colour(index, key, value);
+                    }
+                    chain-pick-colour(index, key) => { root.chain-pick-colour(index, key); }
+                    chain-auto-colour(index, key) => { root.chain-auto-colour(index, key); }
+                    cutout-mode(mode) => { root.cutout-mode(mode); }
+                    cutout-tool(index) => { root.cutout-tool(index); }
+                    cutout-size(size) => { root.cutout-size(size); }
+                    cutout-painting(on) => { root.cutout-painting(on); }
+                    cutout-subject(index) => { root.cutout-subject(index); }
+                    cutout-clear => { root.cutout-clear(); }
+                }
+
+                // 画面 · 蒙版：线性 / 镜面 / 圆形 / 矩形 / 爱心 / 星形，羽化与
+                // 反转都在；调整页的蒙版入口也回到这里，同一组参数。
+                if root.showing == "Mask": VideoPanel {
+                    selected: root.selected;
+                    with-speed: false;
+                    part: "mask";
+                    canvas: false;
+                    applied: root.applied-visual;
+                    params: root.visual-params;
+                    colours: root.visual-colours;
+                    choices: root.visual-choices;
+                    brush-tool: root.brush-tool;
+                    brush-size: root.brush-size;
+                    painting: root.painting;
+                    set(field, value) => { root.clip-set(field, value); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
+                    chain-add(id) => { root.chain-add(false, id); }
+                    chain-remove(index) => { root.chain-remove(false, index); }
+                    chain-set-param(index, key, value) => {
+                        root.chain-set-param(false, index, key, value);
+                    }
+                    chain-set-colour(index, key, value) => {
+                        root.chain-set-colour(index, key, value);
+                    }
+                    chain-pick-colour(index, key) => { root.chain-pick-colour(index, key); }
+                    chain-auto-colour(index, key) => { root.chain-auto-colour(index, key); }
+                    cutout-mode(mode) => { root.cutout-mode(mode); }
+                    cutout-tool(index) => { root.cutout-tool(index); }
+                    cutout-size(size) => { root.cutout-size(size); }
+                    cutout-painting(on) => { root.cutout-painting(on); }
+                    cutout-subject(index) => { root.cutout-subject(index); }
+                    cutout-clear => { root.cutout-clear(); }
+                }
+
+                // 画面 · 美颜美体：磨皮/美白真实生效（整画面），瘦脸/大眼/
+                // 身材如实标即将开放。
+                if root.showing == "Beauty": BeautyPanel {
+                    params: root.adjust-params;
+                    set(key, value) => { root.adjust-set(key, value); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
+                }
+
+                // 画面 · AI 效果：AI 超分/画质修复（EnhancePanel）+ 片段的
+                // 效果链（旧的 Effects 页，保留，方便看与取下链上的效果）。
+                if root.showing == "Effects": VerticalLayout {
+                    if root.heading == "Video" && root.selected.kind != ClipKind.shape: EnhancePanel {
+                        selected: root.selected;
+                        enhance-set(on) => { root.clip-enhance-set(on); }
+                        enhance-scale(scale) => { root.clip-enhance-scale(scale); }
+                        enhance-strength(strength) => { root.clip-enhance-strength(strength); }
+                        enhance-preview => { root.clip-enhance-preview(); }
+                        enhance-run => { root.clip-enhance-run(); }
+                    }
+
+                    PresetStack {
+                        noun: I18n.t("common.effect");
+                        library-title: "AI 效果";
+                        library: false;
+                        empty-note: I18n.t("configPane.noEffectClipYet");
+                        shelf: 1;
+                        group-labels: root.effect-groups;
+                        catalogue: root.catalogue-effects;
+                        applied: root.applied-visual;
+                        params: root.visual-params;
+                        wheel-groups: root.visual-wheels;
+                        curve-groups: root.visual-curves;
+                        colours: root.visual-colours;
+                        choices: root.visual-choices;
+
+                        add(id) => { root.chain-add(false, id); }
+                        toggle(index) => { root.chain-toggle(false, index); }
+                        move-by(index, delta) => { root.chain-move-by(false, index, delta); }
+                        remove(index) => { root.chain-remove(false, index); }
+                        set-param(index, key, value) => {
+                            root.chain-set-param(false, index, key, value);
+                        }
+                        set-colour(index, key, value) => {
+                            root.chain-set-colour(index, key, value);
+                        }
+                        pick-colour(index, key) => { root.chain-pick-colour(index, key); }
+                        auto-colour(index, key) => { root.chain-auto-colour(index, key); }
+                        curve-point(index, key, point, x, y) => {
+                            root.curve-point(index, key, point, x, y);
+                        }
+                        curve-remove(index, key, point) => {
+                            root.curve-remove(index, key, point);
+                        }
+                        commit => { root.clip-commit(); root.applied-flash = true; }
+                    }
+                }
+
+                // 动画：入场 / 出场 / 组合（循环与强度）三个小节，卡片本身
+                // 会播放预览，时长/强度在下面调。
+                if root.showing == "In": AnimatePanel {
+                    selected: root.selected;
+                    preset-page: 0;
+                    set(field, value) => { root.clip-set(field, value); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
+                }
+                if root.showing == "Out": AnimatePanel {
+                    selected: root.selected;
+                    preset-page: 1;
+                    set(field, value) => { root.clip-set(field, value); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
+                }
+                if root.showing == "Loop": AnimatePanel {
+                    selected: root.selected;
+                    preset-page: 2;
+                    set(field, value) => { root.clip-set(field, value); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
+                }
+                // 文本页的动画小节仍是完整的三页自己选。
                 if root.showing == "Animate": AnimatePanel {
                     selected: root.selected;
                     set(field, value) => { root.clip-set(field, value); }
-                    commit => { root.clip-commit(); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
                 }
 
-                if root.showing == "Enhance": EnhancePanel {
+                // 变速：常规（倍速 + 时长联动）/ 曲线（关键点）/ 卡点（BPM
+                // 插点，基础版）。
+                if root.showing == "Constant": SpeedPanel {
+                    first: true;
+                    part: "constant";
                     selected: root.selected;
-                    enhance-set(on) => { root.clip-enhance-set(on); }
-                    enhance-scale(scale) => { root.clip-enhance-scale(scale); }
-                    enhance-strength(strength) => { root.clip-enhance-strength(strength); }
-                    enhance-preview => { root.clip-enhance-preview(); }
-                    enhance-run => { root.clip-enhance-run(); }
+                    set(field, value) => { root.clip-set(field, value); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
+                }
+                if root.showing == "Curve": SpeedPanel {
+                    first: true;
+                    part: "curve";
+                    selected: root.selected;
+                    set(field, value) => { root.clip-set(field, value); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
+                }
+                if root.showing == "Beat": BeatSyncPanel {
+                    selected: root.selected;
+                    beat(bpm, every) => { root.speed-beat(bpm, every); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
                 }
 
-                if root.showing == "Adjust": AdjustPanel {
+                // 调整：基础 / HSL / 曲线 / 色轮 / 蒙版（蒙版与画面共用）。
+                if root.showing == "Basic" && root.heading == "Adjust": AdjustBasicPanel {
                     params: root.adjust-params;
-                    wheels: root.adjust-wheels;
-                    curves: root.adjust-curves;
                     set(key, value) => { root.adjust-set(key, value); }
-                    curve-point(key, point, x, y) => { root.curve-point(-1, key, point, x, y); }
-                    curve-remove(key, point) => { root.curve-remove(-1, key, point); }
-                    commit => { root.clip-commit(); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
                 }
-
-                if root.showing == "Layer": FilterPanel {
-                    selected: root.selected;
-                    help: root.is-sound-layer ? I18n.t("clipInspector.soundLayerTreatsTheMix")
-                        : I18n.t("clipInspector.layerTreatsEverythingUnder");
-                    set(field, value) => { root.clip-set(field, value); }
-                    commit => { root.clip-commit(); }
+                if root.showing == "Hsl": HslPanel {
+                    params: root.adjust-params;
+                    set(key, value) => { root.adjust-set(key, value); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
                 }
-
-                if root.showing == "Shape": ShapePanel {
-                    selected: root.selected;
-                    set(field, value) => { root.clip-set(field, value); }
-                    set-colour(which, value) => { root.clip-shape-colour(which, value); }
-                    commit => { root.clip-commit(); }
+                if root.showing == "Curves": CurvesPanel {
+                    curves: root.adjust-curves;
+                    point(key, point, x, y) => { root.curve-point(-1, key, point, x, y); }
+                    remove(key, point) => { root.curve-remove(-1, key, point); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
                 }
-
-                if root.showing == "Text": TextPanel {
-                    selected: root.selected;
-                    families: root.font-families;
-                    set(field, value) => { root.clip-set(field, value); }
-                    set-text(field, value) => { root.clip-set-text(field, value); }
-                    set-words(text, caret) => { root.clip-set-words(text, caret); }
-                    select-words(anchor, cursor) => { root.clip-select-words(anchor, cursor); }
-                    reset-words => { root.clip-reset-words(); }
-                    set-colour(field, value) => { root.clip-set-colour(field, value); }
-                    commit => { root.clip-commit(); }
-                    import-font => { root.import-font(); }
-                    set-default => { root.text-style-default(); }
+                if root.showing == "Wheels": WheelsPanel {
+                    wheels: root.adjust-wheels;
+                    set(key, value) => { root.adjust-set(key, value); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
                 }
-
-                // Audio: the level and fades, then the voice and room chain
-                // under them, the way an audio tab is usually laid out.
-                if root.showing == "Sound": VerticalLayout {
-                    // A sound clip's speed sits in the panel's Playback,
-                    // beside its fades and pitch. A picture's sound rides
-                    // the picture's, set under Video › Basic.
-                    AudioPanel {
-                        selected: root.selected;
-                        audio-tracks: root.audio-tracks;
-                        with-speed: root.is-audio;
-                        set(field, value) => { root.clip-set(field, value); }
-                        commit => { root.clip-commit(); }
-                        denoise(strength, hum, audition) => {
-                            root.clip-denoise(strength, hum, audition);
+                if root.showing == "MaskLink": VerticalLayout {
+                    Section {
+                        first: true;
+                        header := SectionHeader {
+                            title: "蒙版";
+                            collapsible: true;
+                            summary: root.selected.masks.length == 0 ? "未添加" : "已添加";
+                        }
+                        if header.open: SectionBody {
+                            Note {
+                                text: "蒙版与「画面 · 蒙版」共用同一组参数：形状、羽化、反转、位置都在那一页。这里只负责带你过去。";
+                            }
+                            Button {
+                                label: "去画面 · 蒙版";
+                                glyph: Glyph.mask-circle;
+                                clicked => {
+                                    root.tab = root.tab-index("Video");
+                                    root.pick-section(root.section-index("Mask"));
+                                }
+                            }
                         }
                     }
-                    // The three treatments, between the mix and the library:
-                    // they are chain links like any other, but they are the
-                    // ones a sound clip usually needs, so they get a switch
-                    // rather than a search.
+                }
+
+                // AI 编辑：填写 / 参考视频 / 结构编辑三页，各自带路到已有
+                // 能力（AI 工作室一键成片 / 爆款复刻 / 左侧模板页）。
+                if root.showing == "Fill": AiEditPanel {
+                    preset-mode: 0;
+                    open-ai-studio(tab) => { root.open-ai-studio(tab); }
+                    open-templates => { root.open-templates(); }
+                }
+                if root.showing == "Reference": AiEditPanel {
+                    preset-mode: 1;
+                    open-ai-studio(tab) => { root.open-ai-studio(tab); }
+                    open-templates => { root.open-templates(); }
+                }
+                if root.showing == "Structure": AiEditPanel {
+                    preset-mode: 2;
+                    open-ai-studio(tab) => { root.open-ai-studio(tab); }
+                    open-templates => { root.open-templates(); }
+                }
+
+                // ── 音频 ────────────────────────────────────────────────
+                if root.showing == "Sound": AudioPanel {
+                    selected: root.selected;
+                    audio-tracks: root.audio-tracks;
+                    with-speed: false;
+                    set(field, value) => { root.clip-set(field, value); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
+                    denoise(strength, hum, audition) => {
+                        root.clip-denoise(strength, hum, audition);
+                    }
+                }
+                if root.showing == "VoicePreset": VoicePresetPanel {
+                    applied: root.applied-audio;
+                    params: root.audio-params;
+                    add(id) => { root.chain-add(true, id); }
+                    remove(index) => { root.chain-remove(true, index); }
+                    set-param(index, key, value) => {
+                        root.chain-set-param(true, index, key, value);
+                    }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
+                }
+                if root.showing == "AudioEffects": VerticalLayout {
                     if !root.selected.batch-volume: ProcessorRows {
                         applied: root.applied-audio;
                         params: root.audio-params;
@@ -879,20 +1112,12 @@ export component ConfigPane inherits Rectangle {
                         set-param(index, key, value) => {
                             root.chain-set-param(true, index, key, value);
                         }
-                        commit => { root.clip-commit(); }
+                        commit => { root.clip-commit(); root.applied-flash = true; }
                     }
-                }
-
-                // The sound's chain and its library, on their own page
-                // rather than under everything Basic holds, where a long
-                // chain pushed the library off the bottom of the pane.
-                if root.showing == "AudioEffects": VerticalLayout {
                     if !root.selected.batch-volume: PresetStack {
                         noun: I18n.t("common.audioEffect");
                         library-title: I18n.t("configPane.audioEffects");
                         shelf: 2;
-                        // A sound layer has no Sound page with their switches,
-                        // so its treatments are cards like any other link.
                         hidden: root.selected.kind == ClipKind.sound-layer ? []
                             : ["concat.loudness", "concat.denoise", "concat.enhance-voice"];
                         group-labels: root.audio-groups;
@@ -907,46 +1132,48 @@ export component ConfigPane inherits Rectangle {
                         set-param(index, key, value) => {
                             root.chain-set-param(true, index, key, value);
                         }
-                        commit => { root.clip-commit(); }
+                        commit => { root.clip-commit(); root.applied-flash = true; }
+                    }
+                    Note {
+                        text: "混响（房间）、回声、降噪、响度都在上面的效果库里，点一下加到所选片段；均衡（EQ）排在 0.3.3。";
                     }
                 }
 
-                // The picture's chain. Filters are not in it: a filter is a
-                // layer on the lanes, edited in its own panel.
-                if root.showing == "Effects": PresetStack {
-                    noun: I18n.t("common.effect");
-                    library-title: "AI 效果";
-                    library: false;
-                    empty-note: I18n.t("configPane.noEffectClipYet");
-                    shelf: 1;
-                    group-labels: root.effect-groups;
-                    catalogue: root.catalogue-effects;
-                    applied: root.applied-visual;
-                    params: root.visual-params;
-                    wheel-groups: root.visual-wheels;
-                    curve-groups: root.visual-curves;
-                    colours: root.visual-colours;
-                    choices: root.visual-choices;
-
-                    add(id) => { root.chain-add(false, id); }
-                    toggle(index) => { root.chain-toggle(false, index); }
-                    move-by(index, delta) => { root.chain-move-by(false, index, delta); }
-                    remove(index) => { root.chain-remove(false, index); }
-                    set-param(index, key, value) => {
-                        root.chain-set-param(false, index, key, value);
-                    }
-                    set-colour(index, key, value) => {
-                        root.chain-set-colour(index, key, value);
-                    }
-                    pick-colour(index, key) => { root.chain-pick-colour(index, key); }
-                    auto-colour(index, key) => { root.chain-auto-colour(index, key); }
-                    curve-point(index, key, point, x, y) => {
-                        root.curve-point(index, key, point, x, y);
-                    }
-                    curve-remove(index, key, point) => {
-                        root.curve-remove(index, key, point);
-                    }
-                    commit => { root.clip-commit(); }
+                // ── 其它片种 ────────────────────────────────────────────
+                if root.showing == "Layer": FilterPanel {
+                    selected: root.selected;
+                    help: root.is-sound-layer ? I18n.t("clipInspector.soundLayerTreatsTheMix")
+                        : I18n.t("clipInspector.layerTreatsEverythingUnder");
+                    set(field, value) => { root.clip-set(field, value); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
+                }
+                if root.showing == "Shape": ShapePanel {
+                    selected: root.selected;
+                    set(field, value) => { root.clip-set(field, value); }
+                    set-colour(which, value) => { root.clip-shape-colour(which, value); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
+                }
+                if root.showing == "Text": TextPanel {
+                    selected: root.selected;
+                    families: root.font-families;
+                    set(field, value) => { root.clip-set(field, value); }
+                    set-text(field, value) => { root.clip-set-text(field, value); }
+                    set-words(text, caret) => { root.clip-set-words(text, caret); }
+                    select-words(anchor, cursor) => { root.clip-select-words(anchor, cursor); }
+                    reset-words => { root.clip-reset-words(); }
+                    set-colour(field, value) => { root.clip-set-colour(field, value); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
+                    import-font => { root.import-font(); }
+                    set-default => { root.text-style-default(); }
+                }
+                if root.showing == "Adjust": AdjustPanel {
+                    params: root.adjust-params;
+                    wheels: root.adjust-wheels;
+                    curves: root.adjust-curves;
+                    set(key, value) => { root.adjust-set(key, value); }
+                    curve-point(key, point, x, y) => { root.curve-point(-1, key, point, x, y); }
+                    curve-remove(key, point) => { root.curve-remove(-1, key, point); }
+                    commit => { root.clip-commit(); root.applied-flash = true; }
                 }
             }
         }

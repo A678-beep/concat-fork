@@ -609,6 +609,61 @@ impl Studio {
         self.set_speed_chosen(Vec::new());
     }
 
+    /// 变速卡点（0.3.2 基础版）：按 BPM 把节拍点插进所选片段的速度曲线，
+    /// 拍点处快、拍与拍之间慢，交替排满整个片段。`every` 是每几个节拍一个
+    /// 点（1/2/4）。不做音频节拍检测——BPM 由面板填，如实标注；曲线和倍速
+    /// 是真实的，插完可以在「曲线变速」页继续拖点。
+    pub fn speed_beat(&mut self, bpm: f32, every: i32) {
+        use concat_project::model::SpeedPoint;
+        use concat_project::model::ranges::{MAX_SPEED, MIN_CLIP_DURATION, MIN_SPEED};
+
+        let Some(id) = self.speed_clip() else {
+            return;
+        };
+        let bpm = if bpm.is_finite() { bpm.clamp(40.0, 240.0) } else { 120.0 };
+        let every = every.clamp(1, 4);
+        self.commit_targets = vec![id.clone()];
+        self.begin_echo();
+        let Some(clip) = self.echo_clip_mut(&id) else {
+            return;
+        };
+        let footage = clip.duration * clip.speed;
+        let duration = clip.duration.max(0.1);
+        let beat = 60.0 / f64::from(bpm);
+        let count = ((duration / beat).floor() as usize).clamp(2, 96);
+        let mut points: Vec<SpeedPoint> = Vec::with_capacity(count + 2);
+        points.push(SpeedPoint {
+            at: 0.0,
+            speed: 1.8,
+            slope: Some(0.0),
+        });
+        let mut at = 0.0;
+        let mut beat_index = 0usize;
+        while points.len() < 96 {
+            at += f64::from(every) * beat / duration;
+            if at >= 0.995 {
+                break;
+            }
+            let fast = beat_index % 2 == 0;
+            points.push(SpeedPoint {
+                at,
+                speed: if fast { 2.4 } else { 0.5 },
+                slope: Some(0.0),
+            });
+            beat_index += 1;
+        }
+        points.push(SpeedPoint {
+            at: 1.0,
+            speed: 1.0,
+            slope: Some(0.0),
+        });
+        let mean = concat_project::speed::average_speed(&points).clamp(MIN_SPEED, MAX_SPEED);
+        clip.speed_curve = Some(points);
+        clip.speed = mean;
+        clip.duration = (footage / mean).max(MIN_CLIP_DURATION);
+        self.set_speed_chosen(Vec::new());
+    }
+
     /// The Speed graph's chosen points, if they are on the selected clip.
     pub(super) fn speed_chosen_now(&self) -> &[usize] {
         match self.sole_selection() {

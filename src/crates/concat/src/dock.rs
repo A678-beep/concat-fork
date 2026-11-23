@@ -283,40 +283,58 @@ pub fn default_dock() -> Dock {
     }
 }
 
-/// 素材优先（0.3.1 布局预设）：素材库占左边一整列，监视器与时间线在右边
-/// 上下分；适合先挑素材再剪的工作方式。剪映 11.9 的「素材优先」同义。
-pub fn media_first_dock() -> Dock {
-    Dock::Split {
-        columns: true,
-        ratio: 0.42,
-        first: Dock::leaf(PaneKind::Media),
-        second: Box::new(Dock::Split {
-            columns: false,
-            ratio: 0.56,
-            first: Dock::leaf(PaneKind::Preview),
-            second: Dock::leaf(PaneKind::Timeline),
-        }),
-    }
-}
-
-/// 竖屏创作右（0.3.1 布局预设）：监视器竖屏习惯的排法——预览在上、素材与
-/// 时间线在下，右侧留给检查器；适合 9:16 短剧/口播。
+/// 竖屏创作（0.3.2 布局预设）：剪映式三栏，右列永远是属性面板；中间预览
+/// 占得更大（素材栏收窄），适合 9:16 短剧/口播边看边调。
 pub fn portrait_right_dock() -> Dock {
     Dock::Split {
         columns: true,
-        ratio: 0.72,
+        ratio: 0.80,
         first: Box::new(Dock::Split {
             columns: false,
-            ratio: 0.58,
-            first: Dock::leaf(PaneKind::Preview),
+            ratio: 0.60,
+            first: Box::new(Dock::Split {
+                columns: true,
+                ratio: 0.22,
+                first: Dock::leaf(PaneKind::Media),
+                second: Dock::leaf(PaneKind::Preview),
+            }),
             second: Dock::leaf(PaneKind::Timeline),
         }),
-        second: Box::new(Dock::Split {
+        second: Dock::leaf(PaneKind::Inspector),
+    }
+}
+
+/// 剪辑优先（0.3.2 布局预设）：时间线更高、素材栏更窄，右列仍是属性面板；
+/// 适合在时间线上精修。
+pub fn timeline_first_dock() -> Dock {
+    Dock::Split {
+        columns: true,
+        ratio: 0.76,
+        first: Box::new(Dock::Split {
             columns: false,
-            ratio: 0.42,
-            first: Dock::leaf(PaneKind::Media),
-            second: Dock::leaf(PaneKind::Inspector),
+            ratio: 0.48,
+            first: Box::new(Dock::Split {
+                columns: true,
+                ratio: 0.26,
+                first: Dock::leaf(PaneKind::Media),
+                second: Dock::leaf(PaneKind::Preview),
+            }),
+            second: Dock::leaf(PaneKind::Timeline),
         }),
+        second: Dock::leaf(PaneKind::Inspector),
+    }
+}
+
+/// The last leaf in a first-then-second walk: the view a right-hand column
+/// ends on. The layout presets all end on the inspector, and a saved layout
+/// that does not is one where the property panel was moved off the right or
+/// taken away; see `Studio::new`.
+impl Dock {
+    pub fn last_kind(&self) -> Option<PaneKind> {
+        match self {
+            Dock::Leaf(kind) => Some(*kind),
+            Dock::Split { second, .. } => second.last_kind(),
+        }
     }
 }
 

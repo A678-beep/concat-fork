@@ -826,6 +826,8 @@ pub struct Models {
     pub ai_drama_history: Rc<VecModel<SharedString>>,
     /// 左侧 AI 助手的对话。
     pub assistant_messages: Rc<VecModel<SharedString>>,
+    /// 智能粗剪（0.3.2）：计划的片段行，一镜一行。
+    pub smartcut_segments: Rc<VecModel<SharedString>>,
     pub speech_sample_waves: Rc<VecModel<SharedString>>,
     pub speech_sample_details: Rc<VecModel<SharedString>>,
     /// The Audio page's shelves.
@@ -926,6 +928,7 @@ impl Models {
             ai_drama_outputs: Rc::new(VecModel::default()),
             ai_drama_history: Rc::new(VecModel::default()),
             assistant_messages: Rc::new(VecModel::default()),
+            smartcut_segments: Rc::new(VecModel::default()),
             speech_sample_waves: Rc::new(VecModel::default()),
             speech_sample_details: Rc::new(VecModel::default()),
             sounds_mine: Rc::new(VecModel::default()),
@@ -1172,6 +1175,28 @@ pub struct Studio {
     /// Bumped to turn the library to Text & Captions > Captions; see
     /// `Editor.captions-jump-token`.
     pub captions_jump: i32,
+    /// 0.3.2：把左侧素材页跳到 `library_page`（6 = 模板），token 变一次跳一次；
+    /// 见 `Editor.library-page-token`。
+    pub library_page: i32,
+    pub library_page_token: i32,
+    /// 0.3.2：智能粗剪页的状态，提交后由 worker 写回，页面直接显示。
+    pub smartcut_busy: bool,
+    pub smartcut_status: String,
+    /// 已选的本地视频，计划在它上面拆。
+    pub smartcut_video: Option<std::path::PathBuf>,
+    pub smartcut_video_name: String,
+    /// 拿到计划后的 plan_id、标题与片段行。
+    pub smartcut_plan_id: String,
+    pub smartcut_plan_title: String,
+    pub smartcut_plan_lines: Vec<String>,
+    /// 渲染进度与阶段。
+    pub smartcut_progress: f32,
+    pub smartcut_stage: String,
+    /// 渲染好的成片地址（平台），以及下载插入时用的本地文件名。
+    pub smartcut_output_url: String,
+    pub smartcut_output_ready: bool,
+    /// 正在等渲染任务的取消旗。
+    pub smartcut_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// A look being shown before it is laid down: the filter's id. It is
     /// drawn into the frames the monitor asks for as a layer over the whole
     /// picture, and nowhere else - the timeline does not have it until the
@@ -3107,12 +3132,18 @@ impl Studio {
         let ai = crate::panes::ai::AiPane::new(&host.dirs, &prefs);
         // The panels where the last session left them, while Settings says
         // to; a saved dock this build cannot read is the default instead.
+        // 0.3.2：右列固定是属性面板（剪映式）。旧版布局文件没有 version，
+        // 不再沿用（右列可能是素材/预览）；本版写出的布局还要在右端收在
+        // 检查器上，否则也回默认——这条保证不靠用户记着重置布局。
         let saved = prefs.layout.as_ref().filter(|_| prefs.remembers_layout());
         let dock = saved
+            .filter(|layout| layout.version >= crate::prefs::LAYOUT_VERSION)
             .and_then(|layout| layout.wide.as_ref())
             .and_then(Dock::from_saved)
+            .filter(|dock| dock.last_kind() == Some(PaneKind::Inspector))
             .unwrap_or_else(default_dock);
         let dock_aside = saved
+            .filter(|layout| layout.version >= crate::prefs::LAYOUT_VERSION)
             .and_then(|layout| layout.compact.as_ref())
             .and_then(Dock::from_saved)
             .unwrap_or_else(crate::dock::compact_dock);
@@ -3196,6 +3227,20 @@ impl Studio {
             stage_guides: Vec::new(),
             inspector_jump: (0, "", ""),
             media_jump: 0,
+            library_page: 0,
+            library_page_token: 0,
+            smartcut_busy: false,
+            smartcut_status: String::new(),
+            smartcut_video: None,
+            smartcut_video_name: String::new(),
+            smartcut_plan_id: String::new(),
+            smartcut_plan_title: String::new(),
+            smartcut_plan_lines: Vec::new(),
+            smartcut_progress: 0.0,
+            smartcut_stage: String::new(),
+            smartcut_output_url: String::new(),
+            smartcut_output_ready: false,
+            smartcut_cancel: None,
             captions_jump: 0,
             audition: None,
             revision: 0,

@@ -134,6 +134,7 @@ impl Studio {
             (&self.dock, &self.dock_aside)
         };
         let mut layout = self.prefs.layout.clone().unwrap_or_default();
+        layout.version = crate::prefs::LAYOUT_VERSION;
         layout.wide = Some(wide.to_saved());
         layout.compact = Some(compact.to_saved());
         let maximized = crate::platform::is_maximized(window);

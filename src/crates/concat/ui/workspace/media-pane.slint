@@ -9,6 +9,7 @@ import { PaneKind, PaneSwitcher } from "pane-switcher.slint";
 import { TextAlignment } from "../timeline/model.slint";
 import { CatalogueEntryData, Library } from "../inspector/clip-inspector.slint";
 import { SearchField } from "../inspector/controls.slint";
+import { SegmentedControl } from "../primitives/segmented-control.slint";
 import { TextPresetData } from "../inspector/style-picker.slint";
 export { TextPresetData }
 import { Select } from "../primitives/select.slint";
@@ -1850,6 +1851,29 @@ export component MediaPane inherits Rectangle {
     /// 插件页（0.3.1）：打开 AI 面板的「本地插件」页。
     callback open-plugins();
 
+    /// 智能粗剪页（0.3.2，剪映 11.9 同级的顶部 tab）：通用 / 口播片 / 配音解说 /
+    /// 长视频切片 / VLOG记录 / 混剪，两档精度；平台 /api/smartcut/* 已上线：
+    /// 选本地视频 → 上传 → 出计划 → 渲染 → 下载插入时间轴。
+    callback smartcut-pick();
+    callback smartcut-submit(mode: string, precision: string, requirement: string);
+    callback smartcut-render();
+    callback smartcut-insert();
+    in property <bool> smartcut-busy;
+    in property <string> smartcut-status;
+    in property <string> smartcut-video;
+    in property <string> smartcut-plan-title;
+    in property <[string]> smartcut-plan;
+    in property <float> smartcut-progress;
+    in property <string> smartcut-stage;
+    in property <bool> smartcut-can-render;
+    in property <bool> smartcut-can-insert;
+
+    /// 左侧页的跳转（0.3.2）：AI 编辑的「结构编辑」要带用户去模板页；
+    /// token 变一次跳一次。
+    in property <int> page-jump-token;
+    in property <int> page-jump;
+    changed page-jump-token => { root.tab = root.page-jump; }
+
     /// The corner button: show something else in this pane's seat.
     callback pane-picked(kind: PaneKind);
     /// Which seat this pane is in. It travels no further than the corner
@@ -1862,6 +1886,12 @@ export component MediaPane inherits Rectangle {
     callback pane-removed();
 
     property <int> tab;
+    /// 智能粗剪页（0.3.2）的选择：0 通用 / 1 口播 / 2 配音解说 / 3 长视频切片 /
+    /// 4 VLOG记录 / 5 混剪；精度 0 标准 / 1 高精度。
+    property <int> smartcut-mode;
+    property <int> smartcut-precision;
+    property <string> smartcut-requirement: "";
+    property <[string]> smartcut-modes: ["通用", "口播片", "配音解说", "长视频切片", "VLOG记录", "混剪"];
     /// The Audio page is up, or not: a drop of sound files on the window
     /// goes into the library while it is.
     changed tab => {
@@ -2088,6 +2118,13 @@ export component MediaPane inherits Rectangle {
                             label: I18n.t("assets.library");
                             current: root.tab == 9;
                             clicked => { root.tab = 9; }
+                        }
+                        // 智能粗剪（0.3.2）：剪映 11.9 同级页，提交平台粗剪。
+                        LibraryTab {
+                            glyph: Glyph.wand;
+                            label: "智能粗剪";
+                            current: root.tab == 14;
+                            clicked => { root.tab = 14; }
                         }
                         }
                     }
@@ -2575,6 +2612,58 @@ export component MediaPane inherits Rectangle {
                             label: "本地插件 / 模型中心";
                             count: -1;
                             current: true;
+                        }
+                    }
+                    // 智能粗剪（0.3.2）：六种粗剪方式，点一行换一种。
+                    if root.tab == 14: VerticalLayout {
+                        spacing: 1px;
+                        CategoryHeading {
+                            height: 26px;
+                            title: "智能粗剪";
+                            open: root.categories-open;
+                            toggled => { root.categories-open = !root.categories-open; }
+                        }
+                        if root.categories-open: CategoryRow {
+                            height: 24px;
+                            label: root.smartcut-modes[0];
+                            count: -1;
+                            current: root.smartcut-mode == 0;
+                            clicked => { root.smartcut-mode = 0; }
+                        }
+                        if root.categories-open: CategoryRow {
+                            height: 24px;
+                            label: root.smartcut-modes[1];
+                            count: -1;
+                            current: root.smartcut-mode == 1;
+                            clicked => { root.smartcut-mode = 1; }
+                        }
+                        if root.categories-open: CategoryRow {
+                            height: 24px;
+                            label: root.smartcut-modes[2];
+                            count: -1;
+                            current: root.smartcut-mode == 2;
+                            clicked => { root.smartcut-mode = 2; }
+                        }
+                        if root.categories-open: CategoryRow {
+                            height: 24px;
+                            label: root.smartcut-modes[3];
+                            count: -1;
+                            current: root.smartcut-mode == 3;
+                            clicked => { root.smartcut-mode = 3; }
+                        }
+                        if root.categories-open: CategoryRow {
+                            height: 24px;
+                            label: root.smartcut-modes[4];
+                            count: -1;
+                            current: root.smartcut-mode == 4;
+                            clicked => { root.smartcut-mode = 4; }
+                        }
+                        if root.categories-open: CategoryRow {
+                            height: 24px;
+                            label: root.smartcut-modes[5];
+                            count: -1;
+                            current: root.smartcut-mode == 5;
+                            clicked => { root.smartcut-mode = 5; }
                         }
                     }
                 }
@@ -3085,6 +3174,170 @@ export component MediaPane inherits Rectangle {
                     }
                 }
 
+                // 智能粗剪（0.3.2）：顶部 tab 里的剪映同级入口。平台
+                // /api/smartcut/* 已上线，这里做完整闭环：选本地视频 → 上传 →
+                // 输入要求 → 选方式/精度 → 出计划（片段列表）→ 渲染 → 下载插入。
+                if root.tab == 14: VerticalLayout {
+                    padding: 12px;
+                    spacing: 10px;
+
+                    Text {
+                        text: "智能粗剪";
+                        color: Theme.fg;
+                        font-size: Theme.fs-lg;
+                        font-weight: Theme.weight-title;
+                    }
+                    Text {
+                        text: "把一条长素材交给平台粗剪：按口播/配音/切片/VLOG/混剪的思路挑出可用镜头、去废话、顺节奏，给出一份可继续精剪的计划。3 秒–15 分钟、≤300MB、要有音轨。";
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: start;
+                        ImportButton {
+                            label: "选择本地视频";
+                            glyph: Glyph.film;
+                            horizontal-stretch: 0;
+                            clicked => { root.smartcut-pick(); }
+                        }
+                        Text {
+                            horizontal-stretch: 1;
+                            text: root.smartcut-video == "" ? "还没选视频" : root.smartcut-video;
+                            color: root.smartcut-video == "" ? Theme.fg-dim : Theme.fg;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+
+                    Text {
+                        text: "当前方式：" + root.smartcut-modes[root.smartcut-mode] + "　·　" + (root.smartcut-precision == 0 ? "标准（快）" : "高精度（慢）");
+                        color: Theme.fg;
+                        font-size: Theme.fs;
+                        font-weight: Theme.weight-title;
+                    }
+                    SegmentedControl {
+                        options: ["标准（快）", "高精度（慢）"];
+                        current: root.smartcut-precision;
+                        changed(index) => { root.smartcut-precision = index; }
+                    }
+
+                    Text {
+                        text: "给平台的要求（可留空，按方式默认；写清时长、卖点、要保留/去掉什么更准）：";
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-xs;
+                    }
+                    Rectangle {
+                        height: 34px;
+                        border-radius: Theme.r;
+                        background: Theme.field;
+                        border-width: 1px;
+                        border-color: Theme.line-strong;
+
+                        req := TextInput {
+                            x: 8px;
+                            y: 0;
+                            width: parent.width - 16px;
+                            height: parent.height;
+                            text: root.smartcut-requirement;
+                            color: Theme.fg;
+                            font-size: Theme.fs;
+                            single-line: true;
+                            vertical-alignment: center;
+                            selection-background-color: Theme.accent;
+                            selection-foreground-color: Theme.on-accent;
+                            changed text => { root.smartcut-requirement = self.text; }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+                        ImportButton {
+                            label: root.smartcut-busy ? "平台处理中…" : "上传并出粗剪计划";
+                            busy: root.smartcut-busy;
+                            glyph: Glyph.wand;
+                            horizontal-stretch: 0;
+                            clicked => {
+                                root.smartcut-submit(
+                                    root.smartcut-modes[root.smartcut-mode],
+                                    root.smartcut-precision == 0 ? "standard" : "high",
+                                    root.smartcut-requirement);
+                            }
+                        }
+                        if root.smartcut-can-render: ImportButton {
+                            label: root.smartcut-busy ? "渲染中…" : "渲染成片";
+                            busy: root.smartcut-busy;
+                            glyph: Glyph.circle-play;
+                            horizontal-stretch: 0;
+                            clicked => { root.smartcut-render(); }
+                        }
+                        if root.smartcut-can-insert: ImportButton {
+                            label: "下载并插入时间轴";
+                            glyph: Glyph.import;
+                            horizontal-stretch: 0;
+                            clicked => { root.smartcut-insert(); }
+                        }
+                    }
+
+                    if root.smartcut-status != "": Text {
+                        text: "状态：" + root.smartcut-status;
+                        color: Theme.fg;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+
+                    if root.smartcut-busy || root.smartcut-stage != "": Text {
+                        text: (root.smartcut-stage == "" ? "处理中" : root.smartcut-stage)
+                            + "　" + Math.round(root.smartcut-progress * 100) + "%";
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                    }
+
+                    if root.smartcut-plan-title != "": Text {
+                        text: "计划：" + root.smartcut-plan-title;
+                        color: Theme.fg;
+                        font-size: Theme.fs;
+                        font-weight: Theme.weight-title;
+                        wrap: word-wrap;
+                    }
+
+                    for line[index] in root.smartcut-plan: Text {
+                        text: line;
+                        color: index == 0 ? Theme.fg-muted : Theme.fg;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+
+                    if root.smartcut-can-render: Text {
+                        text: "片段按平台给的顺序使用；渲染完成后点「下载并插入时间轴」，再在时间线上精剪。";
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-xs;
+                        wrap: word-wrap;
+                    }
+
+                    Text {
+                        text: "接口联调中/排队 429 时？用现成路径先出片：AI 工作室 · 一键成片（画面/配音/字幕一次配好，成片自动回素材库）。";
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+                    ImportButton {
+                        label: "用 AI 工作室成片";
+                        glyph: Glyph.sparkle;
+                        horizontal-stretch: 0;
+                        clicked => { root.open-smart-pack(); }
+                    }
+                    Text {
+                        text: "合规：上传的素材须为本人所有或已获授权；成片按平台规则带「AI 生成」标注。平台限制：3 秒–15 分钟、≤300MB、须有音轨；高峰限流。";
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-xs;
+                        wrap: word-wrap;
+                    }
+                }
                 // 素材库：搜索、网格、下载与插入时间轴。滚到哪、可视多高
                 // 传进去，网格才能只画可视区域的卡片（0.2.21 卡顿修复）。
                 if root.tab == 9: AssetPage {

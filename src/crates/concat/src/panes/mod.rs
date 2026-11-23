@@ -31,6 +31,8 @@ pub mod pace;
 pub mod project;
 pub mod relink;
 pub mod settings;
+/// 智能粗剪（0.3.2）：顶部 tab 的提交与状态。
+pub mod smartcut;
 pub mod sounds;
 pub mod speech;
 pub mod start;

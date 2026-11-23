@@ -78,6 +78,9 @@ pub mod reverse;
 pub mod sadtalker;
 mod route;
 pub mod session;
+/// 智能粗剪（0.3.2）：平台 `/smartcut/*` 的提交（后端并行开发，未就绪时
+/// 如实返回「接口联调中」）。
+pub mod smartcut;
 pub mod sounds;
 pub mod stabilize;
 pub mod templates;

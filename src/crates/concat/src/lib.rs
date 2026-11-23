@@ -699,6 +699,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
         editor.set_catalogue_transitions(ModelRc::from(models.catalogue_transitions.clone()));
         editor.set_effect_groups(ModelRc::from(models.effect_groups.clone()));
         editor.set_filter_groups(ModelRc::from(models.filter_groups.clone()));
+        editor.set_smartcut_plan(ModelRc::from(models.smartcut_segments.clone()));
         editor.set_audio_groups(ModelRc::from(models.audio_groups.clone()));
         editor.set_transition_groups(ModelRc::from(models.transition_groups.clone()));
         editor.set_applied_visual(ModelRc::from(models.applied_visual.clone()));
@@ -1578,6 +1579,38 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     }));
     editor.on_library_open_plugins(on_window!(|state| {
         state.handle(Msg::Ai(crate::panes::ai::AiMsg::OpenTab(2)));
+    }));
+    // 0.3.2：AI 编辑页的三条带路 + 模板页跳转 + 变速卡点 + 智能粗剪提交。
+    editor.on_open_templates(on_window!(|state| {
+        state.library_page = 6;
+        state.library_page_token += 1;
+    }));
+    editor.on_open_ai_studio(on_window!(|state, tab: i32| {
+        state.handle(Msg::AiStudio(
+            crate::panes::ai_studio::AiStudioMsg::Open(tab),
+        ));
+    }));
+    editor.on_speed_beat(on_lanes!(|state, bpm: f32, every: i32| {
+        state.speed_beat(bpm, every);
+    }));
+    editor.on_smartcut_pick(on_window!(|state| {
+        state.smartcut_pick();
+    }));
+    editor.on_smartcut_submit(on_window!(|state,
+                                         mode: SharedString,
+                                         precision: SharedString,
+                                         requirement: SharedString| {
+        state.smartcut_submit(
+            mode.to_string(),
+            precision.to_string(),
+            requirement.to_string(),
+        );
+    }));
+    editor.on_smartcut_render(on_window!(|state| {
+        state.smartcut_render();
+    }));
+    editor.on_smartcut_insert(on_window!(|state| {
+        state.smartcut_insert();
     }));
 
     // ── the inspector's effect stacks ──
@@ -3254,15 +3287,18 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                         "sort-kind" => state.handle(Msg::Media(MediaMsg::SortChanged(2))),
                         "zoom-in" => state.handle(Msg::Timeline(TimelineMsg::ZoomIn)),
                         "zoom-out" => state.handle(Msg::Timeline(TimelineMsg::ZoomOut)),
-                        // 0.3.1 布局预设：三套常用的 + 重置回默认。
+                        // 0.3.2 布局预设：剪映式三栏（右列永远是属性面板）+ 重置。
                         "layout-default" | "layout-reset" => {
                             state.set_wide_dock(crate::dock::default_dock());
-                        }
-                        "layout-media" => {
-                            state.set_wide_dock(crate::dock::media_first_dock());
+                            state.remember_layout_soon();
                         }
                         "layout-portrait" => {
                             state.set_wide_dock(crate::dock::portrait_right_dock());
+                            state.remember_layout_soon();
+                        }
+                        "layout-edit" => {
+                            state.set_wide_dock(crate::dock::timeline_first_dock());
+                            state.remember_layout_soon();
                         }
                         "start" => {
                             state.pause();

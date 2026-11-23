@@ -22,7 +22,9 @@ description = "The manual colour panel every picture clip carries: exposure, ton
 # 2: drawn in light. Exposure is in true stops of light, where it scaled
 # the display encoding, some 2.4 stops an EV; the rest reads as it did at
 # a moderate setting, without clipping.
-version = 2
+# 3 (0.3.2): HSL 八色相通道与美颜的磨皮/美白加进来；默认值都为 0，所以
+# 老工程打开时与从前一样。
+version = 3
 
 [[param]]
 key = "temperature"
@@ -148,6 +150,271 @@ unit = "%"
 key = "vignette"
 group = "Effects"
 label = "Vignette"
+min = 0
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+# 0.3.2：HSL 八色相通道。每个通道三个旋钮：色相（-100..100 → 转 ±50°）、
+# 饱和度（-100..100 → ×0..2）、明度（-100..100 → ×0.5..1.5）。渲染在
+# effect.wgsl 里逐带用 hsl_band 做，只动落在该色相带里的像素。
+[[param]]
+key = "hsl_red_hue"
+group = "HSL"
+label = "色相"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_red_sat"
+group = "HSL"
+label = "饱和度"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_red_lum"
+group = "HSL"
+label = "明度"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_orange_hue"
+group = "HSL"
+label = "色相"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_orange_sat"
+group = "HSL"
+label = "饱和度"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_orange_lum"
+group = "HSL"
+label = "明度"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_yellow_hue"
+group = "HSL"
+label = "色相"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_yellow_sat"
+group = "HSL"
+label = "饱和度"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_yellow_lum"
+group = "HSL"
+label = "明度"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_green_hue"
+group = "HSL"
+label = "色相"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_green_sat"
+group = "HSL"
+label = "饱和度"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_green_lum"
+group = "HSL"
+label = "明度"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_cyan_hue"
+group = "HSL"
+label = "色相"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_cyan_sat"
+group = "HSL"
+label = "饱和度"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_cyan_lum"
+group = "HSL"
+label = "明度"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_blue_hue"
+group = "HSL"
+label = "色相"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_blue_sat"
+group = "HSL"
+label = "饱和度"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_blue_lum"
+group = "HSL"
+label = "明度"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_purple_hue"
+group = "HSL"
+label = "色相"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_purple_sat"
+group = "HSL"
+label = "饱和度"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_purple_lum"
+group = "HSL"
+label = "明度"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_magenta_hue"
+group = "HSL"
+label = "色相"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_magenta_sat"
+group = "HSL"
+label = "饱和度"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "hsl_magenta_lum"
+group = "HSL"
+label = "明度"
+min = -100
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+# 0.3.2：美颜美体里本版真能做的两项（整画面）。瘦脸/大眼/身材需要人脸
+# 关键点模型，界面如实标「即将开放」，不带这两个参数。
+[[param]]
+key = "beauty_soften"
+group = "Beauty"
+label = "磨皮"
+min = 0
+max = 100
+default = 0
+step = 1
+unit = "%"
+
+[[param]]
+key = "beauty_whiten"
+group = "Beauty"
+label = "美白"
 min = 0
 max = 100
 default = 0

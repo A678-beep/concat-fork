@@ -154,6 +154,31 @@ export global Editor {
     callback library-open-digital-human();
     /// 插件页（0.3.1）：打开 AI 面板的本地插件页。
     callback library-open-plugins();
+    /// 模板页跳转（0.3.2）：AI 编辑的「结构编辑」把用户带到左侧模板页。
+    callback open-templates();
+    /// AI 工作室的某一页（0.3.2）：0 一键成片 / 2 爆款复刻。
+    callback open-ai-studio(tab: int);
+    /// 变速卡点（0.3.2）：按 BPM 往所选片段的速度曲线上插节拍点。
+    callback speed-beat(bpm: float, every: int);
+    /// 智能粗剪（0.3.2）：顶部 tab 的完整闭环——选本地视频、提交计划、渲染、
+    /// 下载插入。渠道是平台 /api/smartcut/*；下面几个属性给页面显示进度、
+    /// 计划片段与成片状态。
+    callback smartcut-pick();
+    callback smartcut-submit(mode: string, precision: string, requirement: string);
+    callback smartcut-render();
+    callback smartcut-insert();
+    in-out property <bool> smartcut-busy;
+    in-out property <string> smartcut-status;
+    in-out property <string> smartcut-video;
+    in-out property <string> smartcut-plan-title;
+    in-out property <[string]> smartcut-plan;
+    in-out property <float> smartcut-progress;
+    in-out property <string> smartcut-stage;
+    in-out property <bool> smartcut-can-render;
+    in-out property <bool> smartcut-can-insert;
+    /// 左侧页跳转（0.3.2）：token 变一次跳一次，page 是页号（模板 = 6）。
+    in-out property <int> library-page: 0;
+    in-out property <int> library-page-token;
 
     // ── the inspector ──
     in-out property <SelectedClipData> selected-clip;
