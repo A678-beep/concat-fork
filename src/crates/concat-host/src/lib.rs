@@ -68,6 +68,9 @@ pub mod playback;
 /// 专业后期底座（0.3.6）：平台 `/api/post/*` 与本地 EDL / OTIO / QC /
 /// 交付包的兜底。
 pub mod post;
+/// 影视专业面板（0.3.7）：导演编排 / 监视 / 发行 / 护照 / 沙盘 / 插件 /
+/// 模板 / 统一任务中心的平台接口与本机任务记录。
+pub mod pro;
 /// 本地 AI 插件：安装、导入、删除、扫描。
 pub mod plugins;
 pub mod preview;

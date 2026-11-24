@@ -53,6 +53,9 @@ mod platform;
 /// 专业后期底座（0.3.6）：示波器 / 色彩管理 / QC / 媒体校验 / 快照 /
 /// 交付包，以及命令面板；窗口这一半。
 mod post;
+/// 影视专业面板（0.3.7）：导演编排 / 监视 / 发行 / 护照 / 沙盘 / 插件 /
+/// 素材库 / 模板 / 统一任务中心；窗口这一半。
+mod pro;
 /// How a phone keeps its screen on while a job runs; see
 /// `concat_host::awake`.
 #[cfg(target_os = "android")]
@@ -1036,6 +1039,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     });
     app.set_own_window_buttons(platform::OWN_WINDOW_BUTTONS);
 
+    // 影视专业面板（0.3.7）：启动时只写一份空的、未打开的表；不联网。
+    crate::pro::initialize(&app);
+
     // Mutate, then republish. Every handler is one of these three: the whole
     // window, the lanes alone (for the handlers a pointer drives directly,
     // which arrive as a stream), or the dock alone (a gutter drag).
@@ -1056,6 +1062,11 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                     }
                     shell.studio.borrow_mut().refresh_art();
                     shell.studio.borrow().$publish(&app, &shell.models);
+                    // 创作中心 / 菜单里点了某块专业面板：等 Studio 的借还
+                    // 都放掉之后再把面板打开（它会再借一次 Studio 取数）。
+                    if let Some(tab) = crate::pro::take_wanted() {
+                        crate::pro::open(app.as_weak(), tab);
+                    }
                 });
             }
         }};
@@ -1339,6 +1350,22 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     {
         let weak = app.as_weak();
         app.on_palette_chosen(move |id| post::palette_chosen(weak.clone(), id.to_string()));
+    }
+
+    // 影视专业面板（0.3.7）：九页一张大表，动作一条回调；Timer 走 pro-tick。
+    {
+        let weak = app.as_weak();
+        app.on_pro_closed(move || pro::close(weak.clone()));
+    }
+    {
+        let weak = app.as_weak();
+        app.on_pro_action(move |action, index, text| {
+            pro::action(weak.clone(), action.to_string(), index, text.to_string())
+        });
+    }
+    {
+        let weak = app.as_weak();
+        app.on_pro_tick(move || pro::tick(weak.clone()));
     }
 
     // ── 星籁 AI ──
@@ -3463,6 +3490,8 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                 let mut interop_action = 0u8;
                 // 0.3.6 专业后期：菜单行的动作等 Studio 的 borrow 放掉再做。
                 let mut post_action: Option<(String, i32)> = None;
+                // 0.3.7 影视专业：菜单行记下要开哪一页，借还之后再开。
+                let mut pro_action: Option<i32> = None;
                 let mut palette_action = false;
                 let mut shortcuts_page = false;
                 {
@@ -3702,6 +3731,16 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                         "checks" => post_action = Some(("panel".to_owned(), 3)),
                         "snapshots" => post_action = Some(("panel".to_owned(), 4)),
                         "handoff" => post_action = Some(("handoff".to_owned(), 5)),
+                        // 0.3.7 影视专业面板：九页一个菜单。
+                        "pro-orchestrator" => pro_action = Some(0),
+                        "pro-monitor" => pro_action = Some(1),
+                        "pro-distribution" => pro_action = Some(2),
+                        "pro-passport" => pro_action = Some(3),
+                        "pro-sandbox" => pro_action = Some(4),
+                        "pro-plugins" => pro_action = Some(5),
+                        "pro-assets" => pro_action = Some(6),
+                        "pro-templates" => pro_action = Some(7),
+                        "pro-tasks" => pro_action = Some(8),
                         "command-palette" => palette_action = true,
                         "shortcuts-page" => shortcuts_page = true,
                         "layout-save" => {
@@ -3769,6 +3808,10 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                     } else {
                         post::open_tab(weak, tab);
                     }
+                }
+                // 0.3.7 影视专业：面板自己借 Studio 取数，等这一步的借用放掉。
+                if let Some(tab) = pro_action {
+                    pro::open(app.as_weak(), tab);
                 }
             });
         }

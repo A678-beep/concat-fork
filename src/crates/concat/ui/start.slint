@@ -2034,6 +2034,158 @@ component AccountMenu inherits Rectangle {
     }
 }
 
+// 创作中心左侧导航（0.3.7）：影视专业九块原生面板的入口。
+// 每项是「图标 + 名称 + 一句话」，点一下由 Rust 打开对应的桌面面板。
+component ProNavItem inherits Rectangle {
+    in property <string> label;
+    in property <string> note;
+    in property <Glyph> glyph;
+    in property <bool> current;
+
+    callback picked();
+
+    height: 38px;
+    border-radius: Theme.r;
+    background: root.current ? Theme.accent-soft : (touch.has-hover ? Theme.field-hover : transparent);
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 6px;
+        spacing: 7px;
+
+        Icon {
+            glyph: root.glyph;
+            size: 13px;
+            tint: root.current ? Theme.accent : Theme.fg-muted;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            vertical-stretch: 1;
+
+            Text {
+                text: root.label;
+                color: root.current ? Theme.fg : Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                font-weight: root.current ? Theme.weight-title : Theme.weight-body;
+            }
+
+            Text {
+                text: root.note;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                overflow: elide;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+}
+
+component ProNav inherits Rectangle {
+    in property <length> nav-width;
+
+    callback link(name: string);
+
+    width: root.nav-width;
+    background: Theme.launch-panel;
+    border-radius: 28px;
+
+    VerticalLayout {
+        padding: 9px;
+        spacing: 1px;
+
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 6px;
+            Text {
+                text: "创作中心";
+                color: Theme.fg;
+                font-size: Theme.fs-sm;
+                font-weight: Theme.weight-title;
+            }
+        }
+
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 6px;
+            padding-bottom: 4px;
+            Text {
+                text: "影视专业 · 桌面原生";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                wrap: word-wrap;
+            }
+        }
+
+        ProNavItem {
+            label: "导演编排器";
+            note: "分镜 → plan → 生成";
+            glyph: Glyph.film;
+            picked => { root.link("pro-orchestrator"); }
+        }
+
+        ProNavItem {
+            label: "导演监视器";
+            note: "take 审片 · 连续性";
+            glyph: Glyph.eye;
+            picked => { root.link("pro-monitor"); }
+        }
+
+        ProNavItem {
+            label: "发行中心";
+            note: "短剧 → 发行包";
+            glyph: Glyph.distribute;
+            picked => { root.link("pro-distribution"); }
+        }
+
+        ProNavItem {
+            label: "授权护照";
+            note: "哈希链 + 签名";
+            glyph: Glyph.link;
+            picked => { root.link("pro-passport"); }
+        }
+
+        ProNavItem {
+            label: "合规沙盘";
+            note: "风险分 · 整改复评";
+            glyph: Glyph.check;
+            picked => { root.link("pro-sandbox"); }
+        }
+
+        ProNavItem {
+            label: "插件市场";
+            note: "安装 · 配置 · 运行";
+            glyph: Glyph.sparkle;
+            picked => { root.link("pro-plugins"); }
+        }
+
+        ProNavItem {
+            label: "素材库";
+            note: "搜索 · 授权 · 插时间线";
+            glyph: Glyph.image;
+            picked => { root.link("pro-assets"); }
+        }
+
+        ProNavItem {
+            label: "模板市场";
+            note: "一键套用生成";
+            glyph: Glyph.copy;
+            picked => { root.link("pro-templates"); }
+        }
+
+        ProNavItem {
+            label: "统一任务中心";
+            note: "AI / 渲染任务";
+            glyph: Glyph.clock;
+            picked => { root.link("pro-tasks"); }
+        }
+    }
+}
+
 component WideHome inherits Rectangle {
     in property <[RecentProjectData]> recents;
     in property <int> recents-total;
@@ -2084,11 +2236,16 @@ component WideHome inherits Rectangle {
     property <length> aside-gap: 40px;
     property <length> main-w: root.aside ? root.content-w - root.aside-w - root.aside-gap
         : root.content-w;
+    /// 创作中心左侧导航（0.3.7）：宽屏才出现；正文让出它的宽度。
+    property <bool> pro-nav: root.aside && root.content-w >= 1180px;
+    property <length> nav-w: root.pro-nav ? 184px : 0px;
+    property <length> nav-gap: root.pro-nav ? 18px : 0px;
+    property <length> body-w: root.main-w - root.nav-w - root.nav-gap;
     /// The create row shares its width by weight - New a third again as
     /// wide as the others - and not by what its words would like, so a
     /// longer line on one tile does not shoulder the others aside.
     property <int> extra-tiles: root.capcut ? 1 : 0;
-    property <length> tile-unit: (root.main-w - (1 + root.extra-tiles) * 14px)
+    property <length> tile-unit: (root.body-w - (1 + root.extra-tiles) * 14px)
         / (2.3 + root.extra-tiles);
     property <bool> searchable: root.recents-total > 8;
 
@@ -2102,12 +2259,22 @@ component WideHome inherits Rectangle {
             y: root.pad-top;
             width: root.content-w;
             height: Math.max(main.preferred-height,
+                root.pro-nav ? nav.preferred-height : 0px,
                 root.aside ? side.y + side-body.preferred-height : 0px);
 
-            main := VerticalLayout {
+            nav := ProNav {
                 x: 0;
                 y: 0;
-                width: root.main-w;
+                width: root.nav-w;
+                nav-width: root.nav-w;
+                visible: root.pro-nav;
+                link(name) => { root.link(name); }
+            }
+
+            main := VerticalLayout {
+                x: root.pro-nav ? root.nav-w + root.nav-gap : 0;
+                y: 0;
+                width: root.body-w;
                 height: self.preferred-height;
                 alignment: start;
 
@@ -2168,10 +2335,10 @@ component WideHome inherits Rectangle {
                         // way the website sets its headline: medium weight,
                         // tight tracking, the ink running into the accent.
                         color: @linear-gradient(90deg, Theme.fg 0%, Theme.fg 25%, Theme.accent.mix(Theme.fg, 0.6) 100%);
-                        font-size: Math.max(40px, Math.min(60px, root.main-w / 16));
+                        font-size: Math.max(40px, Math.min(60px, root.body-w / 16));
                         font-weight: 500;
                         letter-spacing: -1.6px;
-                        max-width: root.main-w;
+                        max-width: root.body-w;
                         wrap: word-wrap;
                     }
                 }
@@ -2234,7 +2401,7 @@ component WideHome inherits Rectangle {
                     // Past a page of them: by the time there are more
                     // than a screen holds, the eye is not a search.
                     if root.searchable: SearchField {
-                        width: Math.min(260px, root.main-w * 0.32);
+                        width: Math.min(260px, root.body-w * 0.32);
                         text: root.query;
                         placeholder: I18n.t("start.searchProjects");
                         edited(text) => { root.search-edited(text); }

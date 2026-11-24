@@ -414,10 +414,47 @@ impl StartPane {
                         return;
                     }
                     "tasks" => {
-                        studio.notify(
-                            "任务在各自面板里看进度：AI 工作室 / AI 短剧 / 电影·剧集向导的「生成」；统一任务中心下一版接",
-                            false,
-                        );
+                        // 0.3.7：统一任务中心已经是桌面原生页（本机记录 +
+                        // 平台导演/电影任务），不再只给位置提示。
+                        crate::pro::want(8);
+                        studio.notify("已打开统一任务中心", false);
+                        return;
+                    }
+                    // 0.3.7 影视专业：创作中心左侧导航 / 菜单都走这条。
+                    "pro-orchestrator" => {
+                        crate::pro::want(0);
+                        return;
+                    }
+                    "pro-monitor" => {
+                        crate::pro::want(1);
+                        return;
+                    }
+                    "pro-distribution" => {
+                        crate::pro::want(2);
+                        return;
+                    }
+                    "pro-passport" => {
+                        crate::pro::want(3);
+                        return;
+                    }
+                    "pro-sandbox" => {
+                        crate::pro::want(4);
+                        return;
+                    }
+                    "pro-plugins" | "plugins" => {
+                        crate::pro::want(5);
+                        return;
+                    }
+                    "pro-assets" | "assets" => {
+                        crate::pro::want(6);
+                        return;
+                    }
+                    "pro-templates" | "templates" => {
+                        crate::pro::want(7);
+                        return;
+                    }
+                    "pro-tasks" => {
+                        crate::pro::want(8);
                         return;
                     }
                     "edit" => {

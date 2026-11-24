@@ -360,18 +360,34 @@ export component TitleBar inherits Rectangle {
             }
         }
 
-        // 帮助：设置/诊断/缓存/快捷键/关于/开源许可。剪映 11.9 把菜单压到 7
-        // 项，我们补的是「用户要找但剪映塞进面板」的那几件，不改信息架构。
-        if !root.minimal && !root.covered: help-menu := MenuLabel {
-            label: I18n.t("titleBar.help");
+        // 影视专业（0.3.7）：导演编排 / 监视 / 发行 / 护照 / 沙盘 / 插件 /
+        // 素材库 / 模板 / 统一任务中心，九块原生面板一个菜单进。
+        if !root.minimal && !root.covered: pro-menu := MenuLabel {
+            label: "影视专业";
             current: root.menu == 6;
             clicked => {
-                root.menu-opened(6, help-menu.absolute-position.x - root.absolute-position.x, false);
+                root.menu-opened(6, pro-menu.absolute-position.x - root.absolute-position.x, false);
             }
             property <int> asked: root.keyboard-token;
             changed asked => {
                 if (root.keyboard-menu == 6) {
-                    root.menu-opened(6, help-menu.absolute-position.x - root.absolute-position.x, true);
+                    root.menu-opened(6, pro-menu.absolute-position.x - root.absolute-position.x, true);
+                }
+            }
+        }
+
+        // 帮助：设置/诊断/缓存/快捷键/关于/开源许可。剪映 11.9 把菜单压到 7
+        // 项，我们补的是「用户要找但剪映塞进面板」的那几件，不改信息架构。
+        if !root.minimal && !root.covered: help-menu := MenuLabel {
+            label: I18n.t("titleBar.help");
+            current: root.menu == 7;
+            clicked => {
+                root.menu-opened(7, help-menu.absolute-position.x - root.absolute-position.x, false);
+            }
+            property <int> asked: root.keyboard-token;
+            changed asked => {
+                if (root.keyboard-menu == 7) {
+                    root.menu-opened(7, help-menu.absolute-position.x - root.absolute-position.x, true);
                 }
             }
         }

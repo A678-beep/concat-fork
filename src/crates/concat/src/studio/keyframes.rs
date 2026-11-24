@@ -3213,9 +3213,79 @@ impl Studio {
                     true,
                 ),
             ],
+            // 影视专业（0.3.7）：九块原生面板，一个菜单进（网页平台的专业
+            // 影视能力搬进桌面，全部真实调已上线接口）。
+            6 => vec![
+                row(
+                    "pro-orchestrator",
+                    "导演编排器（分镜 → 计划 → 生成）".to_owned(),
+                    Glyph::Film,
+                    "",
+                    true,
+                ),
+                row(
+                    "pro-monitor",
+                    "导演监视器（take 审片 · 连续性）".to_owned(),
+                    Glyph::Eye,
+                    "",
+                    true,
+                ),
+                rule(),
+                row(
+                    "pro-distribution",
+                    "发行中心（短剧 → 发行包）".to_owned(),
+                    Glyph::Distribute,
+                    "",
+                    true,
+                ),
+                row(
+                    "pro-passport",
+                    "授权护照（哈希链 + 签名）".to_owned(),
+                    Glyph::Link,
+                    "",
+                    true,
+                ),
+                row(
+                    "pro-sandbox",
+                    "合规沙盘（风险分 · 整改复评）".to_owned(),
+                    Glyph::Check,
+                    "",
+                    true,
+                ),
+                rule(),
+                row(
+                    "pro-plugins",
+                    "插件市场（安装 · 配置 · 运行）".to_owned(),
+                    Glyph::Sparkle,
+                    "",
+                    true,
+                ),
+                row(
+                    "pro-assets",
+                    "素材库（搜索 · 授权 · 插时间线）".to_owned(),
+                    Glyph::Image,
+                    "",
+                    true,
+                ),
+                row(
+                    "pro-templates",
+                    "模板市场（一键套用生成）".to_owned(),
+                    Glyph::Copy,
+                    "",
+                    true,
+                ),
+                rule(),
+                row(
+                    "pro-tasks",
+                    "统一任务中心（AI / 渲染任务）".to_owned(),
+                    Glyph::Clock,
+                    "",
+                    true,
+                ),
+            ],
             // 帮助：剪映 11.9 把菜单压到 7 项，把很多事塞进面板；我们补的是
             // 用户真会去找的那几件（设置/诊断/缓存/快捷键/关于/开源许可）。
-            6 => vec![
+            7 => vec![
                 row(
                     "help-guides",
                     "使用教程（在线）".to_owned(),

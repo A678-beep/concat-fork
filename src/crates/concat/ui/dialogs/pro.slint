@@ -1,0 +1,2824 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 XingLai contributors
+
+// 星籁剪辑 0.3.7 影视专业面板：把网页平台的专业影视能力全搬进桌面原生面板。
+//
+// 九块面板在左侧一张竖排导航里（导演编排器 / 导演监视器 / 发行中心 /
+// 授权护照 / 合规沙盘 / 插件市场 / 素材库 / 模板市场 / 统一任务中心）。
+// 全部真实调平台已上线接口；每个面板顶部写明这次用的是哪个接口，接口报错
+// 时给「打开网页版」的兜底入口，不做假按钮。
+//
+// 数据由 Rust 写进 ProData 与各张表；面板上每个动作（点页签、输入、按钮）
+// 都汇总成一条 action(action, index, text) 回调，与电影向导 / 后期面板同一
+// 种接法。这里只负责画和收手势，不做网络请求。
+
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { Button, Field, Modal, Progress } from "../primitives/modal.slint";
+import { Select } from "../primitives/select.slint";
+import { PaneScroll } from "../workspace/pane.slint";
+import { Assets, AssetPage } from "../workspace/asset-page.slint";
+
+// ── 行数据结构 ───────────────────────────────────────────────────────
+
+/// 一行通用数据：列表 / 文件清单 / 步骤 / 审计 / 历史。
+export struct ProRow {
+    label: string,
+    detail: string,
+    value: string,
+    /// ok / warn / fail / info / on / ""
+    level: string,
+}
+
+/// 编排器里可编辑的一个分镜。
+export struct ProShotRow {
+    no: int,
+    label: string,
+    scene: string,
+    line: string,
+    dur: string,
+}
+
+/// plan 结果里的一镜：模型 / 成本 / 降级警告。
+export struct ProPlanShot {
+    no: int,
+    label: string,
+    title: string,
+    model: string,
+    cost: string,
+    detail: string,
+    level: string,
+}
+
+/// 模型能力矩阵的一行。
+export struct ProModelRow {
+    group: string,
+    name: string,
+    vendor: string,
+    status: string,
+    detail: string,
+    level: string,
+}
+
+/// 三档定价的一行。
+export struct ProTierRow {
+    key: string,
+    label: string,
+    desc: string,
+    per-shot: string,
+    ep120: string,
+    ep180: string,
+    effective: string,
+    downgrade: string,
+    hot: bool,
+}
+
+/// 统一任务中心的一行。
+export struct ProTaskRow {
+    id: string,
+    module: string,
+    title: string,
+    status: string,
+    progress: float,
+    cost: string,
+    detail: string,
+    level: string,
+    has-file: bool,
+    can-open: bool,
+}
+
+/// 监视器状态板上的一张镜头卡。
+export struct ProBoardShot {
+    id: string,
+    no: string,
+    title: string,
+    meta: string,
+    status: string,
+    flags: string,
+    level: string,
+}
+
+/// 模板市场的一行。
+export struct ProTemplateRow {
+    id: string,
+    name: string,
+    meta: string,
+    detail: string,
+    level: string,
+}
+
+/// 插件市场的一行。
+export struct ProPluginRow {
+    id: string,
+    name: string,
+    meta: string,
+    description: string,
+    quality: string,
+    installed: bool,
+    official: bool,
+}
+
+/// 合规沙盘的一条问题。
+export struct ProFinding {
+    level: string,
+    title: string,
+    category: string,
+    position: string,
+    quote: string,
+    basis: string,
+    why: string,
+    suggest: string,
+}
+
+/// 影视专业面板的全部状态。字段由 Rust 写。
+export struct ProData {
+    open: bool,
+    /// 0 编排器 / 1 监视器 / 2 发行 / 3 护照 / 4 沙盘 / 5 插件 / 6 素材库 /
+    /// 7 模板 / 8 任务中心
+    tab: int,
+    busy: bool,
+    signed-in: bool,
+    /// 账号 / 平台一句话状态。
+    status-line: string,
+    /// ok / warn / fail
+    status-level: string,
+    /// 当前页的接口说明。
+    hint: string,
+
+    // ── 导演编排器 ──
+    orch-tier: int,
+    orch-budget: string,
+    orch-title: string,
+    orch-plan-line: string,
+    orch-plan-budget: string,
+    orch-plan-level: string,
+    orch-budget-ok: bool,
+    orch-run-line: string,
+    orch-run-progress: float,
+    orch-run-status: string,
+    orch-task-line: string,
+    orch-film-url: string,
+    orch-pack-url: string,
+    orch-shot-count: int,
+
+    // ── 导演监视器 ──
+    mon-project: string,
+    mon-episode: string,
+    mon-type: int,
+    mon-type-line: string,
+    mon-board-line: string,
+    mon-progress: float,
+    mon-budget-line: string,
+    mon-counts: string,
+    mon-shot-line: string,
+    mon-shot-title: string,
+    mon-shot-meta: string,
+    mon-take-url: string,
+    mon-take-line: string,
+    mon-note-text: string,
+    mon-note-line: string,
+    mon-retake-prompt: string,
+    mon-retake-tier: int,
+    mon-retake-line: string,
+    mon-cont-line: string,
+    mon-queue-line: string,
+    mon-audit-line: string,
+
+    // ── 发行中心 ──
+    dist-drama: int,
+    dist-pick: int,
+    dist-platform: int,
+    dist-lang: int,
+    dist-line: string,
+    dist-file-line: string,
+    dist-url: string,
+    dist-views: string,
+    dist-likes: string,
+    dist-conversions: string,
+    dist-publish-url: string,
+    dist-stats-line: string,
+
+    // ── 授权护照 ──
+    pass-mode: int,
+    pass-asset-id: string,
+    pass-asset-url: string,
+    pass-project: string,
+    pass-pack: string,
+    pass-title: string,
+    pass-client: string,
+    pass-line: string,
+    pass-verify-line: string,
+    pass-verify-id: string,
+    pass-sha: string,
+    pass-id: string,
+    pass-zip-url: string,
+    pass-json-path: string,
+
+    // ── 合规沙盘 ──
+    sb-content: string,
+    sb-type: int,
+    sb-platform: int,
+    sb-ai: bool,
+    sb-line: string,
+    sb-score: int,
+    sb-grade: string,
+    sb-summary: string,
+    sb-stats: string,
+    sb-rewrite: string,
+    sb-ai-line: string,
+    sb-history-line: string,
+    sb-check-id: string,
+
+    // ── 插件市场 ──
+    plug-query: string,
+    plug-line: string,
+    plug-selected: string,
+    plug-detail-line: string,
+    plug-detail-desc: string,
+    plug-detail-meta: string,
+    plug-schema: string,
+    plug-config-json: string,
+    plug-run-json: string,
+    plug-output: string,
+    plug-runs-line: string,
+    plug-installed: bool,
+    plug-enabled: bool,
+    plug-runnable: bool,
+
+    // ── 素材库 ──
+    asset-industry: int,
+    asset-line: string,
+
+    // ── 模板市场 ──
+    tpl-industry: int,
+    tpl-scene: int,
+    tpl-line: string,
+    tpl-detail-line: string,
+    tpl-detail-desc: string,
+    tpl-store: string,
+    tpl-product: string,
+    tpl-points: string,
+    tpl-copy: string,
+    tpl-duration: int,
+    tpl-quality: int,
+    tpl-gen-line: string,
+    tpl-gen-progress: float,
+    tpl-run: int,
+    tpl-video-url: string,
+    tpl-download-url: string,
+    tpl-fav: bool,
+    tpl-selected: string,
+
+    // ── 统一任务中心 ──
+    task-line: string,
+    task-count: int,
+}
+
+// ── 基础构件 ─────────────────────────────────────────────────────────
+
+component NavItem inherits Rectangle {
+    in property <string> label;
+    in property <string> note;
+    in property <Glyph> glyph;
+    in property <bool> current;
+
+    callback picked();
+
+    height: 44px;
+    border-radius: Theme.r;
+    background: root.current ? Theme.accent-soft : (touch.has-hover ? Theme.field-hover : transparent);
+    border-width: 1px;
+    border-color: root.current ? Theme.accent : transparent;
+
+    HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 7px;
+        spacing: 8px;
+
+        Icon {
+            glyph: root.glyph;
+            size: 14px;
+            tint: root.current ? Theme.accent : Theme.fg-muted;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            vertical-stretch: 1;
+
+            Text {
+                text: root.label;
+                color: root.current ? Theme.fg : Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                font-weight: root.current ? Theme.weight-title : Theme.weight-body;
+            }
+
+            if root.note != "": Text {
+                text: root.note;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                overflow: elide;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+}
+
+component Card inherits Rectangle {
+    in property <string> title;
+
+    background: Theme.panel;
+    border-radius: Theme.r;
+    border-width: 1px;
+    border-color: Theme.line;
+
+    VerticalLayout {
+        padding: 11px;
+        spacing: 7px;
+
+        if root.title != "": Text {
+            text: root.title;
+            color: Theme.fg;
+            font-size: Theme.fs-lg;
+            font-weight: Theme.weight-title;
+        }
+
+        @children
+    }
+}
+
+component Hint inherits Text {
+    color: Theme.fg-muted;
+    font-size: Theme.fs-sm;
+    wrap: word-wrap;
+}
+
+component Note inherits Text {
+    color: Theme.fg-dim;
+    font-size: Theme.fs-xs;
+    wrap: word-wrap;
+}
+
+component KV inherits HorizontalLayout {
+    in property <string> k;
+    in property <string> v;
+    in property <color> ink: Theme.fg;
+
+    spacing: 6px;
+    height: 22px;
+
+    Text {
+        text: root.k;
+        color: Theme.fg-dim;
+        font-size: Theme.fs-sm;
+        vertical-alignment: center;
+        min-width: 92px;
+    }
+
+    Text {
+        horizontal-stretch: 1;
+        text: root.v;
+        color: root.ink;
+        font-size: Theme.fs-sm;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+// 一行结果：列表 / 文件 / 历史 / 校验行。
+component LineRow inherits Rectangle {
+    in property <ProRow> entry;
+    in property <bool> clickable: false;
+    in property <string> action-label: "";
+
+    callback picked();
+    callback acted();
+
+    height: 32px;
+    border-radius: Theme.r-sm;
+    background: touch.has-hover ? Theme.field-hover : Theme.field;
+
+    HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 6px;
+        spacing: 8px;
+
+        Text {
+            width: 12px;
+            text: root.entry.level == "fail" ? "!" : (root.entry.level == "warn" ? "!" : (root.entry.level == "on" ? "✓" : "·"));
+            color: root.entry.level == "fail" ? Theme.danger
+                : (root.entry.level == "warn" ? Theme.accent
+                : (root.entry.level == "on" ? Theme.accent : Theme.fg-dim));
+            font-size: Theme.fs-sm;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.entry.label;
+            color: Theme.fg;
+            font-size: Theme.fs-sm;
+            vertical-alignment: center;
+            overflow: elide;
+            min-width: 120px;
+        }
+
+        Text {
+            horizontal-stretch: 1;
+            text: root.entry.detail;
+            color: Theme.fg-muted;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        if root.entry.value != "": Text {
+            text: root.entry.value;
+            color: Theme.accent;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+            overflow: elide;
+            max-width: 220px;
+        }
+
+        if root.action-label != "": Button {
+            label: root.action-label;
+            ghost: true;
+            clicked => { root.acted(); }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            if (root.clickable) { root.picked(); }
+        }
+    }
+}
+
+component PageHead inherits HorizontalLayout {
+    in property <string> title;
+    in property <string> note;
+
+    callback web();
+    callback close();
+
+    height: 34px;
+    spacing: 10px;
+
+    Text {
+        text: root.title;
+        color: Theme.fg;
+        font-size: Theme.fs-xl;
+        font-weight: Theme.weight-title;
+        vertical-alignment: center;
+    }
+
+    Text {
+        horizontal-stretch: 1;
+        text: root.note;
+        color: Theme.fg-dim;
+        font-size: Theme.fs-xs;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Button {
+        label: "打开网页版";
+        ghost: true;
+        clicked => { root.web(); }
+    }
+
+    Button {
+        label: "关闭";
+        clicked => { root.close(); }
+    }
+}
+
+component StatusBar inherits Rectangle {
+    in property <string> line;
+    in property <string> level: "info";
+
+    height: root.line == "" ? 0px : 30px;
+    visible: root.line != "";
+    border-radius: Theme.r-sm;
+    background: root.level == "fail" ? Theme.danger-soft
+        : (root.level == "warn" ? Theme.field-hover : Theme.field);
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+
+        Text {
+            vertical-stretch: 1;
+            text: root.line;
+            color: root.level == "fail" ? Theme.danger : Theme.fg;
+            font-size: Theme.fs-sm;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+}
+
+// 多行输入（合规文案 / 插件 JSON / 模板卖点）。
+component AreaText inherits Rectangle {
+    in property <string> value;
+    in property <string> placeholder;
+    in property <length> box-height: 92px;
+    callback edited(text: string);
+
+    property <string> draft;
+    init => { root.draft = root.value; }
+    changed value => { if (!input.has-focus) { root.draft = root.value; } }
+
+    min-height: root.box-height;
+    max-height: root.box-height;
+    background: Theme.field;
+    border-radius: Theme.r;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : transparent;
+    clip: true;
+
+    input := TextInput {
+        x: 9px;
+        y: 7px;
+        width: parent.width - 18px;
+        height: parent.height - 14px;
+        text <=> root.draft;
+        edited => { root.edited(self.text); }
+        color: Theme.fg;
+        font-size: Theme.fs-sm;
+        single-line: false;
+        wrap: word-wrap;
+        selection-background-color: Theme.accent;
+        selection-foreground-color: Theme.on-accent;
+    }
+
+    if root.draft == "" && !input.has-focus: Text {
+        x: 9px;
+        y: 7px;
+        width: parent.width - 18px;
+        text: root.placeholder;
+        color: Theme.fg-dim;
+        font-size: Theme.fs-sm;
+        wrap: word-wrap;
+    }
+}
+
+component Tag inherits Rectangle {
+    in property <string> label;
+    in property <bool> hot: false;
+
+    height: 18px;
+    border-radius: 9px;
+    background: root.hot ? Theme.accent-soft : Theme.field;
+    border-width: 1px;
+    border-color: root.hot ? Theme.accent : Theme.line;
+
+    Text {
+        x: 7px;
+        y: (parent.height - self.height) / 2;
+        text: root.label;
+        color: root.hot ? Theme.accent : Theme.fg-muted;
+        font-size: Theme.fs-xs;
+    }
+}
+
+// ── ① 导演编排器 ─────────────────────────────────────────────────────
+
+component OrchestratorPage inherits VerticalLayout {
+    in property <ProData> data;
+    in property <[ProShotRow]> text-shots;
+    in property <[ProPlanShot]> plan-shots;
+    in property <[ProModelRow]> models;
+    in property <[ProTierRow]> tiers;
+
+    callback act(action: string, index: int, text: string);
+
+    spacing: 8px;
+
+    PageHead {
+        title: "导演编排器";
+        note: "分镜 → 路由计划（每镜模型 / 成本 / 降级警告）→ 真实生成 → 逐镜进度 → 成片 / 工程包。接口 /api/director/{plan,run,task,models,pricing}。";
+        web => { root.act("web", 0, ""); }
+        close => { root.act("close", 0, ""); }
+    }
+
+    // 档位 / 预算 / 标题
+    Card {
+        title: "档位与预算（plan 不产生费用；run 才真实调用模型）";
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Text {
+                text: "档位";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+            }
+
+            for tier[index] in root.tiers: Button {
+                label: tier.label + " · " + tier.per-shot;
+                ghost: root.data.orch-tier != index;
+                primary: root.data.orch-tier == index;
+                clicked => { root.act("orch-tier", index, ""); }
+            }
+
+            Text {
+                text: "预算 ¥";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+            }
+
+            Field {
+                width: 96px;
+                value: root.data.orch-budget;
+                placeholder: "10";
+                edited(text) => { root.act("orch-budget", 0, text); }
+            }
+
+            Field {
+                horizontal-stretch: 1;
+                value: root.data.orch-title;
+                placeholder: "片名";
+                edited(text) => { root.act("orch-title", 0, text); }
+            }
+
+            Button {
+                label: "载入模型矩阵 / 三档定价";
+                ghost: true;
+                clicked => { root.act("orch-models", 0, ""); }
+            }
+
+            Button {
+                label: "生成路由计划";
+                primary: true;
+                enabled: !root.data.busy && root.data.orch-shot-count > 0;
+                clicked => { root.act("orch-plan", 0, ""); }
+            }
+
+            Button {
+                label: "开始真实生成";
+                danger: true;
+                enabled: root.data.orch-budget-ok && root.data.orch-plan-line != "" && !root.data.busy;
+                clicked => { root.act("orch-run", 0, ""); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Hint {
+                horizontal-stretch: 1;
+                text: root.data.orch-plan-budget;
+            }
+
+            Text {
+                text: "降级链（不可用自动换下一个）";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // 分镜表
+    Card {
+        title: "分镜表（\{root.data.orch-shot-count} 镜 · 单任务上限 80 镜）";
+
+        for shot[index] in root.text-shots: HorizontalLayout {
+            spacing: 6px;
+
+            Text {
+                width: 34px;
+                text: shot.label;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-xs;
+                vertical-alignment: center;
+            }
+
+            Field {
+                horizontal-stretch: 1;
+                value: shot.scene;
+                placeholder: "镜头描述：雨夜，外卖箱雨珠特写，路灯昏黄";
+                edited(text) => { root.act("orch-shot-scene", index, text); }
+            }
+
+            Field {
+                width: 220px;
+                value: shot.line;
+                placeholder: "台词（可空）";
+                edited(text) => { root.act("orch-shot-line", index, text); }
+            }
+
+            Field {
+                width: 58px;
+                value: shot.dur;
+                placeholder: "5";
+                edited(text) => { root.act("orch-shot-dur", index, text); }
+            }
+
+            Button {
+                label: "删";
+                ghost: true;
+                clicked => { root.act("orch-del-shot", index, ""); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Button {
+                label: "加一镜";
+                ghost: true;
+                clicked => { root.act("orch-add-shot", 0, ""); }
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: "plan 会按档位给每镜选模型：首镜起锚、对白镜走口型、动作镜控时长；目标模型未配置 / 未开通时写明降级到哪个模型。";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                wrap: word-wrap;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // plan / run 结果
+    HorizontalLayout {
+        spacing: 8px;
+        vertical-stretch: 1;
+
+        VerticalLayout {
+            width: 55%;
+            spacing: 8px;
+
+            Card {
+                title: "路由计划（每镜模型 / 成本 / 降级警告）";
+
+                Text {
+                    text: root.data.orch-plan-line;
+                    color: Theme.fg;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: root.data.orch-plan-budget;
+                    color: root.data.orch-budget-ok ? Theme.fg-muted : Theme.danger;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+
+                for shot in root.plan-shots: LineRow {
+                    entry: {
+                        label: shot.label,
+                        detail: shot.detail,
+                        value: shot.model + " · " + shot.cost,
+                        level: shot.level,
+                    };
+                }
+
+                if root.plan-shots.length == 0: Note {
+                    text: "还没有计划：填好分镜后点「生成路由计划」。plan 只算模型与成本，不调用厂商、不扣费。";
+                }
+            }
+
+            Card {
+                title: "真实生成（异步任务）";
+
+                Progress {
+                    value: root.data.orch-run-progress / 100.0;
+                    done: root.data.orch-run-progress >= 100;
+                    live: root.data.orch-run-line != "" && root.data.orch-run-progress < 100;
+                }
+
+                Text {
+                    text: root.data.orch-run-line;
+                    color: Theme.fg;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: root.data.orch-run-status;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    Button {
+                        label: "刷新任务";
+                        ghost: true;
+                        clicked => { root.act("orch-task", 0, ""); }
+                    }
+
+                    Button {
+                        label: "下载成片";
+                        enabled: root.data.orch-film-url != "";
+                        clicked => { root.act("orch-download-film", 0, ""); }
+                    }
+
+                    Button {
+                        label: "下载工程包";
+                        enabled: root.data.orch-pack-url != "";
+                        clicked => { root.act("orch-download-pack", 0, ""); }
+                    }
+
+                    Button {
+                        label: "打开成片网页";
+                        ghost: true;
+                        enabled: root.data.orch-film-url != "";
+                        clicked => { root.act("orch-open-film", 0, ""); }
+                    }
+                }
+
+                Note {
+                    text: "真实生成按逐镜路由调用模型（先关键帧再图生视频，有台词的口型镜按档位决定是否口型）；任务在平台后台跑，2C2G 串行并发 ≤3。成片与工程包由平台打包后下载回本机「视频 → 导演成片」。";
+                }
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 8px;
+
+            Card {
+                title: "模型能力矩阵（真实 /director/models）";
+
+                for model in root.models: HorizontalLayout {
+                    spacing: 6px;
+                    KV {
+                        k: model.group;
+                        v: model.name;
+                        ink: model.level == "ready" ? Theme.fg : Theme.fg-muted;
+                    }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: model.vendor + " · " + model.detail;
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    Tag {
+                        label: model.status;
+                        hot: model.level == "ready";
+                    }
+                }
+
+                if root.models.length == 0: Note {
+                    text: "矩阵还没加载：点上面「载入模型矩阵 / 三档定价」。";
+                }
+            }
+
+            Card {
+                title: "三档定价（真实 /director/pricing，1 积分 = ¥1）";
+
+                for tier in root.tiers: Rectangle {
+                    height: 78px;
+                    border-radius: Theme.r-sm;
+                    background: Theme.field;
+
+                    VerticalLayout {
+                        padding: 7px;
+                        spacing: 2px;
+
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: tier.label;
+                                color: Theme.fg;
+                                font-size: Theme.fs-sm;
+                                font-weight: Theme.weight-title;
+                            }
+                            Tag { label: "¥" + tier.per-shot + " / 镜"; hot: tier.hot; }
+                            Text {
+                                horizontal-stretch: 1;
+                                text: tier.desc;
+                                color: Theme.fg-dim;
+                                font-size: Theme.fs-xs;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+
+                        Text {
+                            text: "120s 单集：" + tier.ep120 + "　180s 单集：" + tier.ep180;
+                            color: Theme.fg-muted;
+                            font-size: Theme.fs-xs;
+                        }
+
+                        Text {
+                            text: "实际路由：" + tier.effective + (tier.downgrade == "" ? "" : "　降级：" + tier.downgrade);
+                            color: tier.downgrade == "" ? Theme.fg-dim : Theme.danger;
+                            font-size: Theme.fs-xs;
+                            overflow: elide;
+                        }
+                    }
+                }
+
+                if root.tiers.length == 0: Note {
+                    text: "定价还没加载：点上面「载入模型矩阵 / 三档定价」。";
+                }
+            }
+        }
+    }
+}
+
+// ── ② 导演监视器 ─────────────────────────────────────────────────────
+
+component MonitorPage inherits VerticalLayout {
+    in property <ProData> data;
+    in property <[ProRow]> types;
+    in property <[ProRow]> episodes;
+    in property <[ProBoardShot]> board;
+    in property <[ProRow]> takes;
+    in property <[ProRow]> notes;
+    in property <[ProRow]> cont-rows;
+    in property <[ProRow]> retake-reasons;
+    in property <[ProRow]> retake-queue;
+    in property <[ProRow]> audit-rows;
+
+    callback act(action: string, index: int, text: string);
+
+    spacing: 8px;
+
+    PageHead {
+        title: "导演监视器";
+        note: "选项目 / 集 → 镜头状态板 → take 登记 / 接受 / 退回 → 批注 → 一键重拍 → 连续性检查 → 进度预算。接口 /api/filmgen/monitor/*。";
+        web => { root.act("web", 0, ""); }
+        close => { root.act("close", 0, ""); }
+    }
+
+    // 项目 / 类型
+    Card {
+        title: "项目与类型（真实 /filmgen/monitor/types）";
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Field {
+                horizontal-stretch: 1;
+                value: root.data.mon-project;
+                placeholder: "project_id（例：desktop-demo-037 或短剧/电影任务的项目 id）";
+                edited(text) => { root.act("mon-project", 0, text); }
+            }
+
+            Field {
+                width: 120px;
+                value: root.data.mon-episode;
+                placeholder: "集（全部留空）";
+                edited(text) => { root.act("mon-episode", 0, text); }
+            }
+
+            Button {
+                label: "载入状态板";
+                primary: true;
+                clicked => { root.act("mon-load", 0, ""); }
+            }
+
+            Button {
+                label: "载入类型表";
+                ghost: true;
+                clicked => { root.act("mon-types", 0, ""); }
+            }
+
+            Button {
+                label: "进度 / 预算";
+                ghost: true;
+                clicked => { root.act("mon-progress", 0, ""); }
+            }
+
+            Button {
+                label: "连续性检查";
+                ghost: true;
+                clicked => { root.act("mon-cont", 0, ""); }
+            }
+
+            Button {
+                label: "重拍队列";
+                ghost: true;
+                clicked => { root.act("mon-retakes", 0, ""); }
+            }
+        }
+
+        Text {
+            text: root.data.mon-type-line;
+            color: Theme.fg-muted;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        if root.types.length > 0: HorizontalLayout {
+            spacing: 4px;
+            for item[index] in root.types: Button {
+                label: item.label;
+                ghost: root.data.mon-type != index;
+                primary: root.data.mon-type == index;
+                clicked => { root.act("mon-type-pick", index, ""); }
+            }
+        }
+
+        Note {
+            text: "没有项目时，先在「导演编排器」生成分镜计划，或在网页监视器导入镜头（POST /filmgen/monitor/projects/{project_id}/shots/sync）；桌面端不对平台项目做导入，避免和服务端重复建项目。";
+        }
+    }
+
+    // 状态板
+    Card {
+        title: "镜头状态板";
+
+        Text {
+            text: root.data.mon-board-line;
+            color: Theme.fg;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        Progress {
+            value: root.data.mon-progress / 100.0;
+            done: root.data.mon-progress >= 100;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                horizontal-stretch: 1;
+                text: root.data.mon-counts + "　" + root.data.mon-budget-line;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-xs;
+                wrap: word-wrap;
+            }
+        }
+
+        if root.episodes.length > 0: HorizontalLayout {
+            spacing: 4px;
+            for ep in root.episodes: Tag {
+                label: ep.label + " · " + ep.detail;
+                hot: ep.level == "on";
+            }
+        }
+
+        if root.board.length == 0: Note {
+            text: "还没有镜头：填 project_id 后点「载入状态板」。";
+        }
+
+        for shot[index] in root.board: LineRow {
+            entry: {
+                label: shot.no + " " + shot.title,
+                detail: shot.meta + (shot.flags == "" ? "" : " · " + shot.flags),
+                value: shot.status,
+                level: shot.level,
+            };
+            clickable: true;
+            picked => { root.act("mon-shot-pick", index, ""); }
+        }
+    }
+
+    // 单镜详情
+    HorizontalLayout {
+        spacing: 8px;
+        vertical-stretch: 1;
+
+        VerticalLayout {
+            width: 50%;
+            spacing: 8px;
+
+            Card {
+                title: "单镜详情 / takes";
+
+                Text {
+                    text: root.data.mon-shot-title;
+                    color: Theme.fg;
+                    font-size: Theme.fs-sm;
+                    font-weight: Theme.weight-title;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: root.data.mon-shot-meta;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                for take[index] in root.takes: HorizontalLayout {
+                    spacing: 6px;
+
+                    Tag { label: take.label; hot: take.level == "on"; }
+
+                    Text {
+                        horizontal-stretch: 1;
+                        text: take.detail;
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    Button {
+                        label: "接受";
+                        ghost: true;
+                        clicked => { root.act("mon-take-decision", index, "accept"); }
+                    }
+
+                    Button {
+                        label: "退回";
+                        ghost: true;
+                        clicked => { root.act("mon-take-decision", index, "reject"); }
+                    }
+
+                    Button {
+                        label: "待定";
+                        ghost: true;
+                        clicked => { root.act("mon-take-decision", index, "hold"); }
+                    }
+                }
+
+                Text {
+                    text: root.data.mon-take-line;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    Field {
+                        horizontal-stretch: 1;
+                        value: root.data.mon-take-url;
+                        placeholder: "take 视频地址 video_url";
+                        edited(text) => { root.act("mon-take-url", 0, text); }
+                    }
+                    Button {
+                        label: "登记 take";
+                        enabled: root.data.mon-shot-line != "";
+                        clicked => { root.act("mon-take-add", 0, ""); }
+                    }
+                }
+            }
+
+            Card {
+                title: "批注";
+
+                for note[index] in root.notes: HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        horizontal-stretch: 1;
+                        text: note.detail;
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-xs;
+                        wrap: word-wrap;
+                    }
+                    Button {
+                        label: "已解决";
+                        ghost: true;
+                        clicked => { root.act("mon-note-resolve", index, ""); }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    Field {
+                        horizontal-stretch: 1;
+                        value: root.data.mon-note-text;
+                        placeholder: "批注内容（写到这一镜）";
+                        edited(text) => { root.act("mon-note-text", 0, text); }
+                    }
+                    Button {
+                        label: "加批注";
+                        enabled: root.data.mon-shot-line != "" && root.data.mon-note-text != "";
+                        clicked => { root.act("mon-note-add", 0, ""); }
+                    }
+                }
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 8px;
+
+            Card {
+                title: "一键重拍（只登记，由导演编排器消费）";
+
+                HorizontalLayout {
+                    spacing: 4px;
+                    for reason[index] in root.retake-reasons: Button {
+                        label: reason.label;
+                        ghost: reason.level != "on";
+                        primary: reason.level == "on";
+                        clicked => { root.act("mon-retake-reason", index, ""); }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    Field {
+                        horizontal-stretch: 1;
+                        value: root.data.mon-retake-prompt;
+                        placeholder: "补充要求（可空）：换机位 / 眼神更狠 / 雨再大一点";
+                        edited(text) => { root.act("mon-retake-prompt", 0, text); }
+                    }
+                    Text {
+                        text: "档位";
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                    }
+                    Select {
+                        width: 116px;
+                        options: ["标准档", "高级档", "旗舰档"];
+                        current: root.data.mon-retake-tier;
+                        changed(index) => { root.act("mon-retake-tier", index, ""); }
+                    }
+                    Button {
+                        label: "一键重拍";
+                        danger: true;
+                        enabled: root.data.mon-shot-line != "";
+                        clicked => { root.act("mon-retake", 0, ""); }
+                    }
+                }
+
+                Text {
+                    text: root.data.mon-retake-line;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+            }
+
+            Card {
+                title: "连续性检查 / 进度预算 / 审计";
+
+                Text {
+                    text: root.data.mon-cont-line;
+                    color: Theme.fg;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    Button {
+                        label: "跑一次连续性";
+                        ghost: true;
+                        clicked => { root.act("mon-cont-run", 0, ""); }
+                    }
+                    Button {
+                        label: "审计日志";
+                        ghost: true;
+                        clicked => { root.act("mon-audit", 0, ""); }
+                    }
+                }
+
+                for line in root.cont-rows: LineRow { entry: line; }
+                for line in root.retake-queue: LineRow { entry: line; }
+                for line in root.audit-rows: LineRow { entry: line; }
+
+                Text {
+                    text: root.data.mon-queue-line;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
+
+// ── ③ 发行中心 ───────────────────────────────────────────────────────
+
+component DistPage inherits VerticalLayout {
+    in property <ProData> data;
+    in property <[ProRow]> dramas;
+    in property <[ProRow]> dists;
+    in property <[ProRow]> files;
+    in property <[ProRow]> steps;
+    in property <[string]> drama-labels;
+
+    callback act(action: string, index: int, text: string);
+
+    property <[string]> platforms: [
+        "抖音 douyin", "快手 kuaishou", "小红书 xiaohongshu", "TikTok tiktok", "YouTube youtube", "通用 generic",
+    ];
+    property <[string]> langs: ["中文 zh", "English en", "日本語 ja", "Español es", "العربية ar"];
+
+    spacing: 8px;
+
+    PageHead {
+        title: "发行中心";
+        note: "短剧列表 → 选剧选平台 / 语言 → 生成发行包（进度 / 文件清单）→ 下载 → 发布步骤 → 数据回填。接口 /api/aidrama/{list,distributions,distribute,stats}。";
+        web => { root.act("web", 0, ""); }
+        close => { root.act("close", 0, ""); }
+    }
+
+    Card {
+        title: "短剧与发行包";
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Button {
+                label: "刷新短剧 / 发行记录";
+                primary: true;
+                clicked => { root.act("dist-load", 0, ""); }
+            }
+
+            Select {
+                width: 260px;
+                options: root.drama-labels.length == 0 ? ["（还没有短剧）"] : root.drama-labels;
+                current: root.data.dist-drama;
+                changed(index) => { root.act("dist-drama", index, ""); }
+            }
+
+            Select {
+                width: 150px;
+                options: root.platforms;
+                current: root.data.dist-platform;
+                changed(index) => { root.act("dist-platform", index, ""); }
+            }
+
+            Select {
+                width: 130px;
+                options: root.langs;
+                current: root.data.dist-lang;
+                changed(index) => { root.act("dist-lang", index, ""); }
+            }
+
+            Button {
+                label: "生成发行包";
+                danger: true;
+                enabled: !root.data.busy && root.dramas.length > 0;
+                clicked => { root.act("dist-make", 0, ""); }
+            }
+        }
+
+        Text {
+            text: root.data.dist-line;
+            color: Theme.fg;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        if root.data.dist-url != "": HorizontalLayout {
+            spacing: 8px;
+            Button {
+                label: "下载发行包 zip";
+                clicked => { root.act("dist-download", 0, ""); }
+            }
+            Button {
+                label: "打开下载地址";
+                ghost: true;
+                clicked => { root.act("dist-open-url", 0, ""); }
+            }
+        }
+
+        Note {
+            text: "发行包按平台 / 语言打包：视频（竖版 / 横版）、字幕（SRT/VTT）、封面、剧本、metadata、发行说明、版权与合规页。平台侧压包要几十秒到几分钟，POST 期间请勿重复提交（2C2G 串行）。";
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+        vertical-stretch: 1;
+
+        VerticalLayout {
+            width: 56%;
+            spacing: 8px;
+
+            Card {
+                title: "发行记录（选一条回填数据 / 下载）";
+
+                for item[index] in root.dists: LineRow {
+                    entry: item;
+                    clickable: true;
+                    action-label: "选择";
+                    picked => { root.act("dist-pick", index, ""); }
+                    acted => { root.act("dist-pick", index, ""); }
+                }
+
+                if root.dists.length == 0: Note {
+                    text: "还没有发行记录：点「刷新短剧 / 发行记录」。";
+                }
+            }
+
+            Card {
+                title: "文件清单";
+
+                Text {
+                    text: root.data.dist-file-line;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                for line in root.files: LineRow { entry: line; }
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 8px;
+
+            Card {
+                title: "发布步骤清单";
+
+                for line in root.steps: LineRow { entry: line; }
+
+                Note {
+                    text: "平台审核口径会变：以各平台最新公告为准；AI 生成内容按《AI 生成合成内容标识办法》显著标识，虚假宣传与绝对化用语先过「合规沙盘」。";
+                }
+            }
+
+            Card {
+                title: "数据回填（POST 回平台台账）";
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text { text: "播放"; color: Theme.fg-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Field { width: 92px; value: root.data.dist-views; placeholder: "0"; edited(text) => { root.act("dist-views", 0, text); } }
+                    Text { text: "点赞"; color: Theme.fg-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Field { width: 92px; value: root.data.dist-likes; placeholder: "0"; edited(text) => { root.act("dist-likes", 0, text); } }
+                    Text { text: "转化"; color: Theme.fg-dim; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Field { width: 92px; value: root.data.dist-conversions; placeholder: "0"; edited(text) => { root.act("dist-conversions", 0, text); } }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    Field {
+                        horizontal-stretch: 1;
+                        value: root.data.dist-publish-url;
+                        placeholder: "发布链接 publish_url（可空）";
+                        edited(text) => { root.act("dist-publish-url", 0, text); }
+                    }
+                    Button {
+                        label: "回填数据";
+                        enabled: root.data.dist-pick >= 0 && root.dists.length > 0;
+                        clicked => { root.act("dist-stats", 0, ""); }
+                    }
+                }
+
+                Text {
+                    text: root.data.dist-stats-line;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
+
+// ── ④ 授权护照 ───────────────────────────────────────────────────────
+
+component PassportPage inherits VerticalLayout {
+    in property <ProData> data;
+    in property <[ProRow]> rows;
+    in property <[ProRow]> verify-rows;
+    in property <[ProRow]> recent;
+
+    callback act(action: string, index: int, text: string);
+
+    spacing: 8px;
+
+    PageHead {
+        title: "授权护照";
+        note: "素材 / 工程 → 生成护照 → 查看 / 校验 / 导出 zip；整项目批量。接口 /api/passport/{asset,project,verify,list,stats,signing,file}。";
+        web => { root.act("web", 0, ""); }
+        close => { root.act("close", 0, ""); }
+    }
+
+    Card {
+        title: "生成";
+
+        HorizontalLayout {
+            spacing: 4px;
+            Button {
+                label: "单素材护照";
+                primary: root.data.pass-mode == 0;
+                ghost: root.data.pass-mode != 0;
+                clicked => { root.act("pass-mode", 0, ""); }
+            }
+            Button {
+                label: "整项目批量";
+                primary: root.data.pass-mode == 1;
+                ghost: root.data.pass-mode != 1;
+                clicked => { root.act("pass-mode", 1, ""); }
+            }
+            Button {
+                label: "校验 / 验真";
+                primary: root.data.pass-mode == 2;
+                ghost: root.data.pass-mode != 2;
+                clicked => { root.act("pass-mode", 2, ""); }
+            }
+            Button {
+                label: "刷新列表 / 签名信息";
+                ghost: true;
+                clicked => { root.act("pass-load", 0, ""); }
+            }
+        }
+
+        if root.data.pass-mode == 0: HorizontalLayout {
+            spacing: 6px;
+            Field {
+                width: 240px;
+                value: root.data.pass-asset-id;
+                placeholder: "素材库 ID（如 72052）";
+                edited(text) => { root.act("pass-asset-id", 0, text); }
+            }
+            Field {
+                horizontal-stretch: 1;
+                value: root.data.pass-asset-url;
+                placeholder: "或外部素材 URL（与 ID 二选一）";
+                edited(text) => { root.act("pass-asset-url", 0, text); }
+            }
+            Field {
+                width: 180px;
+                value: root.data.pass-project;
+                placeholder: "project_id（可空）";
+                edited(text) => { root.act("pass-project", 0, text); }
+            }
+            Button {
+                label: "生成素材护照";
+                primary: true;
+                clicked => { root.act("pass-gen-asset", 0, ""); }
+            }
+        }
+
+        if root.data.pass-mode == 1: HorizontalLayout {
+            spacing: 6px;
+            Field {
+                width: 260px;
+                value: root.data.pass-pack;
+                placeholder: "工程包 ID（如 pk-20261123-3e2bd87c）";
+                edited(text) => { root.act("pass-pack", 0, text); }
+            }
+            Field {
+                width: 190px;
+                value: root.data.pass-title;
+                placeholder: "项目名（可空）";
+                edited(text) => { root.act("pass-title", 0, text); }
+            }
+            Field {
+                width: 150px;
+                value: root.data.pass-client;
+                placeholder: "甲方（可空）";
+                edited(text) => { root.act("pass-client", 0, text); }
+            }
+            Button {
+                label: "生成项目护照（批量）";
+                primary: true;
+                clicked => { root.act("pass-gen-project", 0, ""); }
+            }
+        }
+
+        if root.data.pass-mode == 2: HorizontalLayout {
+            spacing: 6px;
+            Field {
+                width: 280px;
+                value: root.data.pass-verify-id;
+                placeholder: "护照编号 pp-a-… / pp-p-…";
+                edited(text) => { root.act("pass-verify-id", 0, text); }
+            }
+            Field {
+                horizontal-stretch: 1;
+                value: root.data.pass-sha;
+                placeholder: "交付文件 SHA-256（可选：校验成片是不是这一份）";
+                edited(text) => { root.act("pass-sha", 0, text); }
+            }
+            Button {
+                label: "开始校验";
+                primary: true;
+                clicked => { root.act("pass-verify", 0, ""); }
+            }
+        }
+
+        Text {
+            text: root.data.pass-line;
+            color: Theme.fg;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        if root.data.pass-zip-url != "": HorizontalLayout {
+            spacing: 6px;
+            Button {
+                label: "下载护照包 zip";
+                clicked => { root.act("pass-download-zip", 0, ""); }
+            }
+            if root.data.pass-json-path != "": Button {
+                label: "打开护照 JSON";
+                ghost: true;
+                clicked => { root.act("pass-open-json", 0, ""); }
+            }
+            Button {
+                label: "打开验真链接";
+                ghost: true;
+                clicked => { root.act("pass-open-verify", 0, ""); }
+            }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+        vertical-stretch: 1;
+
+        VerticalLayout {
+            width: 55%;
+            spacing: 8px;
+
+            Card {
+                title: "护照内容";
+
+                for line in root.rows: LineRow { entry: line; }
+
+                if root.rows.length == 0: Note {
+                    text: "还没有护照：上面生成一张，或从「最近护照」里选一张查看。";
+                }
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 8px;
+
+            Card {
+                title: "最近护照 / 统计 / 签名";
+
+                for line in root.recent: LineRow { entry: line; }
+
+                Note {
+                    text: "护照 = 内容 SHA-256 + 台账哈希链 + Ed25519 签名；哈希链任何一环被改动，verify 都会检出。桌面只调已上线接口，不改服务端。";
+                }
+            }
+
+            Card {
+                title: "校验结果";
+
+                Text {
+                    text: root.data.pass-verify-line;
+                    color: Theme.fg;
+                    font-size: Theme.fs-sm;
+                    wrap: word-wrap;
+                }
+
+                for line in root.verify-rows: LineRow { entry: line; }
+            }
+        }
+    }
+}
+
+// ── ⑤ 合规沙盘 ───────────────────────────────────────────────────────
+
+component SandboxPage inherits VerticalLayout {
+    in property <ProData> data;
+    in property <[ProFinding]> findings;
+    in property <[ProRow]> platforms;
+    in property <[ProRow]> history;
+
+    callback act(action: string, index: int, text: string);
+
+    property <[string]> types: ["文案 / 笔记 copy", "脚本 / 分镜 script", "视频成片 video", "图片图文 image", "直播话术 live"];
+    property <[string]> platforms-list: ["抖音 douyin", "快手 kuaishou", "小红书 xiaohongshu", "通用 generic"];
+
+    spacing: 8px;
+
+    PageHead {
+        title: "合规沙盘";
+        note: "粘贴文案 / 脚本 → 选平台 → 风险分 / 问题清单 / 修改建议 → 整改复评。接口 /api/sandbox/{check,rules,history,version}。";
+        web => { root.act("web", 0, ""); }
+        close => { root.act("close", 0, ""); }
+    }
+
+    Card {
+        title: "发布前彩排（规则库 + AI 语义辅助；结果仅供参考，不构成法律意见）";
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Select {
+                width: 170px;
+                options: root.types;
+                current: root.data.sb-type;
+                changed(index) => { root.act("sb-type", index, ""); }
+            }
+
+            Select {
+                width: 160px;
+                options: root.platforms-list;
+                current: root.data.sb-platform;
+                changed(index) => { root.act("sb-platform", index, ""); }
+            }
+
+            Button {
+                label: root.data.sb-ai ? "已声明使用 AI 素材" : "未声明 AI 素材";
+                ghost: !root.data.sb-ai;
+                primary: root.data.sb-ai;
+                clicked => { root.act("sb-ai", 0, ""); }
+            }
+
+            Button {
+                label: "开始彩排";
+                primary: true;
+                enabled: !root.data.busy && root.data.sb-content != "";
+                clicked => { root.act("sb-check", 0, ""); }
+            }
+
+            Button {
+                label: "整改后复评";
+                enabled: root.data.sb-check-id != "" && !root.data.busy;
+                clicked => { root.act("sb-recheck", 0, ""); }
+            }
+
+            Button {
+                label: "历史 / 规则库";
+                ghost: true;
+                clicked => { root.act("sb-history", 0, ""); }
+            }
+        }
+
+        AreaText {
+            value: root.data.sb-content;
+            placeholder: "把要发布的口播 / 字幕 / 笔记 / 直播话术粘进来，点「开始彩排」。";
+            box-height: 110px;
+            edited(text) => { root.act("sb-content", 0, text); }
+        }
+
+        Text {
+            text: root.data.sb-line;
+            color: Theme.fg-muted;
+            font-size: Theme.fs-xs;
+            wrap: word-wrap;
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+        vertical-stretch: 1;
+
+        VerticalLayout {
+            width: 58%;
+            spacing: 8px;
+
+            Card {
+                title: "风险结果";
+
+                HorizontalLayout {
+                    spacing: 14px;
+
+                    Text {
+                        text: root.data.sb-score < 0 ? "—" : "\{root.data.sb-score}";
+                        color: root.data.sb-score >= 75 ? Theme.danger : (root.data.sb-score >= 50 ? Theme.accent : Theme.fg);
+                        font-size: 40px;
+                        font-weight: Theme.weight-display;
+                        vertical-alignment: center;
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Tag {
+                            label: root.data.sb-grade;
+                            hot: root.data.sb-score >= 50;
+                        }
+                        Text {
+                            text: root.data.sb-summary;
+                            color: Theme.fg-muted;
+                            font-size: Theme.fs-xs;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                Text {
+                    text: root.data.sb-stats;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: root.data.sb-ai-line;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+            }
+
+            Card {
+                title: "问题清单（\{root.findings.length} 条）";
+
+                for finding in root.findings: Rectangle {
+                    height: 96px;
+                    border-radius: Theme.r-sm;
+                    background: Theme.field;
+                    border-width: 1px;
+                    border-color: finding.level == "critical" ? Theme.danger
+                        : (finding.level == "high" ? Theme.accent : Theme.line);
+
+                    VerticalLayout {
+                        padding: 7px;
+                        spacing: 2px;
+
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Tag {
+                                label: finding.level == "critical" ? "严重" : (finding.level == "high" ? "高" : (finding.level == "medium" ? "中" : "低"));
+                                hot: finding.level == "critical" || finding.level == "high";
+                            }
+                            Text {
+                                horizontal-stretch: 1;
+                                text: finding.title;
+                                color: Theme.fg;
+                                font-size: Theme.fs-sm;
+                                font-weight: Theme.weight-title;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: finding.category;
+                                color: Theme.fg-dim;
+                                font-size: Theme.fs-xs;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Text {
+                            text: finding.position + "　" + finding.quote;
+                            color: Theme.fg-muted;
+                            font-size: Theme.fs-xs;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            text: "依据：" + finding.basis;
+                            color: Theme.fg-dim;
+                            font-size: Theme.fs-xs;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            text: "建议：" + finding.suggest;
+                            color: Theme.accent;
+                            font-size: Theme.fs-xs;
+                            overflow: elide;
+                        }
+                    }
+                }
+
+                if root.findings.length == 0: Note {
+                    text: "还没有检查：粘文案、选平台，点「开始彩排」。";
+                }
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 8px;
+
+            Card {
+                title: "整改建议稿（可复制回原文）";
+
+                AreaText {
+                    value: root.data.sb-rewrite;
+                    placeholder: "彩排后这里给出按建议替换的整改稿（可能是建议而非原文）。";
+                    box-height: 150px;
+                    edited(text) => { root.act("sb-rewrite", 0, text); }
+                }
+
+                Note {
+                    text: "自动替换只是建议：法律与平台口径以人工复核为准；高风险行业（医疗 / 金融 / 教育 / 房产 / 招商）须法务或合规人工确认。";
+                }
+            }
+
+            Card {
+                title: "平台严度对比 / 复检历史";
+
+                for line in root.platforms: LineRow { entry: line; }
+
+                Text {
+                    text: root.data.sb-history-line;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                for line in root.history: LineRow { entry: line; }
+
+                Note {
+                    text: "复评会带 parent_check_id：平台给出「已解决 / 新增 / 仍存在」对比；风险分下降不等于绝对安全。";
+                }
+            }
+        }
+    }
+}
+
+// ── ⑥ 插件市场 ───────────────────────────────────────────────────────
+
+component PluginPage inherits VerticalLayout {
+    in property <ProData> data;
+    in property <[ProPluginRow]> market;
+    in property <[ProRow]> mine;
+
+    callback act(action: string, index: int, text: string);
+
+    spacing: 8px;
+
+    PageHead {
+        title: "插件市场";
+        note: "列表（分类 / 搜索 / 认证徽章）→ 详情 → 安装 / 启用 / 配置表单 → 运行 → 运行历史。接口 /api/plugins/*。";
+        web => { root.act("web", 0, ""); }
+        close => { root.act("close", 0, ""); }
+    }
+
+    Card {
+        title: "市场（官方 / 第三方 · 分类 · 质量认证）";
+
+        HorizontalLayout {
+            spacing: 8px;
+            Button {
+                label: "刷新市场 / 已安装";
+                primary: true;
+                clicked => { root.act("plug-load", 0, ""); }
+            }
+            Field {
+                horizontal-stretch: 1;
+                value: root.data.plug-query;
+                placeholder: "搜索插件名 / 分类 / 作者（本地过滤）";
+                edited(text) => { root.act("plug-query", 0, text); }
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.data.plug-line;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-xs;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        for item[index] in root.market: LineRow {
+            entry: {
+                label: item.name,
+                detail: item.meta + "　" + item.description,
+                value: item.installed ? "已安装" : "未安装",
+                level: item.quality == "待认证" ? "" : "ok",
+            };
+            clickable: true;
+            action-label: item.installed ? "已安装" : "安装";
+            picked => { root.act("plug-pick-market", index, ""); }
+            acted => { root.act("plug-install", index, ""); }
+        }
+
+        if root.market.length == 0: Note {
+            text: "市场还没加载：点「刷新市场 / 已安装」。";
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+        vertical-stretch: 1;
+
+        VerticalLayout {
+            width: 50%;
+            spacing: 8px;
+
+            Card {
+                title: "详情";
+
+                Text {
+                    text: root.data.plug-detail-line;
+                    color: Theme.fg;
+                    font-size: Theme.fs-sm;
+                    font-weight: Theme.weight-title;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: root.data.plug-detail-meta;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: root.data.plug-detail-desc;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    Button {
+                        label: "启用";
+                        enabled: root.data.plug-installed && !root.data.plug-enabled;
+                        clicked => { root.act("plug-enable", 0, ""); }
+                    }
+                    Button {
+                        label: "停用";
+                        ghost: true;
+                        enabled: root.data.plug-enabled;
+                        clicked => { root.act("plug-disable", 0, ""); }
+                    }
+                    Button {
+                        label: "读取配置";
+                        ghost: true;
+                        enabled: root.data.plug-installed;
+                        clicked => { root.act("plug-config-load", 0, ""); }
+                    }
+                    Button {
+                        label: "运行历史";
+                        ghost: true;
+                        enabled: root.data.plug-installed;
+                        clicked => { root.act("plug-runs", 0, ""); }
+                    }
+                }
+
+                Text {
+                    text: root.data.plug-runs-line;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                for item[index] in root.mine: LineRow {
+                    entry: item;
+                    clickable: true;
+                    picked => { root.act("plug-pick-installed", index, item.value); }
+                }
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 8px;
+
+            Card {
+                title: "配置（按 config_schema）";
+
+                Text {
+                    text: root.data.plug-schema;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                AreaText {
+                    value: root.data.plug-config-json;
+                    placeholder: "配置 JSON（服务端按 config_schema 校验）";
+                    box-height: 96px;
+                    edited(text) => { root.act("plug-config-json", 0, text); }
+                }
+
+                Button {
+                    label: "保存配置";
+                    enabled: root.data.plug-installed;
+                    clicked => { root.act("plug-config-save", 0, ""); }
+                }
+            }
+
+            Card {
+                title: "运行（平台沙箱执行，输出回桌面）";
+
+                AreaText {
+                    value: root.data.plug-run-json;
+                    placeholder: "输入 JSON（插件 input，按插件 schema）";
+                    box-height: 80px;
+                    edited(text) => { root.act("plug-run-json", 0, text); }
+                }
+
+                Button {
+                    label: "运行插件";
+                    danger: true;
+                    enabled: root.data.plug-installed && root.data.plug-enabled && root.data.plug-runnable;
+                    clicked => { root.act("plug-run", 0, ""); }
+                }
+
+                Text {
+                    text: root.data.plug-output;
+                    color: Theme.fg;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                Note {
+                    text: "panel / assetpack 资源型插件不执行脚本（没有假运行）；插件在平台沙箱里跑，权限与审计由平台记录；桌面端不安装不可信插件。";
+                }
+            }
+        }
+    }
+}
+
+// ── ⑦ 素材库独立页 ───────────────────────────────────────────────────
+
+component AssetsProPage inherits VerticalLayout {
+    callback act(action: string, index: int, text: string);
+
+    spacing: 8px;
+
+    PageHead {
+        title: "素材库";
+        note: "搜索 / 行业 / 类型 / 用途 / 授权角标 / 下载 / 插入时间线。接口 /api/assets/{search,industries,download,license}；OSS 不可用时卡片给失败原因。";
+        web => { root.act("web", 0, ""); }
+        close => { root.act("close", 0, ""); }
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+
+        Button {
+            label: "全部行业";
+            ghost: Assets.industry != 0;
+            primary: Assets.industry == 0;
+            clicked => { Assets.industry-changed(0); }
+        }
+
+        Select {
+            width: 200px;
+            options: Assets.industries;
+            current: Math.max(0, Assets.industry - 1);
+            changed(index) => { Assets.industry-changed(index + 1); }
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        Text {
+            text: Assets.message;
+            color: Theme.fg-muted;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    flick := Flickable {
+        vertical-stretch: 1;
+        content-width: self.width;
+        content-height: Math.max(self.height, assets.preferred-height);
+
+        assets := AssetPage {
+            width: flick.width;
+            scroll-top: -flick.content-y;
+            viewport: flick.height;
+        }
+    }
+}
+
+// ── ⑧ 模板市场 ───────────────────────────────────────────────────────
+
+component TemplatePage inherits VerticalLayout {
+    in property <ProData> data;
+    in property <[ProTemplateRow]> templates;
+    in property <[string]> industries;
+    in property <[string]> scenes;
+
+    callback act(action: string, index: int, text: string);
+
+    spacing: 8px;
+
+    PageHead {
+        title: "模板市场";
+        note: "浏览 / 筛选 / 详情 / 一键套用（POST /api/templates-market/use，生成后成片 / 工程包回桌面）。";
+        web => { root.act("web", 0, ""); }
+        close => { root.act("close", 0, ""); }
+    }
+
+    Card {
+        title: "浏览与筛选";
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            Button {
+                label: "刷新模板 / 筛选项";
+                primary: true;
+                clicked => { root.act("tpl-load", 0, ""); }
+            }
+
+            Select {
+                width: 180px;
+                options: root.industries.length == 0 ? ["全部行业"] : root.industries;
+                current: root.data.tpl-industry;
+                changed(index) => { root.act("tpl-industry", index, ""); }
+            }
+
+            Select {
+                width: 150px;
+                options: root.scenes.length == 0 ? ["全部场景"] : root.scenes;
+                current: root.data.tpl-scene;
+                changed(index) => { root.act("tpl-scene", index, ""); }
+            }
+
+            Text {
+                horizontal-stretch: 1;
+                text: root.data.tpl-line;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-xs;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        for item[index] in root.templates: LineRow {
+            entry: {
+                label: item.name,
+                detail: item.meta + "　" + item.detail,
+                value: "",
+                level: item.level,
+            };
+            clickable: true;
+            action-label: "详情";
+            picked => { root.act("tpl-pick", index, ""); }
+            acted => { root.act("tpl-pick", index, ""); }
+        }
+
+        if root.templates.length == 0: Note {
+            text: "还没有模板：点「刷新模板 / 筛选项」。";
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+        vertical-stretch: 1;
+
+        VerticalLayout {
+            width: 50%;
+            spacing: 8px;
+
+            Card {
+                title: "详情";
+
+                Text {
+                    text: root.data.tpl-detail-line;
+                    color: Theme.fg;
+                    font-size: Theme.fs-sm;
+                    font-weight: Theme.weight-title;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: root.data.tpl-detail-desc;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                Button {
+                    label: root.data.tpl-fav ? "♥ 已收藏" : "♡ 收藏模板";
+                    ghost: true;
+                    enabled: root.data.tpl-selected != "";
+                    clicked => { root.act("tpl-fav", 0, ""); }
+                }
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 8px;
+
+            Card {
+                title: "一键套用（真实渲染任务）";
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    Field {
+                        width: 140px;
+                        value: root.data.tpl-store;
+                        placeholder: "店名 / 品牌";
+                        edited(text) => { root.act("tpl-store", 0, text); }
+                    }
+                    Field {
+                        horizontal-stretch: 1;
+                        value: root.data.tpl-product;
+                        placeholder: "产品 / 卖点对象";
+                        edited(text) => { root.act("tpl-product", 0, text); }
+                    }
+                    Field {
+                        width: 140px;
+                        value: root.data.tpl-points;
+                        placeholder: "卖点（顿号分隔）";
+                        edited(text) => { root.act("tpl-points", 0, text); }
+                    }
+                }
+
+                AreaText {
+                    value: root.data.tpl-copy;
+                    placeholder: "自定义开场文案（可空，最多 200 字）";
+                    box-height: 62px;
+                    edited(text) => { root.act("tpl-copy", 0, text); }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+
+                    Select {
+                        width: 130px;
+                        options: ["15 秒", "30 秒"];
+                        current: root.data.tpl-duration;
+                        changed(index) => { root.act("tpl-duration", index, ""); }
+                    }
+
+                    Select {
+                        width: 120px;
+                        options: ["720P", "1080P"];
+                        current: root.data.tpl-quality;
+                        changed(index) => { root.act("tpl-quality", index, ""); }
+                    }
+
+                    Button {
+                        label: "一键套用生成";
+                        danger: true;
+                        enabled: root.data.tpl-selected != "" && !root.data.busy;
+                        clicked => { root.act("tpl-use", 0, ""); }
+                    }
+
+                    Button {
+                        label: "刷新进度";
+                        ghost: true;
+                        enabled: root.data.tpl-run != 0;
+                        clicked => { root.act("tpl-poll", 0, ""); }
+                    }
+                }
+
+                Progress {
+                    value: root.data.tpl-gen-progress / 100.0;
+                    done: root.data.tpl-gen-progress >= 100;
+                }
+
+                Text {
+                    text: root.data.tpl-gen-line;
+                    color: Theme.fg;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                if root.data.tpl-video-url != "": HorizontalLayout {
+                    spacing: 6px;
+                    Button {
+                        label: "下载成片";
+                        clicked => { root.act("tpl-download", 0, ""); }
+                    }
+                    Button {
+                        label: "打开成片地址";
+                        ghost: true;
+                        clicked => { root.act("tpl-open-video", 0, ""); }
+                    }
+                }
+
+                Note {
+                    text: "模板渲染是平台真实 TTS + 字幕 + BGM + ffmpeg 串行队列，15 秒成片通常几十秒到几分钟；成片与工程包地址由平台任务返回，桌面下载到「视频 → 模板成片」。";
+                }
+            }
+        }
+    }
+}
+
+// ── ⑨ 统一任务中心 ───────────────────────────────────────────────────
+
+component TaskPage inherits VerticalLayout {
+    in property <ProData> data;
+    in property <[ProTaskRow]> tasks;
+
+    callback act(action: string, index: int, text: string);
+
+    spacing: 8px;
+
+    PageHead {
+        title: "统一任务中心";
+        note: "本机发起的所有 AI / 渲染任务：本地记录 + 轮询远端（/director/task、/templates-market/task、/director/tasks、/movie/tasks），显示状态 / 进度 / 成本，可取消本地跟踪、打开文件。";
+        web => { root.act("web", 0, ""); }
+        close => { root.act("close", 0, ""); }
+    }
+
+    Card {
+        title: "全部任务（\{root.data.task-count}）";
+
+        HorizontalLayout {
+            spacing: 8px;
+            Button {
+                label: "刷新";
+                primary: true;
+                clicked => { root.act("task-refresh", 0, ""); }
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.data.task-line;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-xs;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+
+        for task[index] in root.tasks: Rectangle {
+            height: 58px;
+            border-radius: Theme.r-sm;
+            background: Theme.field;
+
+            VerticalLayout {
+                padding: 7px;
+                spacing: 3px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    Tag { label: task.module; hot: task.level == "fail"; }
+
+                    Text {
+                        horizontal-stretch: 1;
+                        text: task.title;
+                        color: Theme.fg;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        text: task.cost;
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                    }
+
+                    Tag {
+                        label: task.status;
+                        hot: task.level == "ok";
+                    }
+
+                    Button {
+                        label: "打开文件";
+                        ghost: true;
+                        enabled: task.has-file;
+                        clicked => { root.act("task-open", index, ""); }
+                    }
+
+                    Button {
+                        label: "取消";
+                        ghost: true;
+                        enabled: !task.can-open;
+                        clicked => { root.act("task-cancel", index, ""); }
+                    }
+
+                    Button {
+                        label: "移除";
+                        ghost: true;
+                        clicked => { root.act("task-remove", index, ""); }
+                    }
+                }
+
+                Progress {
+                    value: task.progress / 100.0;
+                    done: task.progress >= 100;
+                    live: task.progress < 100;
+                }
+
+                Text {
+                    text: task.detail;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    overflow: elide;
+                }
+            }
+        }
+
+        if root.tasks.length == 0: Note {
+            text: "还没有任务：在上面八个面板里发起生成 / 渲染 / 下载，任务会记到本机这张表（prod-tasks.json）。";
+        }
+
+        Note {
+            text: "「取消」只停止本地跟踪（服务端任务不能从桌面取消，如实说明）；平台任务在 2C2G 单机串行执行，排队时进度会停在继续之前。";
+        }
+    }
+}
+
+// ── 面板本体 ─────────────────────────────────────────────────────────
+
+export component ProDialog inherits Modal {
+    in property <ProData> data;
+
+    // 编排器
+    in property <[ProShotRow]> text-shots;
+    in property <[ProPlanShot]> plan-shots;
+    in property <[ProModelRow]> models;
+    in property <[ProTierRow]> tiers;
+    // 监视器
+    in property <[ProRow]> mon-types;
+    in property <[ProRow]> mon-episodes;
+    in property <[ProBoardShot]> board;
+    in property <[ProRow]> takes;
+    in property <[ProRow]> notes;
+    in property <[ProRow]> cont-rows;
+    in property <[ProRow]> retake-reasons;
+    in property <[ProRow]> retake-queue;
+    in property <[ProRow]> audit-rows;
+    // 发行
+    in property <[ProRow]> dramas;
+    in property <[ProRow]> dists;
+    in property <[ProRow]> dist-files;
+    in property <[ProRow]> dist-steps;
+    in property <[string]> dist-drama-labels;
+    // 护照
+    in property <[ProRow]> pass-rows;
+    in property <[ProRow]> pass-verify-rows;
+    in property <[ProRow]> pass-recent;
+    // 沙盘
+    in property <[ProFinding]> findings;
+    in property <[ProRow]> sb-platforms;
+    in property <[ProRow]> sb-history;
+    // 插件
+    in property <[ProPluginRow]> plugins;
+    in property <[ProRow]> plugin-mine;
+    // 模板
+    in property <[ProTemplateRow]> templates;
+    in property <[string]> tpl-industries;
+    in property <[string]> tpl-scenes;
+    // 任务
+    in property <[ProTaskRow]> tasks;
+
+    callback action(action: string, index: int, text: string);
+    callback tick();
+
+    open: root.data.open;
+    title: "影视专业面板";
+    glyph: Glyph.film;
+    surface-width: 1330px;
+    surface-height: 860px;
+
+    Timer {
+        interval: 1000ms;
+        running: root.data.open;
+        triggered => { root.tick(); }
+    }
+
+    HorizontalLayout {
+        padding: 12px;
+        spacing: 12px;
+
+        // ── 左侧导航 ──
+        Rectangle {
+            width: 196px;
+            background: Theme.well;
+            border-radius: Theme.r;
+            border-width: 1px;
+            border-color: Theme.line;
+
+            VerticalLayout {
+                padding: 8px;
+                spacing: 3px;
+
+                Text {
+                    text: "影视专业";
+                    color: Theme.fg;
+                    font-size: Theme.fs-lg;
+                    font-weight: Theme.weight-display;
+                }
+
+                Text {
+                    text: "网页上的专业影视能力 · 桌面原生";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    wrap: word-wrap;
+                }
+
+                Rectangle { height: 5px; }
+
+                Text {
+                    text: "影视生产";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                }
+
+                NavItem {
+                    label: "导演编排器";
+                    note: "分镜 → plan → run";
+                    glyph: Glyph.film;
+                    current: root.data.tab == 0;
+                    picked => { root.action("tab", 0, ""); }
+                }
+
+                NavItem {
+                    label: "导演监视器";
+                    note: "take 审片 · 连续性";
+                    glyph: Glyph.eye;
+                    current: root.data.tab == 1;
+                    picked => { root.action("tab", 1, ""); }
+                }
+
+                Text {
+                    text: "发行与合规";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                }
+
+                NavItem {
+                    label: "发行中心";
+                    note: "短剧 → 平台 / 语言 → 发行包";
+                    glyph: Glyph.distribute;
+                    current: root.data.tab == 2;
+                    picked => { root.action("tab", 2, ""); }
+                }
+
+                NavItem {
+                    label: "授权护照";
+                    note: "素材 / 工程 · 哈希链";
+                    glyph: Glyph.link;
+                    current: root.data.tab == 3;
+                    picked => { root.action("tab", 3, ""); }
+                }
+
+                NavItem {
+                    label: "合规沙盘";
+                    note: "风险分 · 整改复评";
+                    glyph: Glyph.check;
+                    current: root.data.tab == 4;
+                    picked => { root.action("tab", 4, ""); }
+                }
+
+                Text {
+                    text: "内容与工具";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                }
+
+                NavItem {
+                    label: "插件市场";
+                    note: "安装 · 配置 · 运行";
+                    glyph: Glyph.sparkle;
+                    current: root.data.tab == 5;
+                    picked => { root.action("tab", 5, ""); }
+                }
+
+                NavItem {
+                    label: "素材库";
+                    note: "搜索 · 授权 · 插时间线";
+                    glyph: Glyph.image;
+                    current: root.data.tab == 6;
+                    picked => { root.action("tab", 6, ""); }
+                }
+
+                NavItem {
+                    label: "模板市场";
+                    note: "一键套用生成";
+                    glyph: Glyph.copy;
+                    current: root.data.tab == 7;
+                    picked => { root.action("tab", 7, ""); }
+                }
+
+                Text {
+                    text: "任务";
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                }
+
+                NavItem {
+                    label: "统一任务中心";
+                    note: "本机 AI / 渲染任务";
+                    glyph: Glyph.clock;
+                    current: root.data.tab == 8;
+                    picked => { root.action("tab", 8, ""); }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                Rectangle {
+                    background: Theme.field;
+                    border-radius: Theme.r-sm;
+
+                    VerticalLayout {
+                        padding: 6px;
+
+                        Text {
+                            text: root.data.signed-in ? "已登录星籁账号" : "未登录：请回首页右上角登录后再用（或打开网页版）";
+                            color: root.data.signed-in ? Theme.fg-dim : Theme.accent;
+                            font-size: Theme.fs-xs;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 右侧内容 ──
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 6px;
+
+            Hint {
+                text: root.data.hint;
+            }
+
+            if root.data.tab == 0: PaneScroll {
+                vertical-stretch: 1;
+                OrchestratorPage {
+                    data: root.data;
+                    text-shots: root.text-shots;
+                    plan-shots: root.plan-shots;
+                    models: root.models;
+                    tiers: root.tiers;
+                    act(a, i, t) => { root.action(a, i, t); }
+                }
+            }
+
+            if root.data.tab == 1: PaneScroll {
+                vertical-stretch: 1;
+                MonitorPage {
+                    data: root.data;
+                    types: root.mon-types;
+                    episodes: root.mon-episodes;
+                    board: root.board;
+                    takes: root.takes;
+                    notes: root.notes;
+                    cont-rows: root.cont-rows;
+                    retake-reasons: root.retake-reasons;
+                    retake-queue: root.retake-queue;
+                    audit-rows: root.audit-rows;
+                    act(a, i, t) => { root.action(a, i, t); }
+                }
+            }
+
+            if root.data.tab == 2: PaneScroll {
+                vertical-stretch: 1;
+                DistPage {
+                    data: root.data;
+                    dramas: root.dramas;
+                    dists: root.dists;
+                    files: root.dist-files;
+                    steps: root.dist-steps;
+                    drama-labels: root.dist-drama-labels;
+                    act(a, i, t) => { root.action(a, i, t); }
+                }
+            }
+
+            if root.data.tab == 3: PaneScroll {
+                vertical-stretch: 1;
+                PassportPage {
+                    data: root.data;
+                    rows: root.pass-rows;
+                    verify-rows: root.pass-verify-rows;
+                    recent: root.pass-recent;
+                    act(a, i, t) => { root.action(a, i, t); }
+                }
+            }
+
+            if root.data.tab == 4: PaneScroll {
+                vertical-stretch: 1;
+                SandboxPage {
+                    data: root.data;
+                    findings: root.findings;
+                    platforms: root.sb-platforms;
+                    history: root.sb-history;
+                    act(a, i, t) => { root.action(a, i, t); }
+                }
+            }
+
+            if root.data.tab == 5: PaneScroll {
+                vertical-stretch: 1;
+                PluginPage {
+                    data: root.data;
+                    market: root.plugins;
+                    mine: root.plugin-mine;
+                    act(a, i, t) => { root.action(a, i, t); }
+                }
+            }
+
+            if root.data.tab == 6: VerticalLayout {
+                vertical-stretch: 1;
+                AssetsProPage {
+                    act(a, i, t) => { root.action(a, i, t); }
+                }
+            }
+
+            if root.data.tab == 7: PaneScroll {
+                vertical-stretch: 1;
+                TemplatePage {
+                    data: root.data;
+                    templates: root.templates;
+                    industries: root.tpl-industries;
+                    scenes: root.tpl-scenes;
+                    act(a, i, t) => { root.action(a, i, t); }
+                }
+            }
+
+            if root.data.tab == 8: PaneScroll {
+                vertical-stretch: 1;
+                TaskPage {
+                    data: root.data;
+                    tasks: root.tasks;
+                    act(a, i, t) => { root.action(a, i, t); }
+                }
+            }
+
+            StatusBar {
+                line: root.data.status-line;
+                level: root.data.status-level;
+            }
+        }
+    }
+}

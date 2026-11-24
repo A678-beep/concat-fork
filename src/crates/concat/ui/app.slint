@@ -62,6 +62,20 @@ import {
     PostRow,
 } from "dialogs/post.slint";
 import { CommandItem, CommandPalette } from "dialogs/palette.slint";
+import {
+    ProData,
+    ProDialog,
+    ProRow,
+    ProShotRow,
+    ProPlanShot,
+    ProModelRow,
+    ProTierRow,
+    ProBoardShot,
+    ProFinding,
+    ProPluginRow,
+    ProTemplateRow,
+    ProTaskRow,
+} from "dialogs/pro.slint";
 import { AiData, AiDialog, AiPluginItem, AiVoiceItem, AiWizard } from "dialogs/ai.slint";
 import { AiVideoData } from "dialogs/ai-video.slint";
 import { AiStudioData, AiStudioDialog } from "dialogs/ai-studio.slint";
@@ -395,6 +409,44 @@ export component App inherits Window {
     callback palette-closed();
     callback palette-query-edited(text: string);
     callback palette-chosen(id: string);
+
+    // 影视专业面板（0.3.7）：九块原生面板。启动路径上只有一份空的 ProData，
+    // 面板打开后才按当前页取数；动作合成一条 pro-action 回调。
+    in property <ProData> pro;
+    in property <[ProShotRow]> pro-text-shots;
+    in property <[ProPlanShot]> pro-plan-shots;
+    in property <[ProModelRow]> pro-models;
+    in property <[ProTierRow]> pro-tiers;
+    in property <[ProRow]> pro-mon-types;
+    in property <[ProRow]> pro-mon-episodes;
+    in property <[ProBoardShot]> pro-board;
+    in property <[ProRow]> pro-takes;
+    in property <[ProRow]> pro-notes;
+    in property <[ProRow]> pro-cont-rows;
+    in property <[ProRow]> pro-retake-reasons;
+    in property <[ProRow]> pro-retake-queue;
+    in property <[ProRow]> pro-audit-rows;
+    in property <[ProRow]> pro-dramas;
+    in property <[ProRow]> pro-dists;
+    in property <[ProRow]> pro-dist-files;
+    in property <[ProRow]> pro-dist-steps;
+    in property <[string]> pro-dist-drama-labels;
+    in property <[ProRow]> pro-pass-rows;
+    in property <[ProRow]> pro-pass-verify-rows;
+    in property <[ProRow]> pro-pass-recent;
+    in property <[ProFinding]> pro-findings;
+    in property <[ProRow]> pro-sb-platforms;
+    in property <[ProRow]> pro-sb-history;
+    in property <[ProPluginRow]> pro-plugins;
+    in property <[ProRow]> pro-plugin-mine;
+    in property <[ProTemplateRow]> pro-templates;
+    in property <[string]> pro-tpl-industries;
+    in property <[string]> pro-tpl-scenes;
+    in property <[ProTaskRow]> pro-tasks;
+    callback pro-action(action: string, index: int, text: string);
+    /// 面板定时拍：轮询进行中的导演 / 模板任务与任务中心。
+    callback pro-tick();
+    callback pro-closed();
 
     // 鏄熺眮 AI锛氭湰鍦颁紭鍏堢殑绠楀姏閫夋嫨銆佹湰鍦伴厤闊筹紙Piper 鎻掍欢锛夈€佺収鐗囨暟瀛椾汉銆?
     // 鎻掍欢绠＄悊锛屼互鍙婇粯璁ゅ叧闂殑浜戠鍏滃簳銆傜姸鎬佷笌涓ゅ垪鐢?Rust 鍐欏ソ锛涜繖閲屽彧杞彂銆?
@@ -1502,6 +1554,54 @@ export component App inherits Window {
         action(action, index, text) => { root.post-action(action, index, text); }
         tick => { root.post-tick(); }
         closed => { root.post-closed(); }
+    }
+
+    // 影视专业面板（0.3.7）：九页一张大表，左侧竖排导航。只在打开时实例化：
+    // 启动路径上没有它，也没有它的网络工作。
+    if root.pro.open: ProDialog {
+        inset-top: root.safe-area-insets.top;
+        inset-bottom: root.safe-area-insets.bottom;
+        inset-left: root.safe-area-insets.left;
+        inset-right: root.safe-area-insets.right;
+        x: 0;
+        y: root.sheets-top;
+        width: root.width;
+        height: root.height - root.sheets-top;
+        data: root.pro;
+        text-shots: root.pro-text-shots;
+        plan-shots: root.pro-plan-shots;
+        models: root.pro-models;
+        tiers: root.pro-tiers;
+        mon-types: root.pro-mon-types;
+        mon-episodes: root.pro-mon-episodes;
+        board: root.pro-board;
+        takes: root.pro-takes;
+        notes: root.pro-notes;
+        cont-rows: root.pro-cont-rows;
+        retake-reasons: root.pro-retake-reasons;
+        retake-queue: root.pro-retake-queue;
+        audit-rows: root.pro-audit-rows;
+        dramas: root.pro-dramas;
+        dists: root.pro-dists;
+        dist-files: root.pro-dist-files;
+        dist-steps: root.pro-dist-steps;
+        dist-drama-labels: root.pro-dist-drama-labels;
+        pass-rows: root.pro-pass-rows;
+        pass-verify-rows: root.pro-pass-verify-rows;
+        pass-recent: root.pro-pass-recent;
+        findings: root.pro-findings;
+        sb-platforms: root.pro-sb-platforms;
+        sb-history: root.pro-sb-history;
+        plugins: root.pro-plugins;
+        plugin-mine: root.pro-plugin-mine;
+        templates: root.pro-templates;
+        tpl-industries: root.pro-tpl-industries;
+        tpl-scenes: root.pro-tpl-scenes;
+        tasks: root.pro-tasks;
+
+        action(action, index, text) => { root.pro-action(action, index, text); }
+        tick => { root.pro-tick(); }
+        closed => { root.pro-closed(); }
     }
 
     // 命令面板（Ctrl+K）：同样按需实例化，浮在后期面板上面。
