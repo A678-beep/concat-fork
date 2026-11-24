@@ -108,6 +108,12 @@ fn main() {
     // and without one they show Windows' generic program icon. Needs the
     // Windows SDK's rc.exe, which an MSVC toolchain has.
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        // 0.4.0: the window's first construction (Slint's item tree plus the
+        // professional panels' component tree) needs more than Windows' 1 MB
+        // default main-thread stack; the component tree grows with every
+        // release, so reserve 8 MB for it rather than shipping a binary that
+        // dies with 0xC00000FD before the window is up.
+        println!("cargo:rustc-link-arg=/STACK:8388608");
         let icon = "../../../assets/icons/concat.ico";
         println!("cargo:rerun-if-changed={icon}");
         // The file's name and description as Windows shows them in its
