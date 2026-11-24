@@ -498,6 +498,40 @@ impl StartPane {
                         crate::pro2::want(8);
                         return;
                     }
+                    // 0.5.0 影视专业三期：提示词 / 风格库 / 项目库 / 审美 /
+                    // 反推 / 自愈 / 补机位 / 节点画布与导演脑。
+                    "pro3-prompt" => {
+                        crate::pro3::want(0);
+                        return;
+                    }
+                    "pro3-stylelib" => {
+                        crate::pro3::want(1);
+                        return;
+                    }
+                    "pro3-index" => {
+                        crate::pro3::want(2);
+                        return;
+                    }
+                    "pro3-aesthetic" => {
+                        crate::pro3::want(3);
+                        return;
+                    }
+                    "pro3-reverse" => {
+                        crate::pro3::want(4);
+                        return;
+                    }
+                    "pro3-heal" => {
+                        crate::pro3::want(5);
+                        return;
+                    }
+                    "pro3-multicam" => {
+                        crate::pro3::want(6);
+                        return;
+                    }
+                    "pro3-canvas" => {
+                        crate::pro3::want(7);
+                        return;
+                    }
                     // 0.4.0 影视专业端：调色 / 声音 / 工业流程 / 交付。
                     "post-panel" => {
                         crate::post::want_tab(0);

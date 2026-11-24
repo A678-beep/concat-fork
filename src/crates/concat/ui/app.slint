@@ -83,6 +83,8 @@ import {
     DirectorShot,
 } from "director.slint";
 import { Pro2Data, Pro2Dialog, Pro2Row } from "dialogs/pro2.slint";
+// 影视专业三期（0.5.0）：八个页签一张大表 + 九张行表。
+import { Pro3Data, Pro3Dialog, Pro3Row } from "dialogs/pro3.slint";
 import { AiData, AiDialog, AiPluginItem, AiVoiceItem, AiWizard } from "dialogs/ai.slint";
 import { AiVideoData } from "dialogs/ai-video.slint";
 import { AiStudioData, AiStudioDialog } from "dialogs/ai-studio.slint";
@@ -484,6 +486,35 @@ export component App inherits Window {
     callback pro2-action(action: string, index: int, text: string);
     callback pro2-tick();
     callback pro2-closed();
+
+    // 影视专业三期（0.5.0）：提示词引擎 / 导演风格库 / 项目资产文件库 /
+    // AI 审美总监 / 视频反推 / 自愈剪辑 / 补机位 / 节点画布与导演脑。
+    // 启动路径上只有一份空的 Pro3Data，打开后才按页取数（懒加载）。
+    in property <Pro3Data> pro3;
+    in property <[Pro3Row]> pro3-pp-elements;
+    in property <[Pro3Row]> pro3-pp-costs;
+    in property <[Pro3Row]> pro3-pp-variants;
+    in property <[Pro3Row]> pro3-sl-styles;
+    in property <[Pro3Row]> pro3-sl-guides;
+    in property <[Pro3Row]> pro3-ix-projects;
+    in property <[Pro3Row]> pro3-ix-tree;
+    in property <[Pro3Row]> pro3-ix-items;
+    in property <[Pro3Row]> pro3-ae-samples;
+    in property <[Pro3Row]> pro3-ae-cats;
+    in property <[Pro3Row]> pro3-ae-issues;
+    in property <[Pro3Row]> pro3-rv-samples;
+    in property <[Pro3Row]> pro3-rv-shots;
+    in property <[Pro3Row]> pro3-hl-issues;
+    in property <[Pro3Row]> pro3-hl-plan;
+    in property <[Pro3Row]> pro3-mc-modes;
+    in property <[Pro3Row]> pro3-mc-rows;
+    in property <[Pro3Row]> pro3-nc-templates;
+    in property <[Pro3Row]> pro3-nc-styles;
+    in property <image> pro3-preview;
+    in property <bool> pro3-has-preview;
+    callback pro3-action(action: string, index: int, text: string);
+    callback pro3-tick();
+    callback pro3-closed();
 
     // 鏄熺眮 AI锛氭湰鍦颁紭鍏堢殑绠楀姏閫夋嫨銆佹湰鍦伴厤闊筹紙Piper 鎻掍欢锛夈€佺収鐗囨暟瀛椾汉銆?
     // 鎻掍欢绠＄悊锛屼互鍙婇粯璁ゅ叧闂殑浜戠鍏滃簳銆傜姸鎬佷笌涓ゅ垪鐢?Rust 鍐欏ソ锛涜繖閲屽彧杞彂銆?
@@ -1673,6 +1704,44 @@ export component App inherits Window {
         action(action, index, text) => { root.pro2-action(action, index, text); }
         tick => { root.pro2-tick(); }
         closed => { root.pro2-closed(); }
+    }
+
+    // 影视专业三期（0.5.0）：八页大表，打开时才实例化（懒加载）。
+    if root.pro3.open: Pro3Dialog {
+        inset-top: root.safe-area-insets.top;
+        inset-bottom: root.safe-area-insets.bottom;
+        inset-left: root.safe-area-insets.left;
+        inset-right: root.safe-area-insets.right;
+        x: 0;
+        y: root.sheets-top;
+        width: root.width;
+        height: root.height - root.sheets-top;
+        data: root.pro3;
+        pp-elements: root.pro3-pp-elements;
+        pp-costs: root.pro3-pp-costs;
+        pp-variants: root.pro3-pp-variants;
+        sl-styles: root.pro3-sl-styles;
+        sl-guides: root.pro3-sl-guides;
+        ix-projects: root.pro3-ix-projects;
+        ix-tree: root.pro3-ix-tree;
+        ix-items: root.pro3-ix-items;
+        ae-samples: root.pro3-ae-samples;
+        ae-cats: root.pro3-ae-cats;
+        ae-issues: root.pro3-ae-issues;
+        rv-samples: root.pro3-rv-samples;
+        rv-shots: root.pro3-rv-shots;
+        hl-issues: root.pro3-hl-issues;
+        hl-plan: root.pro3-hl-plan;
+        mc-modes: root.pro3-mc-modes;
+        mc-rows: root.pro3-mc-rows;
+        nc-templates: root.pro3-nc-templates;
+        nc-styles: root.pro3-nc-styles;
+        preview: root.pro3-preview;
+        has-preview: root.pro3-has-preview;
+
+        action(action, index, text) => { root.pro3-action(action, index, text); }
+        tick => { root.pro3-tick(); }
+        closed => { root.pro3-closed(); }
     }
 
     // 导演台同屏浮窗（0.4.0）：没有第二块屏时用；点背景或「收起浮窗」回主窗口。

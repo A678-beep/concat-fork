@@ -2266,6 +2266,77 @@ component ProNav inherits Rectangle {
             glyph: Glyph.image;
             picked => { root.link("pro2-quality"); }
         }
+
+        Rectangle { height: 6px; }
+
+        HorizontalLayout {
+            height: 20px;
+            vertical-stretch: 0;
+            padding-left: 8px;
+            padding-right: 6px;
+            Text {
+                text: "0.5.0 · 专业全功能";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                wrap: word-wrap;
+            }
+        }
+
+        ProNavItem {
+            label: "提示词引擎";
+            note: "12 要素 · 中英 · 成本";
+            glyph: Glyph.sparkle;
+            picked => { root.link("pro3-prompt"); }
+        }
+
+        ProNavItem {
+            label: "导演风格库";
+            note: "20 风格 · 构图辅助线";
+            glyph: Glyph.image;
+            picked => { root.link("pro3-stylelib"); }
+        }
+
+        ProNavItem {
+            label: "项目资产文件库";
+            note: "类型树 · 版本 · 影响";
+            glyph: Glyph.folder;
+            picked => { root.link("pro3-index"); }
+        }
+
+        ProNavItem {
+            label: "AI 审美总监";
+            note: "分数 · 问题 · 报告";
+            glyph: Glyph.check;
+            picked => { root.link("pro3-aesthetic"); }
+        }
+
+        ProNavItem {
+            label: "视频反推";
+            note: "分镜 · 可复制提示词";
+            glyph: Glyph.eye;
+            picked => { root.link("pro3-reverse"); }
+        }
+
+        ProNavItem {
+            label: "自愈剪辑";
+            note: "问题 · 修复 · 补拍";
+            glyph: Glyph.sparkle;
+            picked => { root.link("pro3-heal"); }
+        }
+
+        ProNavItem {
+            label: "补机位";
+            note: "二次构图 7 模式";
+            glyph: Glyph.image;
+            picked => { root.link("pro3-multicam"); }
+        }
+
+        ProNavItem {
+            label: "节点画布 / 导演脑";
+            note: "入口 · 外部页面";
+            glyph: Glyph.link;
+            picked => { root.link("pro3-canvas"); }
+        }
     }
 }
 
@@ -2316,6 +2387,15 @@ component WideHome inherits Rectangle {
     property <[string]> center-links-b: [
         "pro2-credits", "director-console", "pro-monitor", "pro2-continuity", "post-checks",
         "post-handoff", "pro-plugins", "pro-tasks",
+    ];
+    // 0.5.0 影视专业三期：八个新面板的入口（与左侧导航同一组）。
+    property <[string]> center-labels-c: [
+        "提示词引擎", "风格库", "项目文件库", "AI 审美总监",
+        "视频反推", "自愈剪辑", "补机位", "画布 / 导演脑",
+    ];
+    property <[string]> center-links-c: [
+        "pro3-prompt", "pro3-stylelib", "pro3-index", "pro3-aesthetic",
+        "pro3-reverse", "pro3-heal", "pro3-multicam", "pro3-canvas",
     ];
 
     /// The margin the page keeps from the window's edges.
@@ -2420,6 +2500,18 @@ component WideHome inherits Rectangle {
                     for label[i] in root.center-labels-b: Chip {
                         label: label;
                         clicked => { root.link(root.center-links-b[i]); }
+                    }
+                }
+
+                Rectangle { height: 6px; }
+
+                // ── 创作中心（0.5.0）：影视专业三期入口 ─────────
+                HorizontalLayout {
+                    height: 34px;
+                    spacing: 6px;
+                    for label[i] in root.center-labels-c: Chip {
+                        label: label;
+                        clicked => { root.link(root.center-links-c[i]); }
                     }
                 }
 

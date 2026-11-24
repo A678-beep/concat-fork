@@ -803,17 +803,20 @@ pub(crate) fn pct(value: f64) -> String {
 
 /// 面板自己的配置目录（下载落盘用）。
 pub(crate) fn config_dir() -> PathBuf {
-    let mut config = PathBuf::new();
-    Shell::with(|shell, _| {
-        config = shell.studio.borrow().host.dirs.config.clone();
-    });
-    if config.as_os_str().is_empty() {
-        config = std::env::var_os("APPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("app.concat.editor");
+    // 0.4.0 hotfix: this is called from a worker result callback, where the
+    // shell's Studio is already borrowed mutably; asking the Studio for its
+    // config directory panicked with "RefCell already mutably borrowed".
+    // AppDirs::locate() reads the same preferences path without borrowing it.
+    if let Ok(dirs) = concat_host::AppDirs::locate() {
+        let config = dirs.config.clone();
+        if !config.as_os_str().is_empty() {
+            return config;
+        }
     }
-    config
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("app.concat.editor")
 }
 
 /// 把状态写回并弹一条通知，然后重新发布面板。

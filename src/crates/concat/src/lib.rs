@@ -58,6 +58,9 @@ mod post;
 mod pro;
 mod director;
 mod pro2;
+/// 影视专业三期（0.5.0）：提示词引擎 / 导演风格库 / 项目资产文件库 /
+/// AI 审美总监 / 视频反推 / 自愈剪辑 / 补机位 / 节点画布与导演脑；窗口这一半。
+mod pro3;
 /// How a phone keeps its screen on while a job runs; see
 /// `concat_host::awake`.
 #[cfg(target_os = "android")]
@@ -1046,6 +1049,8 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     // 0.4.0：导演台（独立窗口 + 同屏浮窗）与影视专业二期面板，启动时都只写空表。
     crate::director::initialize(&app);
     crate::pro2::initialize(&app);
+    // 0.5.0：影视专业三期八个页签，启动时也只写空表，不联网。
+    crate::pro3::initialize(&app);
 
     // Mutate, then republish. Every handler is one of these three: the whole
     // window, the lanes alone (for the handlers a pointer drives directly,
@@ -1074,6 +1079,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                     }
                     if let Some(tab) = crate::pro2::take_wanted() {
                         crate::pro2::open(app.as_weak(), tab);
+                    }
+                    if let Some(tab) = crate::pro3::take_wanted() {
+                        crate::pro3::open(app.as_weak(), tab);
                     }
                     if crate::director::take_wanted_open() {
                         crate::director::open_window(app.as_weak());
@@ -1406,6 +1414,21 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
             pro2::tick(weak.clone());
             director::tick(weak.clone());
         });
+    }
+    // 影视专业三期（0.5.0）：八个页签一条 action + 一个 Timer。
+    {
+        let weak = app.as_weak();
+        app.on_pro3_closed(move || pro3::close(weak.clone()));
+    }
+    {
+        let weak = app.as_weak();
+        app.on_pro3_action(move |action, index, text| {
+            pro3::action(weak.clone(), action.to_string(), index, text.to_string())
+        });
+    }
+    {
+        let weak = app.as_weak();
+        app.on_pro3_tick(move || pro3::tick(weak.clone()));
     }
 
     // ── 星籁 AI ──
