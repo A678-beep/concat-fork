@@ -76,6 +76,13 @@ import {
     ProTemplateRow,
     ProTaskRow,
 } from "dialogs/pro.slint";
+import {
+    DirectorBoard,
+    DirectorData,
+    DirectorRow,
+    DirectorShot,
+} from "director.slint";
+import { Pro2Data, Pro2Dialog, Pro2Row } from "dialogs/pro2.slint";
 import { AiData, AiDialog, AiPluginItem, AiVoiceItem, AiWizard } from "dialogs/ai.slint";
 import { AiVideoData } from "dialogs/ai-video.slint";
 import { AiStudioData, AiStudioDialog } from "dialogs/ai-studio.slint";
@@ -447,6 +454,36 @@ export component App inherits Window {
     /// 面板定时拍：轮询进行中的导演 / 模板任务与任务中心。
     callback pro-tick();
     callback pro-closed();
+
+    // 导演台（0.4.0）：独立窗口 + 同屏浮窗共用一份状态与三张表。
+    in property <DirectorData> director;
+    in property <[DirectorShot]> director-board;
+    in property <[DirectorRow]> director-takes;
+    in property <[DirectorRow]> director-notes;
+    callback director-action(action: string, index: int, text: string);
+
+    // 影视专业二期（0.4.0）：九个页签一张大表，动作合成一条 pro2-action。
+    in property <Pro2Data> pro2;
+    in property <[Pro2Row]> pro2-credits-templates;
+    in property <[Pro2Row]> pro2-assembly-materials;
+    in property <[Pro2Row]> pro2-assembly-edl;
+    in property <[Pro2Row]> pro2-assembly-gaps;
+    in property <[string]> pro2-vfx-effects;
+    in property <[string]> pro2-vfx-presets;
+    in property <[Pro2Row]> pro2-vfx-jobs;
+    in property <[string]> pro2-music-styles;
+    in property <[Pro2Row]> pro2-music-cues;
+    in property <[string]> pro2-voice-roles;
+    in property <[Pro2Row]> pro2-continuity-issues;
+    in property <[Pro2Row]> pro2-continuity-runs;
+    in property <[string]> pro2-style-profiles;
+    in property <[Pro2Row]> pro2-style-metrics;
+    in property <[Pro2Row]> pro2-assets;
+    in property <image> pro2-preview;
+    in property <bool> pro2-has-preview;
+    callback pro2-action(action: string, index: int, text: string);
+    callback pro2-tick();
+    callback pro2-closed();
 
     // 鏄熺眮 AI锛氭湰鍦颁紭鍏堢殑绠楀姏閫夋嫨銆佹湰鍦伴厤闊筹紙Piper 鎻掍欢锛夈€佺収鐗囨暟瀛椾汉銆?
     // 鎻掍欢绠＄悊锛屼互鍙婇粯璁ゅ叧闂殑浜戠鍏滃簳銆傜姸鎬佷笌涓ゅ垪鐢?Rust 鍐欏ソ锛涜繖閲屽彧杞彂銆?
@@ -1604,6 +1641,68 @@ export component App inherits Window {
         closed => { root.pro-closed(); }
     }
 
+    // 影视专业二期（0.4.0）：九页大表，打开时才实例化。
+    if root.pro2.open: Pro2Dialog {
+        inset-top: root.safe-area-insets.top;
+        inset-bottom: root.safe-area-insets.bottom;
+        inset-left: root.safe-area-insets.left;
+        inset-right: root.safe-area-insets.right;
+        x: 0;
+        y: root.sheets-top;
+        width: root.width;
+        height: root.height - root.sheets-top;
+        data: root.pro2;
+        credits-templates: root.pro2-credits-templates;
+        assembly-materials: root.pro2-assembly-materials;
+        assembly-edl: root.pro2-assembly-edl;
+        assembly-gaps: root.pro2-assembly-gaps;
+        vfx-effects: root.pro2-vfx-effects;
+        vfx-presets: root.pro2-vfx-presets;
+        vfx-jobs: root.pro2-vfx-jobs;
+        music-styles: root.pro2-music-styles;
+        music-cues: root.pro2-music-cues;
+        voice-roles: root.pro2-voice-roles;
+        continuity-issues: root.pro2-continuity-issues;
+        continuity-runs: root.pro2-continuity-runs;
+        style-profiles: root.pro2-style-profiles;
+        style-metrics: root.pro2-style-metrics;
+        assets: root.pro2-assets;
+        preview: root.pro2-preview;
+        has-preview: root.pro2-has-preview;
+
+        action(action, index, text) => { root.pro2-action(action, index, text); }
+        tick => { root.pro2-tick(); }
+        closed => { root.pro2-closed(); }
+    }
+
+    // 导演台同屏浮窗（0.4.0）：没有第二块屏时用；点背景或「收起浮窗」回主窗口。
+    if root.director.open && root.director.pinned: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #00000066;
+
+        TouchArea {
+            clicked => { root.director-action("pin-close", 0, ""); }
+        }
+
+        DirectorBoard {
+            x: Math.max(12px, (parent.width - 1120px) / 2);
+            y: Math.max(12px, (parent.height - 760px) / 2);
+            width: Math.min(1120px, parent.width - 24px);
+            height: Math.min(760px, parent.height - 24px);
+            in-window: false;
+            data: root.director;
+            board: root.director-board;
+            takes: root.director-takes;
+            notes: root.director-notes;
+
+            action(action, index, text) => { root.director-action(action, index, text); }
+            closed => { root.director-action("pin-close", 0, ""); }
+        }
+    }
+
     // 命令面板（Ctrl+K）：同样按需实例化，浮在后期面板上面。
     if root.palette-open: CommandPalette {
         inset-top: root.safe-area-insets.top;
@@ -1836,4 +1935,35 @@ export component App inherits Window {
         neighbour(by) => { root.open-menu-from-keys(Math.mod(root.open-menu + by, 4)); }
     }
 
+}
+
+// 导演台独立窗口（0.4.0）：Rust 用第二份实例把它显示成独立窗口（可拖到第二
+// 显示器、可全屏）；关掉这个窗口只隐藏，主窗口继续编辑。
+export component DirectorWindow inherits Window {
+    in property <DirectorData> data;
+    in property <[DirectorShot]> board;
+    in property <[DirectorRow]> takes;
+    in property <[DirectorRow]> notes;
+
+    callback action(action: string, index: int, text: string);
+    callback closed();
+
+    title: "星籁剪辑 · 导演台";
+    width: 1120px;
+    height: 760px;
+
+    DirectorBoard {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        in-window: true;
+        data: root.data;
+        board: root.board;
+        takes: root.takes;
+        notes: root.notes;
+
+        action(action, index, text) => { root.action(action, index, text); }
+        closed => { root.closed(); }
+    }
 }

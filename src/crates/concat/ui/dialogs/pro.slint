@@ -985,6 +985,17 @@ component MonitorPage inherits VerticalLayout {
             }
 
             Button {
+                label: "导演台（双屏）";
+                clicked => { root.act("director-open", 0, ""); }
+            }
+
+            Button {
+                label: "导演台浮窗";
+                ghost: true;
+                clicked => { root.act("director-pin", 0, ""); }
+            }
+
+            Button {
                 label: "载入类型表";
                 ghost: true;
                 clicked => { root.act("mon-types", 0, ""); }

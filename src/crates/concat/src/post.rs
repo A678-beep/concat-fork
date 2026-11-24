@@ -423,6 +423,22 @@ fn publish(app: &App) {
 // 打开 / 关闭 / 定时刷新
 // ─────────────────────────────────────────────────────────────────────
 
+/// 从首页创作中心把「打开专业后期面板第 N 页」放进队列：首页链接在
+/// Studio 借用里处理，面板要等借用放掉才开（同 `pro::want` 的做法）。
+thread_local! {
+    static WANTED: std::cell::Cell<Option<i32>> = const { std::cell::Cell::new(None) };
+}
+
+/// 请求打开专业后期面板第 `tab` 页（消息处理之后由 [`take_wanted`] 兑现）。
+pub fn want_tab(tab: i32) {
+    WANTED.with(|slot| slot.set(Some(tab.clamp(0, TAB_HANDOFF))));
+}
+
+/// 窗口消息处理完之后取走「要开哪一页」。
+pub fn take_wanted() -> Option<i32> {
+    WANTED.with(|slot| slot.take())
+}
+
 pub fn open_tab(weak: slint::Weak<App>, tab: i32) {
     Shell::with(|shell, app| {
         let studio = shell.studio.borrow();

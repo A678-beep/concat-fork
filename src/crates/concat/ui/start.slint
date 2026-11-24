@@ -2091,6 +2091,7 @@ component ProNav inherits Rectangle {
     callback link(name: string);
 
     width: root.nav-width;
+    height: self.preferred-height;
     background: Theme.launch-panel;
     border-radius: 28px;
 
@@ -2099,6 +2100,8 @@ component ProNav inherits Rectangle {
         spacing: 1px;
 
         HorizontalLayout {
+            height: 20px;
+            vertical-stretch: 0;
             padding-left: 8px;
             padding-right: 6px;
             Text {
@@ -2110,9 +2113,11 @@ component ProNav inherits Rectangle {
         }
 
         HorizontalLayout {
+            height: 18px;
+            vertical-stretch: 0;
             padding-left: 8px;
             padding-right: 6px;
-            padding-bottom: 4px;
+            padding-bottom: 2px;
             Text {
                 text: "影视专业 · 桌面原生";
                 color: Theme.fg-dim;
@@ -2183,6 +2188,84 @@ component ProNav inherits Rectangle {
             glyph: Glyph.clock;
             picked => { root.link("pro-tasks"); }
         }
+
+        Rectangle { height: 6px; }
+
+        HorizontalLayout {
+            height: 20px;
+            vertical-stretch: 0;
+            padding-left: 8px;
+            padding-right: 6px;
+            Text {
+                text: "0.4.0 · 试映准备";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                wrap: word-wrap;
+            }
+        }
+
+        ProNavItem {
+            label: "导演台（双屏）";
+            note: "独立窗口 / 同屏浮窗";
+            glyph: Glyph.eye;
+            picked => { root.link("director-console"); }
+        }
+
+        ProNavItem {
+            label: "片头片尾";
+            note: "演职人员表 · 生成导出";
+            glyph: Glyph.film;
+            picked => { root.link("pro2-credits"); }
+        }
+
+        ProNavItem {
+            label: "实拍装配";
+            note: "素材 + 剧本 → 粗剪";
+            glyph: Glyph.import;
+            picked => { root.link("pro2-assembly"); }
+        }
+
+        ProNavItem {
+            label: "特效";
+            note: "9 类 / 27 预设";
+            glyph: Glyph.sparkle;
+            picked => { root.link("pro2-vfx"); }
+        }
+
+        ProNavItem {
+            label: "配乐";
+            note: "28 风格 · 按场景配乐";
+            glyph: Glyph.music;
+            picked => { root.link("pro2-music"); }
+        }
+
+        ProNavItem {
+            label: "配音";
+            note: "40 角色 · 情感台词";
+            glyph: Glyph.mic;
+            picked => { root.link("pro2-voice"); }
+        }
+
+        ProNavItem {
+            label: "连贯性检查";
+            note: "分数 · 问题 · 报告";
+            glyph: Glyph.check;
+            picked => { root.link("pro2-continuity"); }
+        }
+
+        ProNavItem {
+            label: "风格匹配";
+            note: "参考片指纹 · LUT";
+            glyph: Glyph.link;
+            picked => { root.link("pro2-style"); }
+        }
+
+        ProNavItem {
+            label: "素材质量";
+            note: "电影候选 / 商用高清";
+            glyph: Glyph.image;
+            picked => { root.link("pro2-quality"); }
+        }
     }
 }
 
@@ -2217,13 +2300,22 @@ component WideHome inherits Rectangle {
 
     /// 创作中心（0.3.5）：一个功能一个入口。桌面内已有的直接开面板，桌面还没有的
     /// 先跳网页版（失败降级）；「编辑」回到最近一个工程。
+    // 0.4.0 产品线分离：桌面 = 影视专业端。创作中心只放影视专业入口，
+    // 不再出现 AI 工作室的营销三件套、文档转视频、直播助播等商家项。
     property <[string]> center-labels: [
-        "一键成片", "动态解说", "爆款复刻", "AI 短剧", "电影 · 剧集",
-        "智能粗剪", "文档转视频", "模板市场", "素材库", "直播助播", "插件市场", "任务中心",
+        "快捷创作", "电影 · 剧集", "AI 短剧", "实拍装配", "剪辑", "调色", "声音", "特效",
     ];
     property <[string]> center-links: [
-        "ai-studio", "ai-studio-explainer", "ai-studio-replicate", "ai-drama", "movie-wizard",
-        "smartcut", "doc-to-video", "templates", "assets", "live", "plugins", "tasks",
+        "ai-studio", "movie-wizard", "ai-drama", "pro2-assembly", "edit", "post-color",
+        "edit-sound", "pro2-vfx",
+    ];
+    property <[string]> center-labels-b: [
+        "片头片尾", "导演台", "导演监视器", "连贯性检查", "工业流程", "交付",
+        "插件市场", "任务中心",
+    ];
+    property <[string]> center-links-b: [
+        "pro2-credits", "director-console", "pro-monitor", "pro2-continuity", "post-checks",
+        "post-handoff", "pro-plugins", "pro-tasks",
     ];
 
     /// The margin the page keeps from the window's edges.
@@ -2310,13 +2402,24 @@ component WideHome inherits Rectangle {
 
                 Rectangle { height: 16px; }
 
-                // ── 创作中心（0.3.5）：一个功能一个入口 ─────────────
+                // ── 创作中心（0.4.0）：影视专业端入口，两排 ─────────
                 HorizontalLayout {
                     height: 34px;
                     spacing: 6px;
                     for label[i] in root.center-labels: Chip {
                         label: label;
                         clicked => { root.link(root.center-links[i]); }
+                    }
+                }
+
+                Rectangle { height: 6px; }
+
+                HorizontalLayout {
+                    height: 34px;
+                    spacing: 6px;
+                    for label[i] in root.center-labels-b: Chip {
+                        label: label;
+                        clicked => { root.link(root.center-links-b[i]); }
                     }
                 }
 

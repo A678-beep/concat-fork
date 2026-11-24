@@ -4268,6 +4268,15 @@ pub fn action(weak: slint::Weak<App>, action: String, index: i32, text: String) 
             open_web(tab);
             return;
         }
+        // 0.4.0：监视器面板上的导演台入口（独立窗口 / 同屏浮窗）。
+        "director-open" => {
+            crate::director::open_window(weak.clone());
+            return;
+        }
+        "director-pin" => {
+            crate::director::toggle_pin(weak.clone());
+            return;
+        }
         _ => {}
     }
 

@@ -457,6 +457,79 @@ impl StartPane {
                         crate::pro::want(8);
                         return;
                     }
+                    // 0.4.0 影视专业二期 / 导演台。
+                    "director-console" => {
+                        crate::director::want_open();
+                        return;
+                    }
+                    "pro2-director" => {
+                        crate::pro2::want(0);
+                        return;
+                    }
+                    "pro2-credits" => {
+                        crate::pro2::want(1);
+                        return;
+                    }
+                    "pro2-assembly" => {
+                        crate::pro2::want(2);
+                        return;
+                    }
+                    "pro2-vfx" => {
+                        crate::pro2::want(3);
+                        return;
+                    }
+                    "pro2-music" => {
+                        crate::pro2::want(4);
+                        return;
+                    }
+                    "pro2-voice" => {
+                        crate::pro2::want(5);
+                        return;
+                    }
+                    "pro2-continuity" => {
+                        crate::pro2::want(6);
+                        return;
+                    }
+                    "pro2-style" => {
+                        crate::pro2::want(7);
+                        return;
+                    }
+                    "pro2-quality" => {
+                        crate::pro2::want(8);
+                        return;
+                    }
+                    // 0.4.0 影视专业端：调色 / 声音 / 工业流程 / 交付。
+                    "post-panel" => {
+                        crate::post::want_tab(0);
+                        return;
+                    }
+                    "post-color" => {
+                        crate::post::want_tab(1);
+                        return;
+                    }
+                    "post-qc" => {
+                        crate::post::want_tab(2);
+                        return;
+                    }
+                    "post-checks" => {
+                        crate::post::want_tab(3);
+                        return;
+                    }
+                    "post-snapshots" => {
+                        crate::post::want_tab(4);
+                        return;
+                    }
+                    "post-handoff" => {
+                        crate::post::want_tab(5);
+                        return;
+                    }
+                    "edit-sound" => {
+                        studio.notify(
+                            "声音：打开工程后，底部「音频」页调音量/淡入淡出/原声；配音用 文件 →「文字转语音…」",
+                            false,
+                        );
+                        return;
+                    }
                     "edit" => {
                         if let Some(recent) = studio.recents.first() {
                             let path = recent.info.path.clone();

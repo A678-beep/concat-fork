@@ -56,6 +56,8 @@ mod post;
 /// 影视专业面板（0.3.7）：导演编排 / 监视 / 发行 / 护照 / 沙盘 / 插件 /
 /// 素材库 / 模板 / 统一任务中心；窗口这一半。
 mod pro;
+mod director;
+mod pro2;
 /// How a phone keeps its screen on while a job runs; see
 /// `concat_host::awake`.
 #[cfg(target_os = "android")]
@@ -1041,6 +1043,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
 
     // 影视专业面板（0.3.7）：启动时只写一份空的、未打开的表；不联网。
     crate::pro::initialize(&app);
+    // 0.4.0：导演台（独立窗口 + 同屏浮窗）与影视专业二期面板，启动时都只写空表。
+    crate::director::initialize(&app);
+    crate::pro2::initialize(&app);
 
     // Mutate, then republish. Every handler is one of these three: the whole
     // window, the lanes alone (for the handlers a pointer drives directly,
@@ -1066,6 +1071,16 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                     // 都放掉之后再把面板打开（它会再借一次 Studio 取数）。
                     if let Some(tab) = crate::pro::take_wanted() {
                         crate::pro::open(app.as_weak(), tab);
+                    }
+                    if let Some(tab) = crate::pro2::take_wanted() {
+                        crate::pro2::open(app.as_weak(), tab);
+                    }
+                    if crate::director::take_wanted_open() {
+                        crate::director::open_window(app.as_weak());
+                    }
+                    // 0.4.0 首页创作中心的「调色 / 工业流程 / 交付」：打开专业后期面板。
+                    if let Some(tab) = crate::post::take_wanted() {
+                        crate::post::open_tab(app.as_weak(), tab);
                     }
                 });
             }
@@ -1366,6 +1381,31 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     {
         let weak = app.as_weak();
         app.on_pro_tick(move || pro::tick(weak.clone()));
+    }
+    // 导演台（0.4.0）：独立窗口 / 同屏浮窗共用一条 action 回调。
+    {
+        let weak = app.as_weak();
+        app.on_director_action(move |action, index, text| {
+            director::action_of(weak.clone(), action.to_string(), index, text.to_string())
+        });
+    }
+    // 影视专业二期（0.4.0）：九个页签一条 action + 一个 Timer。
+    {
+        let weak = app.as_weak();
+        app.on_pro2_closed(move || pro2::close(weak.clone()));
+    }
+    {
+        let weak = app.as_weak();
+        app.on_pro2_action(move |action, index, text| {
+            pro2::action(weak.clone(), action.to_string(), index, text.to_string())
+        });
+    }
+    {
+        let weak = app.as_weak();
+        app.on_pro2_tick(move || {
+            pro2::tick(weak.clone());
+            director::tick(weak.clone());
+        });
     }
 
     // ── 星籁 AI ──
@@ -3492,6 +3532,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                 let mut post_action: Option<(String, i32)> = None;
                 // 0.3.7 影视专业：菜单行记下要开哪一页，借还之后再开。
                 let mut pro_action: Option<i32> = None;
+                // 0.4.0：二期面板九页 + 导演台。
+                let mut pro2_action: Option<i32> = None;
+                let mut director_open = false;
                 let mut palette_action = false;
                 let mut shortcuts_page = false;
                 {
@@ -3741,6 +3784,18 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                         "pro-assets" => pro_action = Some(6),
                         "pro-templates" => pro_action = Some(7),
                         "pro-tasks" => pro_action = Some(8),
+                        // 0.4.0 影视专业二期：导演台 / 片头片尾 / 实拍装配 / 特效 /
+                        // 配乐 / 配音 / 连贯性 / 风格匹配 / 素材质量。
+                        "director-console" => director_open = true,
+                        "pro2-director" => pro2_action = Some(0),
+                        "pro2-credits" => pro2_action = Some(1),
+                        "pro2-assembly" => pro2_action = Some(2),
+                        "pro2-vfx" => pro2_action = Some(3),
+                        "pro2-music" => pro2_action = Some(4),
+                        "pro2-voice" => pro2_action = Some(5),
+                        "pro2-continuity" => pro2_action = Some(6),
+                        "pro2-style" => pro2_action = Some(7),
+                        "pro2-quality" => pro2_action = Some(8),
                         "command-palette" => palette_action = true,
                         "shortcuts-page" => shortcuts_page = true,
                         "layout-save" => {
@@ -3812,6 +3867,12 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
                 // 0.3.7 影视专业：面板自己借 Studio 取数，等这一步的借用放掉。
                 if let Some(tab) = pro_action {
                     pro::open(app.as_weak(), tab);
+                }
+                if let Some(tab) = pro2_action {
+                    pro2::open(app.as_weak(), tab);
+                }
+                if director_open {
+                    director::open_window(app.as_weak());
                 }
             });
         }

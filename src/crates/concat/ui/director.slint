@@ -1,0 +1,449 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 XingLai contributors
+
+// 星籁剪辑 0.4.0 导演台：成片 / 分镜 / 镜头状态板 / 批注。
+//
+// 一套界面两处用：主窗口里的「同屏浮窗」（Pro2Dialog 之外的浮层）和独立
+// 窗口（app.slint 里的 DirectorWindow）。导演的通过 / 退回 / 批注 / 重拍
+// 由 Rust 直连 /filmgen/monitor/*，并同时刷新主窗口。
+
+import { Theme } from "theme/theme.slint";
+import { Glyph, Icon } from "icons.slint";
+import { Button, Field } from "primitives/modal.slint";
+
+/// 状态板上的一张镜头卡。
+export struct DirectorShot {
+    id: string,
+    no: string,
+    title: string,
+    meta: string,
+    status: string,
+    level: string,
+}
+
+/// 一行通用数据：takes / 批注 / 审计。
+export struct DirectorRow {
+    label: string,
+    detail: string,
+    value: string,
+    level: string,
+}
+
+/// 导演台的数据。
+export struct DirectorData {
+    open: bool,
+    pinned: bool,
+    project: string,
+    index: int,
+    board-line: string,
+    progress-line: string,
+    shot-line: string,
+    shot-title: string,
+    shot-meta: string,
+    take-line: string,
+    note-text: string,
+    note-line: string,
+    retake-prompt: string,
+    status-line: string,
+    status-level: string,
+    film-url: string,
+    busy: bool,
+}
+
+component Hint inherits Text {
+    color: Theme.fg-muted;
+    font-size: Theme.fs-sm;
+    wrap: word-wrap;
+}
+
+component Note inherits Text {
+    color: Theme.fg-dim;
+    font-size: Theme.fs-xs;
+    wrap: word-wrap;
+}
+
+component ShotCard inherits Rectangle {
+    in property <DirectorShot> shot;
+    in property <bool> current;
+
+    callback picked();
+
+    height: 44px;
+    border-radius: Theme.r-sm;
+    background: root.current ? Theme.accent-soft : (touch.has-hover ? Theme.field-hover : Theme.field);
+    border-width: 1px;
+    border-color: root.current ? Theme.accent : transparent;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 6px;
+        spacing: 8px;
+
+        Text {
+            width: 26px;
+            text: root.shot.no;
+            color: root.current ? Theme.accent : Theme.fg-dim;
+            font-size: Theme.fs-sm;
+            vertical-alignment: center;
+        }
+
+        VerticalLayout {
+            vertical-stretch: 1;
+            alignment: center;
+            spacing: 1px;
+            Text {
+                text: root.shot.title;
+                color: Theme.fg;
+                font-size: Theme.fs-sm;
+                overflow: elide;
+            }
+            Text {
+                text: root.shot.meta;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                overflow: elide;
+            }
+        }
+
+        Text {
+            text: root.shot.status;
+            color: root.shot.level == "fail" ? Theme.danger
+                : (root.shot.level == "warn" ? Theme.accent : Theme.fg-muted);
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+}
+
+component TakeRow inherits Rectangle {
+    in property <DirectorRow> entry;
+    in property <bool> can-decide;
+
+    callback acted(action: string);
+
+    height: 34px;
+    border-radius: Theme.r-sm;
+    background: Theme.field;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 6px;
+        spacing: 6px;
+
+        Text {
+            width: 12px;
+            text: root.entry.level == "ok" ? "✓" : (root.entry.level == "fail" ? "!" : "·");
+            color: root.entry.level == "ok" ? Theme.accent : (root.entry.level == "fail" ? Theme.danger : Theme.fg-dim);
+            vertical-alignment: center;
+            font-size: Theme.fs-sm;
+        }
+        VerticalLayout {
+            vertical-stretch: 1;
+            alignment: center;
+            Text {
+                text: root.entry.label;
+                color: Theme.fg;
+                font-size: Theme.fs-sm;
+                overflow: elide;
+            }
+            Text {
+                text: root.entry.detail;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                overflow: elide;
+            }
+        }
+        Text {
+            text: root.entry.value;
+            color: Theme.accent;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+        }
+        if root.can-decide: Button {
+            label: "通过";
+            ghost: true;
+            clicked => { root.acted("pass"); }
+        }
+        if root.can-decide: Button {
+            label: "退回";
+            ghost: true;
+            clicked => { root.acted("reject"); }
+        }
+    }
+}
+
+/// 导演台面板（可放进独立窗口，也可放进主窗口的同屏浮窗）。
+export component DirectorBoard inherits Rectangle {
+    in property <DirectorData> data;
+    in property <[DirectorShot]> board;
+    in property <[DirectorRow]> takes;
+    in property <[DirectorRow]> notes;
+    in property <bool> in-window: false;
+
+    callback action(action: string, index: int, text: string);
+    callback closed();
+
+    background: Theme.panel;
+    border-radius: root.in-window ? Theme.r : 0px;
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+
+        // ── 顶栏 ──
+        HorizontalLayout {
+            height: 34px;
+            spacing: 8px;
+
+            Icon { glyph: Glyph.eye; size: 16px; tint: Theme.accent; }
+
+            Text {
+                text: "导演台";
+                color: Theme.fg;
+                font-size: Theme.fs-xl;
+                font-weight: Theme.weight-title;
+                vertical-alignment: center;
+            }
+
+            Text {
+                horizontal-stretch: 1;
+                text: "第二屏 / 同屏浮窗 · 主窗口继续编辑不阻塞 · 关掉导演台回到主窗口";
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Button {
+                label: root.in-window ? "窗口全屏" : "全屏";
+                ghost: true;
+                clicked => { root.action("fullscreen", 0, ""); }
+            }
+            Button {
+                label: "刷新";
+                ghost: true;
+                clicked => { root.action("reload", 0, ""); }
+            }
+            Button {
+                label: root.in-window ? "关窗口" : "收起浮窗";
+                clicked => { root.closed(); }
+            }
+        }
+
+        Hint { text: root.data.board-line; }
+
+        // ── 项目与进度 ──
+        HorizontalLayout {
+            spacing: 8px;
+            Field {
+                width: 260px;
+                value: root.data.project;
+                placeholder: "监视器项目 ID";
+                edited(t) => { root.action("project", 0, t); }
+            }
+            Button {
+                label: "载入状态板";
+                primary: true;
+                clicked => { root.action("reload", 0, ""); }
+            }
+            if root.data.film-url != "": Button {
+                label: "打开成片";
+                clicked => { root.action("film", 0, ""); }
+            }
+            Button {
+                label: "打开监视器网页版";
+                ghost: true;
+                clicked => { root.action("web", 0, ""); }
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.data.progress-line;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-xs;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        // ── 主体：状态板 + 单镜详情 ──
+        HorizontalLayout {
+            vertical-stretch: 1;
+            spacing: 10px;
+
+            // 镜头状态板
+            Rectangle {
+                width: 380px;
+                background: Theme.well;
+                border-radius: Theme.r;
+                border-width: 1px;
+                border-color: Theme.line;
+
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 4px;
+
+                    Text {
+                        text: "镜头状态板（分镜）";
+                        color: Theme.fg;
+                        font-size: Theme.fs-sm;
+                        font-weight: Theme.weight-title;
+                    }
+
+                    if root.board.length == 0: Note {
+                        text: "还没有镜头：填项目 ID 后「载入状态板」。桌面不新建监视器项目，镜头走平台同步。";
+                    }
+
+                    for shot[i] in root.board: ShotCard {
+                        shot: shot;
+                        current: i == root.data.index;
+                        picked => { root.action("select", i, ""); }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+
+            // 单镜详情
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 6px;
+
+                Text {
+                    text: root.data.shot-title;
+                    color: Theme.fg;
+                    font-size: Theme.fs-lg;
+                    font-weight: Theme.weight-title;
+                }
+                Note { text: root.data.shot-meta; }
+                Hint { text: root.data.shot-line; }
+
+                // takes
+                Rectangle {
+                    background: Theme.well;
+                    border-radius: Theme.r;
+                    border-width: 1px;
+                    border-color: Theme.line;
+
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 4px;
+                        Text {
+                            text: "takes（通过 / 退回写平台审计日志）";
+                            color: Theme.fg;
+                            font-size: Theme.fs-sm;
+                            font-weight: Theme.weight-title;
+                        }
+                        if root.takes.length == 0: Note {
+                            text: "这一镜还没有 take：先在导演监视器里登记 take，或直接「重拍」。";
+                        }
+                        for take in root.takes: TakeRow {
+                            entry: take;
+                            can-decide: true;
+                            acted(action) => { root.action(action, 0, ""); }
+                        }
+                    }
+                }
+
+                // 批注
+                Rectangle {
+                    background: Theme.well;
+                    border-radius: Theme.r;
+                    border-width: 1px;
+                    border-color: Theme.line;
+
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 4px;
+                        Text {
+                            text: "批注";
+                            color: Theme.fg;
+                            font-size: Theme.fs-sm;
+                            font-weight: Theme.weight-title;
+                        }
+                        if root.notes.length == 0: Note {
+                            text: "还没有批注。";
+                        }
+                        for note in root.notes: Text {
+                            text: "· " + note.detail;
+                            color: Theme.fg-muted;
+                            font-size: Theme.fs-xs;
+                            wrap: word-wrap;
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Field {
+                                value: root.data.note-text;
+                                placeholder: "写给这一镜的批注（会写进平台）";
+                                edited(t) => { root.action("note-text", 0, t); }
+                            }
+                            Button {
+                                label: "加批注";
+                                primary: true;
+                                clicked => { root.action("note", 0, ""); }
+                            }
+                        }
+                        Note { text: root.data.note-line; }
+                    }
+                }
+
+                // 重拍
+                Rectangle {
+                    background: Theme.well;
+                    border-radius: Theme.r;
+                    border-width: 1px;
+                    border-color: Theme.line;
+
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 4px;
+                        Text {
+                            text: "重拍";
+                            color: Theme.fg;
+                            font-size: Theme.fs-sm;
+                            font-weight: Theme.weight-title;
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Field {
+                                value: root.data.retake-prompt;
+                                placeholder: "重拍要求（例：雨再大一点，眼神更犹豫）";
+                                edited(t) => { root.action("retake-prompt", 0, t); }
+                            }
+                            Button {
+                                label: "登记重拍";
+                                danger: true;
+                                clicked => { root.action("retake", 0, ""); }
+                            }
+                        }
+                        Note { text: root.data.take-line; }
+                    }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+
+        // ── 状态栏 ──
+        Rectangle {
+            height: root.data.status-line == "" ? 0px : 30px;
+            visible: root.data.status-line != "";
+            border-radius: Theme.r-sm;
+            background: root.data.status-level == "fail" ? Theme.danger-soft : Theme.field;
+
+            Text {
+                x: 10px;
+                y: (parent.height - self.height) / 2;
+                width: parent.width - 20px;
+                text: root.data.status-line;
+                color: root.data.status-level == "fail" ? Theme.danger : Theme.fg;
+                font-size: Theme.fs-sm;
+                overflow: elide;
+            }
+        }
+    }
+}

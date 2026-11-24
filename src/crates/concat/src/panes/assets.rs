@@ -529,7 +529,7 @@ impl AssetsPane {
             move || -> Result<Bundle, String> {
                 let industries = assets::industries().unwrap_or_default();
                 let categories = assets::categories().unwrap_or_default();
-                let page = assets::search(&query, &kind, &industry, &category, 1, PAGE_SIZE)?;
+                let page = assets::search(&query, &kind, &industry, &category, "", 1, PAGE_SIZE)?;
                 Ok(Bundle {
                     industries,
                     categories,
@@ -560,7 +560,7 @@ impl AssetsPane {
         let category = self.category_name();
         let page = self.page + 1;
         crate::host::spawn(
-            move || assets::search(&query, &kind, &industry, &category, page, PAGE_SIZE),
+            move || assets::search(&query, &kind, &industry, &category, "", page, PAGE_SIZE),
             move |studio, _, _, result| {
                 studio.handle(crate::panes::Msg::Assets(AssetsMsg::MoreLoaded(
                     generation,

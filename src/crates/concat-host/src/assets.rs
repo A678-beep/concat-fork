@@ -334,12 +334,14 @@ fn item_of(value: &serde_json::Value) -> Option<AssetItem> {
     })
 }
 
-/// 搜索素材。`kind` 为空是不限类型；`industry` 为空是不限行业。
+/// 搜索素材。`kind` 为空是不限类型；`industry` 为空是不限行业；
+/// `quality` 为空是不限质量档（0.4.0：`cinema_candidate` / `commercial_hd`）。
 pub fn search(
     query: &str,
     kind: &str,
     industry: &str,
     category: &str,
+    quality: &str,
     page: u32,
     limit: u32,
 ) -> Result<AssetPage, String> {
@@ -360,6 +362,7 @@ pub fn search(
     encode("type", kind);
     encode("industry", industry);
     encode("category", category);
+    encode("quality", quality);
     let url = api(&path);
     let value = get(&path)?;
     let items_value = ["items", "list", "rows", "results"]
