@@ -308,36 +308,20 @@ pub fn models(token: Option<&str>) -> Result<Inventory, String> {
     })
 }
 
-/// 桌面端自带的 ffmpeg：跟 `concat.exe` 放在一起。
+/// 桌面端自带的 ffmpeg：Windows 跟 `concat.exe` 放在一起，macOS 在 `.app`
+/// 的 `Contents/Resources/bin`；开发机只装在 PATH 里也行。查找规则见
+/// [`crate::tools`]。
 pub fn ffmpeg() -> Result<PathBuf, String> {
-    if let Ok(path) = std::env::var("XINGLAI_FFMPEG") {
-        let path = PathBuf::from(path.trim());
-        if path.is_file() {
-            return Ok(path);
-        }
+    let found = crate::tools::ffmpeg();
+    // 裸名字（没有目录）表示随包的文件夹和 PATH 里都没有：这里就先说清楚，
+    // 不要把「找不到程序」拖到起进程时才报。
+    if found.is_file() || found.parent().is_some_and(|parent| !parent.as_os_str().is_empty()) {
+        Ok(found)
+    } else {
+        Err("找不到随包的 ffmpeg：Windows 安装包把它放在 concat.exe 旁边，macOS 的 .app \
+             放在 Contents/Resources/bin；开发机可以装一个，或用 XINGLAI_FFMPEG 指定"
+            .to_owned())
     }
-    if let Ok(path) = std::env::var("PATH") {
-        for part in std::env::split_paths(&path) {
-            for name in ["ffmpeg.exe", "ffmpeg"] {
-                let candidate = part.join(name);
-                if candidate.is_file() {
-                    return Ok(candidate);
-                }
-            }
-        }
-    }
-    let beside = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf));
-    if let Some(dir) = beside {
-        for name in ["ffmpeg.exe", "ffmpeg"] {
-            let candidate = dir.join(name);
-            if candidate.is_file() {
-                return Ok(candidate);
-            }
-        }
-    }
-    Err("找不到桌面端自带的 ffmpeg.exe：请确认安装的是星籁剪辑 0.2.22 或更新版本".to_owned())
 }
 
 /// 生成一张纯净底图（文生视频的首帧）。返回 JPEG 字节。

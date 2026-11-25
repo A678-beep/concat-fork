@@ -133,6 +133,19 @@ fn main() {
             .expect("could not embed the Windows icon");
     }
 
+    // The macOS build's own half of the same fact: 0.4.0 raised the main
+    // thread's stack because the window's first construction (Slint's item
+    // tree plus the professional panels' component tree) outgrew what the
+    // platform reserves for it. macOS reserves 8 MB for the main thread,
+    // which is the same size the Windows block above asks for, so today the
+    // two agree and this line changes nothing - but it is stated rather
+    // than assumed, and it keeps the reservation if the tree outgrows a
+    // Mac's default too. `-stack_size` is ld64's name for it; the Windows
+    // block is the same intent in MSVC's `/STACK`.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        println!("cargo:rustc-link-arg=-Wl,-stack_size,0x1000000");
+    }
+
     // Three facts about the build that the built thing cannot ask for at run
     // time. Settings > About shows them in the block a bug report is copied
     // out of: which triple this binary is for, which profile it came out of,

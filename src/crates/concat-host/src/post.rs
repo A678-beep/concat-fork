@@ -200,19 +200,10 @@ pub fn download(url: &str, dest: &Path) -> Result<u64, String> {
 
 // ── 本地：文件指纹 / 探测 / 质检 ─────────────────────────────────────
 
-/// 随包 / 系统里的 ffprobe。
+/// 随包 / 系统里的 ffprobe：与 [`crate::video_preview::ffmpeg`] 同一套查找，
+/// 平台的差别见 [`crate::tools`]。
 pub fn ffprobe() -> PathBuf {
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(dir) = exe.parent()
-    {
-        for name in ["ffprobe.exe", "ffprobe"] {
-            let beside = dir.join(name);
-            if beside.is_file() {
-                return beside;
-            }
-        }
-    }
-    PathBuf::from("ffprobe.exe")
+    crate::tools::ffprobe()
 }
 
 /// 一个文件的 sha256（流式读，不整档进内存）。

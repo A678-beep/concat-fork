@@ -11,18 +11,11 @@
 
 use std::path::{Path, PathBuf};
 
-/// 随包/系统里的 ffmpeg。安装包把 ffmpeg.exe 放在 exe 旁边；开发机可能
-/// 只在 PATH 里，最后再试一次裸名字。
+/// 随包/系统里的 ffmpeg。安装包放哪由平台决定：Windows 是 exe 旁边，
+/// macOS 是 `.app` 的 `Contents/Resources/bin`；开发机只在 PATH 里也行。
+/// 查找规则在 [`crate::tools`]，这里只把名字固定成 ffmpeg。
 pub fn ffmpeg() -> PathBuf {
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(dir) = exe.parent()
-    {
-        let beside = dir.join("ffmpeg.exe");
-        if beside.is_file() {
-            return beside;
-        }
-    }
-    PathBuf::from("ffmpeg.exe")
+    crate::tools::ffmpeg()
 }
 
 /// 把开头片段解成 `count` 张小 JPEG，写到 `dir`，返回按帧序排好的路径。

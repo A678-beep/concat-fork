@@ -101,6 +101,8 @@ pub mod sounds;
 pub mod stabilize;
 pub mod templates;
 pub mod titles;
+/// 外部命令行工具（ffmpeg / ffprobe）的查找：随包的优先，PATH 兜底。
+pub mod tools;
 pub mod updates;
 /// 素材库悬停预览的本地取帧/取声：随包 ffmpeg 把开头片段解成小 JPEG / PCM。
 pub mod video_preview;
